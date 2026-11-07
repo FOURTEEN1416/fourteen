@@ -157,6 +157,7 @@ class PersonaService:
         tool_context: str = "",
         capability_flags: dict[str, Any] | None = None,
         reply_mode: str | None = None,
+        character_card: dict[str, Any] | None = None,
     ) -> str:
         """构建系统提示词。
 
@@ -177,7 +178,11 @@ class PersonaService:
             emotion_state if emotion_state is not None else self._engine.emotion.state
         )
 
-        character = self._build_character(effective_emotion, character_id=character_id)
+        character = self._build_character(
+            effective_emotion,
+            character_id=character_id,
+            character_card=character_card,
+        )
         # 2026-09-21：记忆层**不得**再走 prompt_builder 的 chat_history 槽
         # （该槽会被 CharacterAggregate 标成「# 对话历史」，模型会把记忆当成聊天记录，
         #  分不清哪句是用户/哪句是自己）。记忆改为独立标注段，真对话只走 messages。
@@ -459,7 +464,12 @@ class PersonaService:
 
     # ── 内部构建 ──────────────────────────────────────────────
 
-    def _build_character(self, emotion_state: Any, character_id: str | None = None) -> CharacterAggregate:
+    def _build_character(
+        self,
+        emotion_state: Any,
+        character_id: str | None = None,
+        character_card: dict[str, Any] | None = None,
+    ) -> CharacterAggregate:
         """构造 shisi CharacterAggregate —— **所有角色共用同一条构建路径**。
 
         2026-09-21 唯一身份路径（用户批评「先引入十四、又给十四加限制」）：
@@ -469,7 +479,9 @@ class PersonaService:
         因此不需要 strip_default_identity / 引擎名擦除 / 两套约束层。
         """
         emotional_state = self._map_emotional_state(emotion_state)
-        card = self._resolve_character_card(character_id)
+        # 2026-11-07：允许调用方传入已合并「用户私人覆盖」的卡片
+        # （公开卡每人一份修改，聊天里必须立即生效）。
+        card = character_card if isinstance(character_card, dict) else self._resolve_character_card(character_id)
         if card:
             character = self._character_from_card(
                 card, str(character_id or card.get("name") or ""), emotional_state

@@ -1515,6 +1515,23 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # 自读**同一双源**（runtime.denied_names_for = 窗口检测 + ledger 持久否决，
         # 且窗口检测扫**全量**账本消息而非尾部 40 条），故该写入已零消费者
         # （全仓 grep 实证）——删除，不留死接线（§1.2 不引入重复 owner）。
+        # 2026-11-07：公开卡「每人一份」私人覆盖 —— 提示词用的卡必须是
+        # 该用户视角下合并后的版本（改了人设，聊天里马上生效）。
+        _card_for_prompt = None
+        _persona_svc = self.components.get("persona")
+        _card_loader = getattr(_persona_svc, "_load_character_card", None)
+        if callable(_card_loader):
+            _card_for_prompt = _card_loader(character_id)
+        if _card_for_prompt is not None and user_id is not None:
+            try:
+                from utils import character_overrides
+
+                _card_for_prompt = character_overrides.apply(
+                    int(user_id), str(character_id), _card_for_prompt
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("角色私人覆盖合并失败（用原卡）: %s", e)
+
         system_prompt = self.components["persona"].build_system_prompt(
             emotion_state=emotion_state,
             memory_context=memory_context,
@@ -1532,6 +1549,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             # 2026-10-21 R7：本轮模式单次解析结果透传（mes_example/creator_notes/
             # 知识槽剥离开关）——旧实现 persona_service 内部再热读一次。
             reply_mode=turn_reply_mode,
+            character_card=_card_for_prompt,
         )
 
         # 身份唯一 owner = PersonaService 解析到的那张卡（内置卡 / 文件卡），
@@ -2245,9 +2263,20 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
                 character_card = None
                 persona_service = self.components.get("persona")
-                card_loader = getattr(persona_service, "_load_character_card", None)
-                if is_external_character_id(character_id) and callable(card_loader):
-                    character_card = card_loader(character_id)
+                if is_external_character_id(character_id):
+                    card_loader = getattr(persona_service, "_load_character_card", None)
+                    if callable(card_loader):
+                        character_card = card_loader(character_id)
+                    # 2026-11-07：公开卡每人一份私人覆盖，一致性检查也看用户的版本
+                    if character_card is not None and user_id is not None:
+                        try:
+                            from utils import character_overrides
+
+                            character_card = character_overrides.apply(
+                                int(user_id), str(character_id), character_card
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            logger.debug("一致性检查角色覆盖合并失败: %s", e)
                 # B4 优化：传入 chat_round 避免重复 get_chat_context 查询
                 # chat_history 已在 _prepare_context 中获取，直接复用长度
                 reply = await check_and_correct_reply(

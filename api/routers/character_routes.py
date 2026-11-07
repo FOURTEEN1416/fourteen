@@ -533,6 +533,13 @@ async def list_characters(
     if principal is not None:
         active_id = await _personal_active_character_id(db, principal.user_id)
         characters = _overlay_personal_activation(characters, active_id)
+        # 2026-11-07：公开卡默认属于每个人——列表里直接呈现该用户自己的私人修改
+        from utils import character_overrides
+
+        characters = [
+            character_overrides.apply(principal.user_id, str(c.get("id") or ""), c) or c
+            for c in characters
+        ]
     return {"characters": characters, "total": len(characters)}
 
 
@@ -587,8 +594,11 @@ async def get_character(
             data["core_anchors"] = []
         _save_character(character_id, data)
 
-    # 个人激活态（不读卡文件的全局 is_active）
+    # 2026-11-07：公开卡的私人修改（每人一份，互不影响）
     if principal is not None:
+        from utils import character_overrides
+
+        data = character_overrides.apply(principal.user_id, character_id, data) or data
         active_id = await _personal_active_character_id(db, principal.user_id)
         _overlay_personal_activation([data], active_id)
 
@@ -636,12 +646,38 @@ async def update_character(
     character_id: str,
     req: UnifiedCharacterUpdate,
     _auth: bool = Security(verify_api_key_dep),
-    _owned: dict[str, Any] = Depends(require_character_write),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
-    """更新角色（合并更新，只传要改的字段）"""
+    """更新角色（合并更新，只传要改的字段）。
+
+    2026-11-07 用户裁决：公开卡默认属于每个人——普通用户改公开卡时写入
+    **自己的私人覆盖**（`utils.character_overrides`），共享卡文件保持原样；
+    自己的私有卡 / 管理员仍走原来的整卡写路径。
+    """
     data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+
+    if principal is not None and not card_write_allowed(data, principal):
+        # 公共池卡：只落该用户自己的覆盖，不碰共享文件
+        from utils import character_overrides
+
+        patch: dict[str, Any] = {}
+        for key in ("name", "description", "personality", "speaking_style", "core_anchors"):
+            value = getattr(req, key, None)
+            if value is not None:
+                patch[key] = value
+        if req.catchphrases is not None:
+            patch["speaking_style"] = {
+                **(patch.get("speaking_style") or {}),
+                "catchphrases": req.catchphrases,
+            }
+        try:
+            character_overrides.write(principal.user_id, character_id, patch)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"status": "updated", "character_id": character_id, "scope": "personal"}
 
     # 合并更新
     if req.name is not None:
@@ -999,12 +1035,17 @@ async def deactivate_character(
 async def get_character_persona(
     character_id: str,
     _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
     _owned: dict[str, Any] = Depends(require_character_access),
 ):
-    """获取角色的人设详情"""
+    """获取角色的人设详情（2026-11-07：公开卡合并该用户自己的私人修改）"""
     data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+    if principal is not None:
+        from utils import character_overrides
+
+        data = character_overrides.apply(principal.user_id, character_id, data) or data
 
     # 尝试转成 PersonaCardV3 格式返回
     try:
@@ -1031,15 +1072,38 @@ async def update_character_persona(
     character_id: str,
     req: PersonaUpdate,
     _auth: bool = Security(verify_api_key_dep),
-    # P4（2026-11-07 写门治理）：人设 PUT 改的是**卡片本体**，与
-    # `PUT /characters/{id}` 同一资源，却曾只挂读门 → 普通用户可改写他人卡/公共池卡
-    # 的人设（跨用户篡改面）。改挂 require_character_write，失败文案同为 404。
-    _owned: dict[str, Any] = Depends(require_character_write),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
+    _owned: dict[str, Any] = Depends(require_character_access),
 ):
-    """更新角色人设（部分更新 personality / speaking_style / catchphrases / core_anchors）"""
+    """更新角色人设（部分更新 personality / speaking_style / catchphrases / core_anchors）。
+
+    2026-11-07 用户裁决：公开卡默认属于每个人。普通用户改公开卡时写**私人覆盖**
+    （只影响自己），共享卡文件不动；自己的私有卡 / 管理员仍写整卡。
+    """
     data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
+
+    if principal is not None and not card_write_allowed(data, principal):
+        from utils import character_overrides
+
+        patch: dict[str, Any] = {}
+        if req.personality is not None:
+            patch["personality"] = req.personality
+        if req.speaking_style is not None:
+            patch["speaking_style"] = req.speaking_style
+        if req.catchphrases is not None:
+            patch["speaking_style"] = {
+                **(patch.get("speaking_style") or {}),
+                "catchphrases": req.catchphrases,
+            }
+        if req.core_anchors is not None:
+            patch["core_anchors"] = req.core_anchors
+        try:
+            character_overrides.write(principal.user_id, character_id, patch)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"status": "updated", "character_id": character_id, "scope": "personal"}
 
     if req.personality is not None:
         existing = data.get("personality", {})

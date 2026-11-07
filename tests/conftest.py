@@ -256,6 +256,17 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 公开卡「每人一份」私人覆盖（2026-11-07 用户裁决）：同型防线——
+    # 不隔离就会把测试用户的修改写进开发机真实 data/sqlite.db。
+    try:
+        from utils import character_overrides as _co
+
+        monkeypatch.setattr(
+            _co, "_DB_PATH", sandbox / "character_overrides.db", raising=False,
+        )
+    except Exception:
+        pass
+
     # 主动 parked 复提的 judge 读同一物理 scheduler_config.json；不重定向会让
     # 测试随宿主 judge_enabled 漂移（2026-10-27 Task 1 Step 7 / 2026-10-28 复核）。
     try:

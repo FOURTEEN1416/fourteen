@@ -1,11 +1,9 @@
 import { useNavigate, Link } from 'react-router-dom'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Plus, Search, Sparkles, AlertTriangle, Gift, X, UserRound } from 'lucide-react'
 import { AnimatedPage, Skeleton, EmptyState } from '../components/shared'
 import { useUnifiedCharacters, queryKeys } from '../hooks/useQueries'
 import { activateCharacter, deactivateCharacter } from '../api/characters'
-import { cloneTemplate, isCloneAccepted, listTemplates } from '../api/templates'
-import type { CharacterTemplate } from '../api/templates'
 import { useQueryClient } from '@tanstack/react-query'
 import { anchorTone, deriveCardSummary, sanitizeCharacterName } from '../utils/character'
 import { useErrorStore } from '../store/errorStore'
@@ -99,6 +97,14 @@ function RoleCard({
     >
       <div className="text-sm font-semibold text-gray-800 mb-1 pr-14 truncate">
         {sanitizeCharacterName(character.name)}
+        {(!character.user_id || ['default', 'system'].includes(character.user_id)) && (
+          <span
+            className="ml-1.5 rounded-full bg-macaron-mint-light px-1.5 py-0.5 align-middle text-[9px] font-normal text-macaron-mint-deep"
+            title="公共角色卡：所有用户都能用；你的修改只影响你自己"
+          >
+            公共卡 · 可自定义
+          </span>
+        )}
       </div>
       <div className="text-xs text-gray-500 mb-3 leading-relaxed line-clamp-2 min-h-[2rem]">
         {deriveCardSummary(character.description, sanitizeCharacterName(character.name), character.core_anchors ?? [])}
@@ -159,41 +165,6 @@ function RoleCard({
   )
 }
 
-/** 公共角色卡（P2/P4，2026-11-07）：全部用户可见、只读、可克隆成自己的一份。 */
-function PublicCard({
-  template,
-  onClone,
-  cloning,
-}: {
-  template: CharacterTemplate
-  onClone: (template: CharacterTemplate) => void
-  cloning: boolean
-}) {
-  return (
-    <div className="glass-card rounded-2xl p-4 flex flex-col h-full" data-testid="public-role-card">
-      <div className="mb-1 flex items-start gap-2">
-        <div className="min-w-0 flex-1 text-sm font-semibold text-gray-800 truncate">{template.name}</div>
-        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[9px] text-gray-500">只读</span>
-      </div>
-      <div className="text-xs text-gray-500 mb-3 leading-relaxed line-clamp-2 min-h-[2rem]">
-        {template.description || '公共角色卡'}
-      </div>
-      <div className="flex flex-wrap gap-1 mb-4 min-h-[1.25rem] content-start">
-        {(template.tags ?? []).slice(0, 3).map((tag) => (
-          <span key={tag} className="tag-blue px-2 py-0.5 rounded text-[10px]">{tag}</span>
-        ))}
-      </div>
-      <button
-        onClick={() => onClone(template)}
-        disabled={cloning}
-        className="mt-auto w-full py-1.5 rounded-lg text-xs border border-macaron-blue/40 text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors disabled:opacity-50"
-      >
-        {cloning ? '克隆中…' : '克隆到我的角色'}
-      </button>
-    </div>
-  )
-}
-
 export default function RolesPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -205,53 +176,6 @@ export default function RolesPage() {
   const [activatingId, setActivatingId] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
   const [keyword, setKeyword] = useState('')
-  // P2/P4（2026-11-07）：公共角色卡并入本页——全部用户可见、只读、可克隆。
-  const [templates, setTemplates] = useState<CharacterTemplate[]>([])
-  const [templatesLoading, setTemplatesLoading] = useState(true)
-  const [templatesError, setTemplatesError] = useState<string | null>(null)
-  const [cloningId, setCloningId] = useState<string | null>(null)
-
-  const loadTemplates = useCallback(async () => {
-    setTemplatesLoading(true)
-    setTemplatesError(null)
-    try {
-      const res = await listTemplates()
-      setTemplates(res?.templates ?? [])
-    } catch {
-      setTemplates([])
-      setTemplatesError('公共角色卡加载失败')
-    } finally {
-      setTemplatesLoading(false)
-    }
-  }, [])
-
-  /* eslint-disable react-hooks/set-state-in-effect -- 挂载时拉取公共卡清单 */
-  useEffect(() => {
-    void loadTemplates()
-  }, [loadTemplates])
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const handleClone = async (template: CharacterTemplate) => {
-    setCloningId(template.id)
-    try {
-      const res = await cloneTemplate(template.id)
-      if (!isCloneAccepted(res)) {
-        useErrorStore.getState().addToast({ type: 'warning', message: '克隆未生效（后端未确认），请重试' })
-        return
-      }
-      await queryClient.invalidateQueries({ queryKey: queryKeys.characters.all })
-      useErrorStore.getState().addToast({
-        type: 'success',
-        message: `已克隆「${template.name}」，可在「我的角色」里设置`,
-      })
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '克隆失败，请重试'
-      useErrorStore.getState().addToast({ type: 'error', message })
-    } finally {
-      setCloningId(null)
-    }
-  }
-
   const visible = useMemo(() => {
     const kw = keyword.trim().toLowerCase()
     const matched = kw
@@ -313,7 +237,7 @@ export default function RolesPage() {
             <div>
               <h1 className="text-xl font-bold text-gray-800">角色配置</h1>
               <p className="mt-0.5 text-sm text-gray-400">
-                先选一个角色，再对它做设置；公共卡只读，克隆后就是你自己的一份。
+                先选一个角色，再对它做设置；公共卡直接就能用，改了只影响你自己。
               </p>
             </div>
             {/* P3（2026-11-07）：新建入口前置为页头主按钮，不再藏在列表末尾 */}
@@ -394,13 +318,13 @@ export default function RolesPage() {
                     >
                       创建角色
                     </button>
-                    {/* P2：模板入口并入本页公共卡分段（不再跳独立页） */}
-                    <a
-                      href="#public-roles"
+                    {/* 2026-11-07：公开卡与私有卡同列，不再有独立模板页 */}
+                    <button
+                      onClick={() => void refetch()}
                       className="rounded-xl border border-macaron-blue/40 px-5 py-2 text-xs font-medium text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors"
                     >
-                      从公共卡挑一个
-                    </a>
+                      刷新列表
+                    </button>
                   </div>
                 }
               />
@@ -437,55 +361,6 @@ export default function RolesPage() {
             </>
           )}
 
-          {/* P2/P4（2026-11-07）：公共角色卡并进本页——全部用户可见、只读、可克隆。
-              原 /templates 独立页删除（旧链接重定向到这里）。 */}
-          <section id="public-roles" className="mt-8" data-testid="public-roles-section">
-            <div className="mb-3 flex items-end justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-700">公共角色卡</h2>
-                <p className="mt-0.5 text-xs text-gray-400">
-                  全部用户可见、只读；点「克隆」生成你自己的一份，之后随意改。
-                </p>
-              </div>
-              <span className="text-xs text-gray-400">{templatesLoading ? '加载中…' : `共 ${templates.length} 张`}</span>
-            </div>
-            {templatesError ? (
-              <div className="glass-card rounded-2xl p-6 text-center">
-                <p className="text-xs text-red-600">{templatesError}</p>
-                <button
-                  onClick={() => void loadTemplates()}
-                  className="mt-3 rounded-lg border border-red-200 bg-white/80 px-4 py-1.5 text-xs text-red-600 hover:bg-white transition-colors"
-                >
-                  重试
-                </button>
-              </div>
-            ) : templatesLoading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" role="status" aria-label="加载公共角色卡">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="glass-card rounded-2xl p-4 h-36 flex flex-col gap-3">
-                    <Skeleton className="h-4 w-2/3" />
-                    <Skeleton className="h-3 w-full" count={2} />
-                    <Skeleton className="mt-auto h-6 w-full" />
-                  </div>
-                ))}
-              </div>
-            ) : templates.length === 0 ? (
-              <div className="glass-card rounded-2xl p-6 text-center text-xs text-gray-400">
-                暂无公共角色卡
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {templates.map((t) => (
-                  <PublicCard
-                    key={t.id}
-                    template={t}
-                    onClone={handleClone}
-                    cloning={cloningId === t.id}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
         </div>
       </div>
     </AnimatedPage>

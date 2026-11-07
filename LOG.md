@@ -11,11 +11,11 @@
 
 - **来源**：用户 9 条报障 + 五轮对齐（四组归位、用户×角色、每人每角色一份、管理员只做基础体验默认值+站点运维）。研讨报告见工作流产物《痛点研讨报告（9 条）》。
 - **本批已落地（5 条）**：
-  - **P4 写门治理**：`PUT /characters/{id}/persona` + 知识库 5 个写端点（documents 上传/删除、vault、crawl、enrich）+ 成就重算，全部从读门改挂 `require_character_write`（公共池卡对普通用户只读）。新增 `tests/test_p4_character_write_gates.py`（13 例：静态路由守卫 + 行为级 404/放行/机器面）。
+  - **P4 写门治理 + 公开卡「每人一份」**：知识库 5 个写端点 + 成就重算 + DELETE 仍挂 `require_character_write`（共享资源只读）；`PUT /characters/{id}` 与 `PUT /persona` 改为「自己的卡写文件、公开卡写私人覆盖」（新模块 `utils/character_overrides.py`，表 `user_character_overrides`，白名单字段、嵌套合并）——公开卡**不需要克隆**，任何用户直接可改，改了只影响自己；聊天侧 `persona_service.build_system_prompt(character_card=...)` 与编排器按用户合并，改完立即生效。新增 `tests/test_p4_character_write_gates.py`（13 例）+ `tests/test_character_public_overrides.py`（4 例）。
   - **P11 账号页假数据**：拟人节奏 GET 失败不再把硬编码默认当真值渲染，改显式错误态+重试；删「见后续版本」残留文案。前端新增 1 例。
   - **P1 用户×角色设置（后端）**：新 owner `utils/character_settings.py`（声明式 44 字段 × 五组、全量快照、读侧容错/写侧严格、首次物化继承旧 per-user 覆盖）；表 `user_character_settings`（user_key, character_id 主键）；新端点 `GET/PUT/DELETE /api/characters/{id}/my-settings`；调度器/编排器接线（proactive 8 键、LLM 决策 6 键、骰子闸 10 键、humanize 18 键、话题 2 键）；`scripts/backfill_character_settings.py` 存量物化；旧 per-user 写入同步到已物化快照（防假回执）、旧「恢复默认」同步清快照。测试：`test_character_settings.py` 14 例 + `test_character_settings_api.py` 5 例。
   - **P10 话题同时段**：续聊锚点窗从 24h 收窄为 `topic_state.same_session_minutes`（出厂 120 分钟）；锚点去重（归一化+包含判定，最新说法优先，上限 2 条）；状态块同一标题只列一次，超窗 active 降级为「之前没聊完」。测试：`test_topic_same_session_p10.py` 7 例；`test_topic_state.py` 默认键数 11→12 连带更新。
-  - **P2/P3/P4 前端**：`/roles` 页头新增「新建角色」主按钮（删列表末尾虚线卡）；公共角色卡分段（全部用户可见/只读/克隆）；`/templates` 路由重定向 `/roles`，导航项移除，`TemplatesPage` 与其 3 个测试删除（DELETION_LOG 已登记）。
+  - **P2/P3/P4 前端**：`/roles` 页头新增「新建角色」主按钮（删列表末尾虚线卡）；公开卡与私有卡**同一列表**（公开卡带「公共卡 · 可自定义」徽标，直接可激活、可进设置修改，无克隆步骤）；`/templates` 路由重定向 `/roles`，导航项移除，`TemplatesPage` 与其 3 个测试删除（DELETION_LOG 已登记）。
 - **P8 后端**：`self_intro` 进画像投影（`profile_projection` 标量字段）+ `user_profile` 自动补列 + 主链画像槽优先展示；端点 `GET/PUT /api/user/self-profile`（写 EventLedger，actor=user）；状态页新增「我的自我介绍」卡片。测试：`test_self_profile_p8.py` 6 例。
 - **未落地（登记下一批）**：P5 消息设置页四组归位前端重构（后端已具备数据面）；P7 最近主动消息迁状态页（需先建本人作用域读面，现 `/api/proactive/history` 仍 admin-only）；P9 剧情线与时间线合并；P8 心理画像页并入状态页（仅完成自述与注入）；HelpGuidePage 模板文案更新；AGENTS/CODE_GRAPH/FUNCTION_INVENTORY 全口径回扫。
 - **已知设计后果（需用户知悉）**：用户裁决「每人每角色一份全量快照」⇒ 之后修改全局出厂默认**不会**回头影响已物化的用户×角色（只有新组合继承新默认）。管理端仍是出厂默认唯一写方。
