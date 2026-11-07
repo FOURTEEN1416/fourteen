@@ -71,8 +71,19 @@ CAPABILITY_RECALL_LINE = (
     "不要说「让我检索一下」，看到材料就自然用；查不到就说记不清，不要编造。\n"
 )
 
+#: 条件行：只有语音合成组件**真的可用**（TTSManager 初始化成功）时才追加。
+#: 2026-11-08 语音案：生产 01:25 实证——TTS 因缺 MiMo Key 未初始化前，模型被问
+#: 「可以给我发语音吗」只能幻觉「手边哪来麦克风」。能力真实可用时必须告知模型，
+#: 否则它会否认一件真实会发生的事（与画像自动维护条同理，复核条目 #9）。
+CAPABILITY_VOICE_LINE = (
+    "- 你**可以发语音消息**：对方想听你的声音、让你「发语音 / 说句话听听」时，"
+    "系统会自动把你说的话转成语音发出去。你不需要麦克风、不需要任何设备，"
+    "也不用做任何额外操作——不要说自己「没法发语音」「手边没有麦克风」，"
+    "正常回应就行，剩下的系统会处理。\n"
+)
 
-def capability_block(memory_recall: bool = True) -> str:
+
+def capability_block(memory_recall: bool = True, voice_enabled: bool = False) -> str:
     """按真实可用性拼能力声明段。
 
     Args:
@@ -80,11 +91,17 @@ def capability_block(memory_recall: bool = True) -> str:
             调用 ``build_system_prompt`` 的调用方（不传 flags 时按「有」处理，
             与改造前无声明相比语义更保守——宁可说明有，也不让模型否认上下文里
             明明存在的记忆段）。
+        voice_enabled: 语音合成组件是否真实可用（2026-11-08 语音案）。缺省
+            False——声明一个发不出去的语音等于教模型说谎；只有 TTS 初始化成功
+            的部署才渲染该行。
 
     Returns:
         以 ``# 你的能力`` 开头的段落；段落**恒非空**（静态部分全是既成事实）。
     """
-    return CAPABILITY_DECLARATION + (CAPABILITY_RECALL_LINE if memory_recall else "")
+    block = CAPABILITY_DECLARATION + (CAPABILITY_RECALL_LINE if memory_recall else "")
+    if voice_enabled:
+        block += CAPABILITY_VOICE_LINE
+    return block
 
 
 class PersonaService:
@@ -336,10 +353,15 @@ class PersonaService:
         # 2026-10-21 R3：能力声明 —— 紧邻记忆守则之后、话题续聊之前。
         # 只告知事实（真实接通的通道），并按 registry 实况条件渲染检索行；
         # 编排器经 `capability_flags` 传入可用性（见 `_memory_recall_available`）。
+        # 2026-11-08：`voice_enabled` 同理——TTS 组件真实可用才声明能发语音。
         _flags = capability_flags if isinstance(capability_flags, dict) else {}
         _memory_recall = _flags.get("memory_recall")
+        _voice_enabled = bool(_flags.get("voice_enabled"))
         injection_parts.append(
-            capability_block(True if _memory_recall is None else bool(_memory_recall)).strip()
+            capability_block(
+                True if _memory_recall is None else bool(_memory_recall),
+                voice_enabled=_voice_enabled,
+            ).strip()
         )
         # 话题续聊（2026-10-27 话题状态机 Q2 B+C）：
         # 有动态状态块 → untrusted 数据块 + 软化接续规则；

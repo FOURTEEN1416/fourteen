@@ -2135,6 +2135,15 @@ class WeChatConnector:
             self._send_media_unsupported_notice(from_user, context_token)
             return
 
+        # 直传图无配文 → 落 `[图片]` 占位（2026-11-08 图片案根治）。
+        # 生产实证（01:29 案）：B 直传路径 text 为空 → chat_history 连 user 行
+        # 都没有，下一轮历史里只剩一句凭空冒出的「哟，这橙子切得好」，模型
+        # 只能幻觉「图我这边没收到」。占位行让历史恢复「你发图→我看见」的
+        # 因果形态；describe 路径已有 `[你亲眼看到：…]` 随文落库，不受影响。
+        if attachments and not text:
+            text = "[图片]"
+            logger.info("[wx][step=image_placeholder] msg_id=%s user=%s", msg_id, from_user)
+
         from utils.local_time import now_local
 
         today = now_local().strftime("%Y-%m-%d")

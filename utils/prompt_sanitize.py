@@ -305,6 +305,21 @@ _TOPIC_ANCHOR_HINTS = (
     "买", "做", "想", "要", "喜欢", "讨厌", "累", "病", "疼", "冷", "热",
     "忙", "闲", "回", "到", "等", "见", "说", "问", "答应", "提醒",
 )
+# 话题管理**元指令**（2026-11-08 话题衰减批）：生产实证「别只讲这个话题了」
+# 被抽成锚点，下一轮「对方最近在说：别只讲这个话题了」教唆模型抛问卷句。
+# 这类句子是会话管理动作不是话题，永不进锚点。
+_META_TOPIC_CONTROL_RE = re.compile(
+    r"换个?话题|聊点别的|说点别的|换(个|下)话题|别(要)?只?(聊|讲|说|提)这?个?话题?|"
+    r"不想聊(这个|了)|别翻旧账|别提了|话题结束了"
+)
+# 图片/语音等媒体占位行：media 通道落库占位（如直传图的 `[图片]` user 行），
+# 没有话题信息，进锚点只会教唆模型对空气谈图。
+_MEDIA_PLACEHOLDER_RE = re.compile(r"^\[?(?:图片|照片|语音|视频|文件)\]?$")
+# 疑问句尾：疑问句只要身后已有任何 assistant 行，就视为「已接住」——
+# 无法从文本判定答没答对，但把已回应的疑问反复回注正是生产实证的
+# 「一轮/几轮反复提同一话题」燃料（2026-11-08 01:29 实锤：
+# 「你看图片里是什么呢」「你可以给我发语音吗」被回注进「哈哈哈」轮）。
+_ANCHOR_QUESTION_END_RE = re.compile(r"[？?]$|[吗呢]$")
 
 
 def _extract_user_anchor_sentences(
@@ -323,7 +338,11 @@ def _extract_user_anchor_sentences(
     - 返回**完整短句**而不是切词 —— 「你先接住对方最近在说什么」需要的是
       原话，不是「的话」「哈喽」这种碎片；
     - 过滤纯寒暄/应答整句（`_GREETING_ONLY_RE`），但保留含具体动作/状态/
-      未完成事项的句子（`_TOPIC_ANCHOR_HINTS` 或长度足够）。
+      未完成事项的句子（`_TOPIC_ANCHOR_HINTS` 或长度足够）；
+    - **已接住衰减**（2026-11-08 话题衰减批）：身后已有 assistant 行接住的
+      旧话头不再回注 —— 生产实证 01:29 「哈哈哈」轮被注入的锚点竟是几分钟前
+      已经回答过的「你看图片里是什么呢」「你可以给我发语音吗」，模型于是
+      一轮/几轮反复提同一话题。
 
     Args:
         messages: 历史行（dict 需含 role/content，可选 timestamp）。
@@ -335,14 +354,19 @@ def _extract_user_anchor_sentences(
     Returns:
         **最新优先**的短句列表（去重后，最多 ``limit`` 条）。
     """
-    candidates: list[str] = []
+    rows: list[tuple[str, str]] = []
     wall_now = None
     if now is not None:
         wall_now = now.replace(tzinfo=None) if getattr(now, "tzinfo", None) is not None else now
+    candidates: list[tuple[int, str]] = []  # (行号, 原话)；行号=len(rows) 表示本轮消息
     for item in messages or []:
         if not isinstance(item, dict):
             continue
-        if str(item.get("role") or "").lower() != "user":
+        role = str(item.get("role") or "").lower()
+        if role not in ("user", "assistant"):
+            continue
+        rows.append((role, str(item.get("content") or "")))
+        if role != "user":
             continue
         ts = item.get("timestamp")
         if ts and wall_now is not None:
@@ -356,9 +380,24 @@ def _extract_user_anchor_sentences(
                     continue
             except Exception:  # noqa: BLE001
                 pass  # 解析失败按无时间窗行处理（fail-open，兼容旧数据）
-        candidates.append(str(item.get("content") or ""))
+        candidates.append((len(rows) - 1, str(item.get("content") or "")))
     if current_user_message:
-        candidates.append(str(current_user_message))
+        candidates.append((len(rows), str(current_user_message)))
+
+    def _engaged(row_idx: int, sentence: str) -> bool:
+        """该话头是否已被身后的 assistant 行接住（接住的不再回注）。
+
+        - 疑问句：身后有任何回复即视为已接住（答没答对无法从文本判定，
+          但回注已回应的疑问正是「反复提同一话题」的燃料）；
+        - 陈述句：身后任一回复与它共享 ≥2 字片段，视为已接住。
+        """
+        later = [c for r, c in rows[row_idx + 1:] if r == "assistant"]
+        if not later:
+            return False
+        if _ANCHOR_QUESTION_END_RE.search(sentence):
+            return True
+        grams = {sentence[i: i + 2] for i in range(len(sentence) - 1)}
+        return any(g in content for content in later for g in grams)
 
     anchors: list[str] = []
     seen_keys: list[str] = []
@@ -378,7 +417,7 @@ def _extract_user_anchor_sentences(
     # 2026-11-07（P10）：从**最新**往回取，重复/近似重复只保留最新说法。
     # 旧实现按时间正序 `sentence in seen` 去重 → 同一话题的旧表述占位，
     # 模型拿到的永远是几小时前的原句（「反复说同一件事」的素材来源）。
-    for blob in reversed(candidates):
+    for row_idx, blob in reversed(candidates):
         for raw in _TOPIC_SENTENCE_SPLIT_RE.split(str(blob or "")):
             sentence = raw.strip(" \t，,。.！!？?、；;：:~～…·\"'“”‘’")
             if len(sentence) < 2 or len(sentence) > 40:
@@ -387,8 +426,15 @@ def _extract_user_anchor_sentences(
                 continue
             if _EMPTY_ANSWER_RE.match(sentence):
                 continue
+            if _META_TOPIC_CONTROL_RE.search(sentence):
+                continue
+            if _MEDIA_PLACEHOLDER_RE.match(sentence):
+                continue
             key = _TOPIC_DEDUP_STRIP_RE.sub("", sentence)
             if _dup(key):
+                continue
+            # 已接住衰减：身后有回复接住的旧话头不再当「对方最近在说」。
+            if _engaged(row_idx, sentence):
                 continue
             # 只保留「在说一件具体的事」的句子：含动作/状态词，或本身足够长。
             if len(sentence) < 4 and not any(h in sentence for h in _TOPIC_ANCHOR_HINTS):

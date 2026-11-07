@@ -204,6 +204,23 @@ def _memory_recall_available(components: dict[str, Any] | None) -> bool:
         return False
 
 
+def _voice_sending_available(components: dict[str, Any] | None) -> bool:
+    """语音合成组件是否真实可用（能力声明的唯一判定函数，2026-11-08 语音案）。
+
+    与 `_memory_recall_available` 同纪律：能力声明必须按**真实可用性**渲染。
+    生产实证（2026-11-08 01:25）：TTSManager 因缺 MiMo Key 初始化失败 →
+    ``components["voice"]`` 为 None → 用户问「可以给我发语音吗」模型只能幻觉
+    「手边哪来麦克风」。判定收在这里，与 prompt 侧单一真源对齐。
+
+    任何异常一律按「不可用」处理（宁可不声明，也不声明一个发不出的语音）。
+    """
+    try:
+        voice = (components or {}).get("voice")
+        return bool(voice) and bool(getattr(voice, "enabled", False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def strip_internal_identifiers(text: str) -> str:
     """剥掉回复正文里泄漏的内部标识（会话键 / user_key / call_id 形态）。
 
@@ -1543,8 +1560,11 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             user_message=user_msg_clean,
             # 2026-10-21 R3：能力声明按**真实可用性**渲染 —— 只有 registry 里
             # 真有 memory 工具时才声明「系统可能先替你检索一次长期记忆」。
+            # 2026-11-08 语音案：`voice_enabled` 同理——TTS 真实可用才声明能发
+            # 语音（生产实证缺 MiMo Key 时模型幻觉「手边哪来麦克风」）。
             capability_flags={
                 "memory_recall": _memory_recall_available(self.components),
+                "voice_enabled": _voice_sending_available(self.components),
             },
             # 2026-10-21 R7：本轮模式单次解析结果透传（mes_example/creator_notes/
             # 知识槽剥离开关）——旧实现 persona_service 内部再热读一次。

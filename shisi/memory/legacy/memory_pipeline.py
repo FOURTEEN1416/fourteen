@@ -92,6 +92,24 @@ def _is_system_error_reply(reply: str) -> bool:
             return True
         return text in _SYSTEM_ERROR_REPLIES or any(m in text for m in _SYSTEM_ERROR_MARKERS)
 
+
+def _is_raw_machine_sentinel(reply: str) -> bool:
+    """落库侧窄口径（2026-11-08 图片案根治）。
+
+    走 :func:`utils.fallback_lines.is_machine_sentinel_line`（空/机器哨兵/精确
+    等于池句），**不含**「≤40 字含 没收到…」模糊规则——生产实证模型自己的
+    36 字回复被模糊规则吞掉，已发送的发言从 chat_history 蒸发。落到本层的
+    reply 都已经真实发送/即将发送，除了裸机器哨兵都该记进历史。
+    """
+    try:
+        from utils.fallback_lines import is_machine_sentinel_line
+        return is_machine_sentinel_line(reply)
+    except Exception:  # noqa: BLE001
+        text = (reply or "").strip()
+        if not text:
+            return True
+        return text in _SYSTEM_ERROR_REPLIES or any(m in text for m in _SYSTEM_ERROR_MARKERS)
+
 # 深夜时段范围（24小时制，含两端）
 LATE_NIGHT_START_HOUR = 23
 LATE_NIGHT_END_HOUR = 5
@@ -482,7 +500,10 @@ class MemoryPipeline:
 
         effective_session = session_id or self.session_id
         turn_id = turn_id or uuid4().hex
-        stored_reply = "" if _is_system_error_reply(reply) else reply
+        # 2026-11-08 窄口径：只有裸机器哨兵才清空——能走到这里的 reply 都已
+        # 真实发送（_after_process/超时旁路两条调用链），模糊「兜底腔」判定
+        # 会把模型自己的话吞掉（生产实证 36 字「没收到」回复蒸发案）。
+        stored_reply = "" if _is_raw_machine_sentinel(reply) else reply
         # 存储层纵深（2026-10-13 对抗验收）：assistant 正文落库前剥时间前缀
         # 元数据——上游 _finalize_reply 已清洗，本层兜底防新出口绕过（主链
         # 有 5 处 write_chat_history_sync 调用点，逐个追上游不可持续）。
@@ -535,7 +556,9 @@ class MemoryPipeline:
         """
         text = str(message or "").strip()
         effective_session = session_id or self.session_id
-        if not text or not effective_session or _is_system_error_reply(text):
+        # 2026-11-08 窄口径：主动线发出的都是真实 outbound（角色化文案），同族
+        # 「模糊兜底腔误吞」不留例外——只有裸机器哨兵才不入库。
+        if not text or not effective_session or _is_raw_machine_sentinel(text):
             return False
         # 存储层纵深（2026-10-13 对抗验收）：出站正文落库前剥时间前缀元数据——
         # 上游两条链（scheduler/reminder）已各自清洗，本层兜底防新调用方绕过
@@ -609,7 +632,8 @@ class MemoryPipeline:
             logger.debug("Late-night importance boost failed: %s", e)
 
         # 2. 存储到结构化记忆（B-a：若 orchestrator 已同步写过则跳过，防双插）
-        store_assistant = bool(reply) and not _is_system_error_reply(reply)
+        # 2026-11-08 窄口径（与 write_chat_history_sync 同源）：只拦裸机器哨兵。
+        store_assistant = bool(reply) and not _is_raw_machine_sentinel(reply)
         result["stored_chat"] = history_already_written or self.write_chat_history_sync(
             user_msg, reply, emotion_tag=emotion_tag, session_id=effective_session,
             character_id=character_id, turn_id=turn_id, importance=importance, channel=channel,

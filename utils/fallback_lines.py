@@ -316,6 +316,29 @@ def is_system_fallback_line(reply: str | None) -> bool:
     return len(text) <= 40 and "没事" not in text and any(s in text for s in _SYSTEMISH)
 
 
+def is_machine_sentinel_line(reply: str | None) -> bool:
+    """落库侧**窄口径**（2026-11-08 图片案根治）：只有裸机器哨兵才不算角色发言。
+
+    与 :func:`is_system_fallback_line` 的差别：去掉「≤40 字且含 没收到/再说一次/
+    没看清…」的模糊规则。生产实证（v1.65.2，2026-11-08 01:29）：模型自己生成的
+    36 字真实回复「你刚发的图我这边没收到啊…你重新发一次？我看看看清。」命
+    中模糊规则被判成兜底句 → ``stored_reply=""`` → **已发给用户的话从
+    chat_history 蒸发**，下一轮她不记得自己说过（用户报障「她说话前后矛盾」
+    的存储层根因）。
+
+    窄口径三判据（全部无歧义）：
+    - 空；- 命中机器哨兵（核心 + 网关，同源 ``_system_markers()``）；
+    - **精确等于**兜底池文案（模型逐字学舌池句仍会被拦）。
+    模型转述/化用池句（如自己说「图我这边没收到」）属于真实发言，必须落库。
+    """
+    text = (reply or "").strip()
+    if not text:
+        return True
+    if any(m in text for m in _system_markers()):
+        return True
+    return text in FALLBACK_POOL_LINES
+
+
 def reset_daily_dedup() -> None:
     """测试用：清空当日去重状态。"""
     global _day_key
