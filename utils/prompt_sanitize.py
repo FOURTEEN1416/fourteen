@@ -1079,6 +1079,41 @@ def _guard_log(rule: str, before: str, after: str) -> None:
     )
 
 
+# 2026-11-07 对抗验收（v1.65.2）：幻觉 URL 防线。生产实证 10-30 bot 把
+# example.com 占位 URL 当真链接发给用户并自称「看过了能打开」，被拆穿后仍
+# 重提 26.6 小时（chat_history #3421/#3435/#3453/#3508）。占位域黑名单
+# 确定性剥句：真实域名不在表内不误伤；词表 = RFC 2606 保留的三个文档域。
+_PLACEHOLDER_URL_HOSTS = frozenset({"example.com", "example.org", "example.net"})
+_PLACEHOLDER_URL_TOKEN_RE = re.compile(
+    r"(?:https?://|www\.)[^\s，。！？、；;：:）)」》\"'“”‘’]+",
+    re.IGNORECASE,
+)
+_PLACEHOLDER_URL_BARE_RE = re.compile(
+    r"(?<![\w.])example\.(?:com|org|net)\b", re.IGNORECASE,
+)
+
+
+def _placeholder_url_hit(text: str) -> bool:
+    """正文里是否出现占位域链接（含 scheme/www 形态与裸域名形态）。"""
+    for match in _PLACEHOLDER_URL_TOKEN_RE.finditer(text):
+        host = re.sub(r"^[a-zA-Z]+://", "", match.group(0))
+        # token 正则本身排除冒号与斜杠后的续段，这里只需剥 scheme 与取 host 段
+        host = host.split("/", 1)[0].lower()
+        if host.startswith("www."):
+            host = host[4:]
+        if host in _PLACEHOLDER_URL_HOSTS:
+            return True
+    return bool(_PLACEHOLDER_URL_BARE_RE.search(text))
+
+
+def _strip_placeholder_urls(text: str) -> str:
+    """剥除含占位域链接的整行（行级确定性剥除；全空返回空串走兜底）。"""
+    if not _placeholder_url_hit(text):
+        return text
+    kept = [line for line in text.splitlines() if not _placeholder_url_hit(line)]
+    return "\n".join(kept).strip()
+
+
 def terminal_reply_guard(
     reply: Any,
     *,
@@ -1114,6 +1149,11 @@ def terminal_reply_guard(
     2026-10-20 语义终审批（时间词改写之后）：复述原话、元记忆解释、无由头反向
     提问、沉浸式动作段四类语义缺陷确定性兜底；``reply_mode`` 缺省空串时不做
     动作段剥离（兼容无模式上下文的调用方），前两类与模式无关。
+
+    2026-11-07 对抗验收批（动作段剥离之后）：**占位域链接剥句**——正文出现
+    ``example.com/.org/.net`` 占位 URL 时剥除所在行（幻觉 URL 防线，生产实证
+    10-30 假链接案）；剥空返回空串走 empty_reply 兜底。真实域名不在黑名单，
+    不误伤正常内容。
     """
     from llm_provider.multi_provider_gateway import _is_error_reply
 
@@ -1127,6 +1167,12 @@ def terminal_reply_guard(
     _before = s
     s = _strip_immersive_stage_directions(s, reply_mode)
     _guard_log("immersive_stage_direction", _before, s)
+    if not s:
+        return ""
+    # 2026-11-07 对抗验收：占位域链接剥句（幻觉 URL 防线，见 _strip_placeholder_urls）。
+    _before = s
+    s = _strip_placeholder_urls(s)
+    _guard_log("placeholder_url", _before, s)
     if not s:
         return ""
     # 2026-10-19 时间感知 3.0：距上一回合 >45min 时相对时间词确定性降级

@@ -6,7 +6,9 @@
   ``topic_state`` / ``topic_plan`` / ``topic_meta``。本模块是这三张表的
   **唯一 owner**，其他模块不得直接 ``sqlite3.connect`` 它们。
 - **六 API**：``get_topic_snapshot / update_after_turn / select_proactive_recall
-  / save_next_plan / take_next_plan / purge_expired``；加 ``read/write_topic_config``。
+  / save_next_plan / take_next_plan / purge_expired``；加 ``read/write_topic_config``
+  与复提记账 ``mark_topic_recalled``（2026-11-07 对抗验收残余缺口②：
+  投递成功计数 + 冷却升级，堵「无回应话题每 ≥6h 周期性复提」）。
 - **关闭态零 DB**：``enabled=false`` 时六个 API 首行短路，不 ``_connect``、
   不建表、不读表。唯一例外是每日维护用的 ``purge_expired(force=True)``。
 - **确定性优先**：每轮先跑确定性状态机；LLM judge 每 4 轮一次、8s 硬超时、
@@ -102,6 +104,8 @@ CREATE TABLE IF NOT EXISTS topic_state (
     turn_count     INTEGER NOT NULL DEFAULT 0,
     anchors        TEXT NOT NULL DEFAULT '[]',
     idle_turns     INTEGER NOT NULL DEFAULT 0,
+    recall_count   INTEGER NOT NULL DEFAULT 0,
+    last_recalled_at TEXT NOT NULL DEFAULT '',
     last_active_at TEXT NOT NULL,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
@@ -143,6 +147,7 @@ __all__ = [
     "update_after_turn",
     "select_proactive_recall",
     "save_next_plan",
+    "mark_topic_recalled",
     "take_next_plan",
     "purge_expired",
     "render_topic_state_block",
@@ -396,10 +401,45 @@ def _connect(*, ensure_schema: bool = False, busy_timeout_ms: int | None = None)
     if ensure_schema:
         try:
             conn.executescript(_SCHEMA)
+            _ensure_recall_columns(conn)
         except Exception:
             conn.close()
             raise
     return conn
+
+
+def _ensure_recall_columns(conn: sqlite3.Connection) -> None:
+    """存量库补列（幂等，2026-11-07 v1.65.2 复提记账）：recall_count / last_recalled_at。
+
+    存量库没有这两列时 ALTER 补上；新库由 _SCHEMA 直接带列，这里零操作。
+    读路径（``select_proactive_recall`` 的 ``ensure_schema=False`` 连接）也会
+    先调它——否则「首次读先于任何写」的部署时序会因缺列整体降级 ``[]``。
+    """
+    cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(topic_state)")}
+    if not cols:
+        return  # 表还不存在：ensure_schema 路径会先建（带列）
+    if "recall_count" not in cols:
+        conn.execute(
+            "ALTER TABLE topic_state ADD COLUMN recall_count INTEGER NOT NULL DEFAULT 0",
+        )
+    if "last_recalled_at" not in cols:
+        conn.execute(
+            "ALTER TABLE topic_state ADD COLUMN last_recalled_at TEXT NOT NULL DEFAULT ''",
+        )
+
+
+def _recall_gap_hours(recall_count: int, base_hours: float) -> float:
+    """复提冷却升级（对抗验收残余缺口②）：用户不回应时同一话题不能无限复提。
+
+    基线 = 配置的 ``recall_after_hours``（≥6h）；同题复提 2-3 次 → 翻倍；
+    ≥4 次 → 四倍封顶。计数与最近复提时间在**投递成功**时记账
+    （:func:`mark_topic_recalled`，scheduler 发送成功分支调用）。
+    """
+    if int(recall_count) >= 4:
+        return float(base_hours) * 4.0
+    if int(recall_count) >= 2:
+        return float(base_hours) * 2.0
+    return float(base_hours)
 
 
 @contextmanager
@@ -431,6 +471,8 @@ def _row_to_topic(row: sqlite3.Row) -> dict[str, Any]:
         "turn_count": _safe_int(_row_get(row, "turn_count", 0), 0),
         "anchors": _as_anchors(_row_get(row, "anchors", "[]")),
         "idle_turns": _safe_int(_row_get(row, "idle_turns", 0), 0),
+        "recall_count": _safe_int(_row_get(row, "recall_count", 0), 0),
+        "last_recalled_at": str(_row_get(row, "last_recalled_at", "") or ""),
         "last_active_at": str(_row_get(row, "last_active_at", "") or ""),
         "created_at": str(_row_get(row, "created_at", "") or ""),
         "updated_at": str(_row_get(row, "updated_at", "") or ""),
@@ -1256,6 +1298,9 @@ def select_proactive_recall(
     try:
         # 先只读扫描 stale active；命中才升级为写事务（不给 5 分钟 tick 增加无谓写锁）
         with closing(_connect(ensure_schema=False, busy_timeout_ms=_READ_TIMEOUT_MS)) as conn:
+            # 存量库补列（幂等，见 _ensure_recall_columns）——必须在查询前，
+            # 否则「首次读先于任何写」的时序会因缺列整体降级 []。
+            _ensure_recall_columns(conn)
             stale_rows = conn.execute(
                 "SELECT * FROM topic_state WHERE session_key=? AND character_id=? "
                 "AND status='active' AND expires_at > ? AND last_active_at <= ?",
@@ -1281,11 +1326,15 @@ def select_proactive_recall(
             logger.debug("[topic_state][step=recall] timeout_parked=%d", len(stale_rows))
 
         with closing(_connect(ensure_schema=False, busy_timeout_ms=_READ_TIMEOUT_MS)) as conn:
+            _ensure_recall_columns(conn)
+            # LIMIT 20 先粗筛再冷却过滤：升级冷却的行必须在过滤**之后**才让位
+            # 给低计数候选（SQL LIMIT 先截断会把名额浪费在冷却中的行上）。
             rows = conn.execute(
                 "SELECT * FROM topic_state WHERE session_key=? AND character_id=? "
                 "AND status='parked' AND expires_at > ? AND last_active_at <= ? "
-                "ORDER BY salience DESC, last_active_at DESC LIMIT ?",
-                (key, character, _ts(dt), cutoff, limit),
+                "AND last_recalled_at <= ? "
+                "ORDER BY salience DESC, last_active_at DESC LIMIT 20",
+                (key, character, _ts(dt), cutoff, cutoff),
             ).fetchall()
     except Exception as e:  # noqa: BLE001
         logger.debug("[topic_state][step=recall] degraded=%s", type(e).__name__)
@@ -1295,11 +1344,64 @@ def select_proactive_recall(
     for row in rows:
         topic = _row_to_topic(row)
         last_active = _parse_ts(topic["last_active_at"])
-        age_hours = max(0.0, (dt - last_active).total_seconds() / 3600.0) if last_active else 0.0
+        last_recalled = _parse_ts(topic.get("last_recalled_at") or "")
+        effective_last = max(
+            (d for d in (last_active, last_recalled) if d is not None),
+            default=None,
+        )
+        age_hours = (
+            max(0.0, (dt - effective_last).total_seconds() / 3600.0)
+            if effective_last else 0.0
+        )
+        # 冷却升级（对抗验收残余缺口②）：复提次数越多，再次复提的间隔越长，
+        # 用户不回应的 parked 话题不再每 ≥6h 周期性合法复提。
+        required_gap = _recall_gap_hours(int(topic.get("recall_count") or 0), threshold_hours)
+        if age_hours + 1e-9 < required_gap:
+            logger.debug(
+                "[topic_state][step=recall] cooldown topic=%s count=%s gap=%.1fh",
+                topic.get("topic_id"), topic.get("recall_count"), required_gap,
+            )
+            continue
         topic["age_hours"] = round(age_hours, 3)
         items.append(topic)
+    items = items[:limit]
     logger.debug("[topic_state][step=recall] count=%d", len(items))
     return items
+
+
+def mark_topic_recalled(
+    session_key: str,
+    character_id: str = "default",
+    topic_id: str = "",
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """复提记账（2026-11-07 对抗验收残余缺口②）：投递成功后由 scheduler 调用。
+
+    ``recall_count += 1`` 且 ``last_recalled_at = now``——之后
+    :func:`select_proactive_recall` 的冷却升级闸（2 次 → 翻倍、4 次 → 四倍）
+    才有真数据可依。幂等安全：topic_id 不存在时 rowcount=0 返回 False。
+    """
+    cfg = read_topic_config()
+    if not cfg["enabled"]:
+        return False
+    key = str(session_key or "").strip()
+    character = str(character_id or "default").strip() or "default"
+    tid = str(topic_id or "").strip()
+    if not key or not tid:
+        return False
+    dt = _normalize_now(now)
+    try:
+        with closing(_connect(ensure_schema=True)) as conn, _write_tx(conn):
+            cur = conn.execute(
+                "UPDATE topic_state SET recall_count=recall_count+1, last_recalled_at=?, "
+                "updated_at=? WHERE session_key=? AND character_id=? AND topic_id=?",
+                (_ts(dt), _ts(dt), key, character, tid),
+            )
+            return bool(cur.rowcount)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[topic_state][step=recall_touch] degraded=%s", type(e).__name__)
+        return False
 
 
 def save_next_plan(

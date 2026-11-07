@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+from api.routers import character_routes as character_routes_mod
 from api.routers import storyline_routes as routes
 from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.core.services import prompt_builder
@@ -90,8 +91,12 @@ def test_production_prompt_path_keeps_storyline_gate_closed():
 
 @pytest.fixture()
 def synth_card(tmp_path, monkeypatch):
-    """合成角色卡 + 隔离目录（不碰 config/characters 的 41 张真卡）。"""
-    monkeypatch.setattr(routes, "CHARACTERS_DIR", tmp_path)
+    """合成角色卡 + 隔离目录（不碰 config/characters 的真卡）。
+
+    2026-11-07 对抗验收后 storyline_routes 不再私有持有 CHARACTERS_DIR
+    （双 owner 已收敛到 character_routes 单一真源），隔离必须 patch 真源模块。
+    """
+    monkeypatch.setattr(character_routes_mod, "CHARACTERS_DIR", tmp_path)
     cid = "w8synthetic"
     (tmp_path / f"{cid}.json").write_text(
         json.dumps({"name": "合成角色", "description": ""}, ensure_ascii=False),
@@ -111,7 +116,7 @@ def test_get_unconfigured_declares_affects_chat(synth_card):
 
 
 def test_get_configured_declares_affects_chat(tmp_path, monkeypatch):
-    monkeypatch.setattr(routes, "CHARACTERS_DIR", tmp_path)
+    monkeypatch.setattr(character_routes_mod, "CHARACTERS_DIR", tmp_path)
     cid = "w8synthetic2"
     (tmp_path / f"{cid}.json").write_text(
         json.dumps(
@@ -132,8 +137,10 @@ def test_put_declares_affects_chat(synth_card):
     payload = asyncio.run(routes.update_storyline_config(synth_card, req))
     assert payload["status"] == "updated"
     assert payload["affects_chat"] is False
-    # 写盘行为不变（不自决撤除入口）
-    saved = json.loads((Path(routes.CHARACTERS_DIR) / f"{synth_card}.json").read_text(encoding="utf-8"))
+    # 写盘行为不变（不自决撤除入口）；真源在 character_routes（v1.65.2 收敛）
+    saved = json.loads(
+        (Path(character_routes_mod.CHARACTERS_DIR) / f"{synth_card}.json").read_text(encoding="utf-8")
+    )
     assert saved["storyline_config"]["enabled"] is True
 
 

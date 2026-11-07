@@ -2258,6 +2258,22 @@ class ProactiveScheduler:
                 )
             except Exception as _plan_err:  # noqa: BLE001
                 logger.debug("消费/保存计划失败（忽略）user=%s: %s", user_key, _plan_err)
+            # 复提记账（2026-11-07 对抗验收残余缺口②）：本轮决策注入了 parked
+            # 候选且投递成功 → 逐条 count+1 并记 last_recalled_at；用户不回应时
+            # 冷却升级闸（2 次翻倍 / 4 次四倍）才能逐轮拉长复提间隔，堵住
+            # 「无回应话题每 ≥6h 周期性合法复提、机制上无次数上限」。投递失败
+            # 不记账（用户没看到，话题应保持可复提）。
+            if _recall.items:
+                try:
+                    for _item in _recall.items:
+                        _topic_state.mark_topic_recalled(
+                            str(user_key),
+                            char_id,
+                            str(_item.get("topic_id") or ""),
+                            now=now,
+                        )
+                except Exception as _recall_err:  # noqa: BLE001
+                    logger.debug("复提记账失败（忽略）user=%s: %s", user_key, _recall_err)
             if eng is not None and hasattr(eng, "commit_sent"):
                 # 注意：模块顶部已导入 contextlib。此处**禁止**再写函数内局部导入
                 # —— 局部导入会让该名在整个函数作用域被视为局部，任何在它

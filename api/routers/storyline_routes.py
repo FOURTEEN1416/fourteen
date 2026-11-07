@@ -2,33 +2,51 @@
 
 响应的 `affects_chat` 字段声明配置当前是否影响对话（见 `CHAT_AFFECTING`）；
 生产 prompt 路径未接线，故为 False。
+
+2026-11-07 对抗验收（v1.65.2）：本模块曾私有复制 ``CHARACTERS_DIR`` 与
+``_load_character``/``_save_character``，与 ``character_routes`` 的同名真源
+构成双 owner——卡目录解析分叉时同一张卡 config 404 而 progress 200（沙箱
+旅程实测实锤）。现收敛为单一真源：加载/保存一律 import character_routes
+（其版本还多「按 JSON 内部 id 回查原文件」的能力，PUT 不再复制出重复卡文件）。
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Security
 from pydantic import BaseModel
 
 from api.auth import verify_api_key_dep
-from api.path_security import sanitize_id
-from api.routers.character_routes import require_character_access
+from api.routers.character_routes import (
+    _load_character,
+    _save_character,
+    require_character_access,
+)
 from shisi.storyline.config import StorylineConfig
 from shisi.storyline.detector import StorylineDetector
 from shisi.storyline.engine import get_storyline_engine
-from utils.project_paths import project_path
+from utils.character_resolver import is_builtin
 
 logger = logging.getLogger("api.storyline_routes")
 
 router = APIRouter(prefix="/api/characters", tags=["storyline"])
 
 
-CHARACTERS_DIR = project_path("config", "characters")
+def _ensure_not_builtin(character_id: str) -> None:
+    """内置默认人设没有卡文件，剧情线配置（写进卡文件）对它无意义。
+
+    2026-11-07 用户裁决后 default 是正式可读卡（require_character_access
+    放行），必须在此显式挡住，否则 404「角色不存在」会把人绕晕。
+    """
+    if is_builtin(character_id):
+        raise HTTPException(
+            status_code=400,
+            detail="内置默认人设（十四）没有独立剧情线配置；先激活一个角色卡再试",
+        )
+
 
 # 剧情线是否影响对话回复 —— **由 prompt 闸的实际状态决定的自我声明**（W8 缺陷 D）。
 #
@@ -40,37 +58,6 @@ CHARACTERS_DIR = project_path("config", "characters")
 # 接线（改 True）该钉即红，强制同批改此常量与前端横幅，禁止"悄悄生效"。
 # 接线 vs 撤除入口属产品裁决（D 类），本模块不自决。
 CHAT_AFFECTING = False
-
-
-def _character_path(character_id: str) -> Path:
-    safe_id = sanitize_id(character_id)
-    if not safe_id:
-        raise HTTPException(status_code=400, detail="Invalid character ID")
-    CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
-    return CHARACTERS_DIR / f"{safe_id}.json"
-
-
-def _load_character(character_id: str) -> dict[str, Any] | None:
-    path = _character_path(character_id)
-    if not path.exists():
-        return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        logger.error("加载角色 %s 失败: %s", character_id, e)
-        return None
-
-
-def _save_character(character_id: str, data: dict[str, Any]) -> bool:
-    path = _character_path(character_id)
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        return True
-    except OSError as e:
-        logger.error("保存角色 %s 失败: %s", character_id, e)
-        return False
 
 
 # ── 请求/响应模型 ──
@@ -96,6 +83,7 @@ async def get_storyline_config(
     _owned: dict = Depends(require_character_access),
 ):
     """获取角色剧情线配置。"""
+    _ensure_not_builtin(character_id)
     data = _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
@@ -128,6 +116,7 @@ async def update_storyline_config(
     _owned: dict = Depends(require_character_access),
 ):
     """更新角色剧情线配置（落盘 + 同步引擎；是否影响对话见 `CHAT_AFFECTING`）。"""
+    _ensure_not_builtin(character_id)
     data = _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
@@ -206,6 +195,7 @@ async def delete_storyline_config(
     _owned: dict = Depends(require_character_access),
 ):
     """删除角色剧情线配置。"""
+    _ensure_not_builtin(character_id)
     data = _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
@@ -244,6 +234,7 @@ async def detect_storyline(
     _owned: dict = Depends(require_character_access),
 ):
     """自动检测角色人设是否适合开启剧情线。"""
+    _ensure_not_builtin(character_id)
     data = _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
