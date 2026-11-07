@@ -584,7 +584,7 @@ def render_topic_state_block(
         )
     except Exception:  # noqa: BLE001
         window = int(fresh_minutes or 120)
-    wall_now = now or datetime.now()
+    wall_now = _normalize_now(now)
     still_active: list[dict[str, Any]] = []
     stale_active: list[dict[str, Any]] = []
     for topic in active:

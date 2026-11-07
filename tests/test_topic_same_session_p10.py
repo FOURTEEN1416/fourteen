@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, ".")
 
+from utils.local_time import now_local
 from utils.prompt_sanitize import _extract_user_anchor_sentences
 from utils.topic_state import render_topic_state_block
 
@@ -40,7 +41,7 @@ def test_old_topic_outside_same_session_window_is_dropped() -> None:
     ]
 
     anchors = _extract_user_anchor_sentences(
-        history, current_user_message="", max_age_hours=2.0, now=datetime.now()
+        history, current_user_message="", max_age_hours=2.0, now=now_local()
     )
 
     joined = "|".join(anchors)
@@ -54,7 +55,7 @@ def test_topic_within_window_is_kept() -> None:
     ]
 
     anchors = _extract_user_anchor_sentences(
-        history, current_user_message="", max_age_hours=2.0, now=datetime.now()
+        history, current_user_message="", max_age_hours=2.0, now=now_local()
     )
 
     assert any("假链接" in a for a in anchors)
@@ -70,7 +71,7 @@ def test_duplicate_topic_keeps_latest_wording() -> None:
     ]
 
     anchors = _extract_user_anchor_sentences(
-        history, current_user_message="", max_age_hours=2.0, now=datetime.now(), limit=2
+        history, current_user_message="", max_age_hours=2.0, now=now_local(), limit=2
     )
 
     # 归一化 + 包含判定去重后只留一条，且是**最新**的那句
@@ -86,7 +87,7 @@ def test_limit_caps_to_latest_items() -> None:
     ]
 
     anchors = _extract_user_anchor_sentences(
-        history, current_user_message="", max_age_hours=2.0, now=datetime.now(), limit=2
+        history, current_user_message="", max_age_hours=2.0, now=now_local(), limit=2
     )
 
     assert len(anchors) == 2
