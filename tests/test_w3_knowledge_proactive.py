@@ -135,6 +135,22 @@ def sched():
     return s
 
 
+def _seed_nonquiet_snapshot(character_id: str) -> None:
+    """v1.65 快照语义补丁（2026-11-07）：把受测对的快照静默键种成夹具的避开窗。
+
+    静默判定读「用户×角色」全量快照（默认 23-7），23:00-06:59 跑测试时
+    快照窗压过夹具全局窗 → 不测静默的决策链用例整族闪红。
+    """
+    from proactive.ase_engine import _local_now
+    from utils import character_settings
+
+    h = _local_now().hour
+    character_settings.write(
+        "4:peer@im.wechat", character_id,
+        {"quiet_hours_start": (h + 3) % 24, "quiet_hours_end": (h + 5) % 24},
+    )
+
+
 def _stub_decision_deps(monkeypatch, events: list):
     import shisi.agent_plane.runtime as rt
 
@@ -149,6 +165,7 @@ def test_decision_chain_injects_knowledge_of_current_character(sched, hub_tmp, m
     """🔴 缺陷 H 主断言：决策 prompt 必须带上当轮角色的知识/热点。"""
     _stub_decision_deps(monkeypatch, [])
     sched._resolve_proactive_llm = lambda eng=None: object()
+    _seed_nonquiet_snapshot("liu-shisan")
 
     reads: list = []
 
@@ -192,6 +209,7 @@ def test_decision_chain_omits_section_when_no_knowledge(sched, hub_tmp, monkeypa
     )
     hub_tmp.get("4:peer@im.wechat")
     monkeypatch.setattr(sched, "_resolve_character_id", lambda sk: "micai")
+    _seed_nonquiet_snapshot("micai")
     sched._llm_proactive_one_user(hub_tmp, "4:peer@im.wechat")
     assert ctxs
     assert "知识库" not in ctxs[0], "空知识时不得留下孤零零的段落标题"

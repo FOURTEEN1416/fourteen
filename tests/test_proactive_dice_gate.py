@@ -655,6 +655,15 @@ def _no_quiet(sched) -> None:
 
     h = now_local().hour
     sched._quiet_hours = ((h + 1) % 24, (h + 2) % 24)
+    # v1.65 快照语义补丁（2026-11-07）：per-user 判定读「用户×角色」快照
+    # （默认 23-7），23:00-06:59 运行时快照窗压过这里设的全局窗。受测键
+    # 角色解析回落 "default"，把其快照静默键种成同一避开窗。
+    from utils import character_settings
+
+    character_settings.write(
+        "4:peer@im.wechat", "default",
+        {"quiet_hours_start": (h + 1) % 24, "quiet_hours_end": (h + 2) % 24},
+    )
 
 
 def test_scheduler_source_order_decide_gate_then_tick():

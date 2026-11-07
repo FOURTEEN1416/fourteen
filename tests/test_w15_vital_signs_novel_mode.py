@@ -273,6 +273,18 @@ def _run_scheduler_beat(tmp_path, monkeypatch, *, key=SESSION):
     fake = _FakeEngine()
     sched = ProactiveScheduler(ase_engine=_FakeHub(fake))
     monkeypatch.setattr(sched, "_is_quiet_hours", lambda: False)
+    # v1.65 快照语义补丁（2026-11-07）：全局静默替身只挡 `_is_quiet_hours`，
+    # per-user 判定读用户×角色快照（默认 23-7）——23 点后整族闪红。把受测键
+    # 可能解析到的两个角色 id 的快照静默键都种成避开窗。
+    from proactive.ase_engine import _local_now as _w15_now
+    from utils import character_settings
+
+    _h = _w15_now().hour
+    for _cid in ("default", CID):
+        character_settings.write(
+            key, _cid,
+            {"quiet_hours_start": (_h + 3) % 24, "quiet_hours_end": (_h + 5) % 24},
+        )
     sched._llm_proactive_one_user(_FakeHub(fake), key)
     return db, vital, fake
 

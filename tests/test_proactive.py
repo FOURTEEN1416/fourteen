@@ -973,6 +973,18 @@ def _hub_sched(monkeypatch, tmp_path):
     monkeypatch.setattr(rt, "project_profile_for", lambda uk: {})
     monkeypatch.setattr(rt, "get_profile_prompt_block", lambda uk: "")
     monkeypatch.setattr(rt, "append_proactive_event", lambda **kw: None)
+    # v1.65 快照语义补丁（2026-11-07）：静默判定读「用户×角色」快照（默认
+    # 23-7），23:00-06:59 运行时快照窗压过用例只保护的全局窗 → 闪红。受测键
+    # 角色解析回落 "default"，把其快照静默键种成避开窗；需「命中」的用例已
+    # 自行 stub `_is_quiet_hours_for`，不受影响。
+    from proactive.ase_engine import _local_now as _hub_now
+    from utils import character_settings
+
+    _h0 = _hub_now().hour
+    character_settings.write(
+        key, "default",
+        {"quiet_hours_start": (_h0 + 2) % 24, "quiet_hours_end": (_h0 + 3) % 24},
+    )
     return sched, hub, key
 
 

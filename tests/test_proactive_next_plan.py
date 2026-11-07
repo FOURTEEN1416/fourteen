@@ -118,6 +118,9 @@ def _make_sched(monkeypatch, *, now: datetime = FIXED, decision: dict | None = N
     sched._vital_tick_for_user = lambda *a, **k: None
     sched._paused = False
     sched._is_quiet_hours = lambda: False
+    # v1.65 快照语义（2026-11-07）：per-user 静默判定读「用户×角色」快照
+    # （默认 23-7），23:00-06:59 运行会拦在不测静默的本用例前置——一并替身化。
+    sched._is_quiet_hours_for = lambda cfg: False
     sched._primary_model_ok = lambda: True
     sched.get_quiet_hours = lambda: None
     sched._resolve_character_id = lambda sk: CHAR

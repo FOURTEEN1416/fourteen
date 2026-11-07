@@ -1316,6 +1316,17 @@ def scope_sched(monkeypatch, tmp_path):
     _hour = _now_local().hour
     sched._quiet_hours = ((_hour + 2) % 24, (_hour + 3) % 24)
     keys = ["4:peer_a", "5:peer_b"]
+    # 2026-11-07 v1.65 快照语义补丁：静默判定读「用户×角色」全量快照
+    # （默认 23-7，overridden_keys=全键），23:00-06:59 跑测试时快照窗会压过
+    # 上面的夹具全局窗 → 不测静默的用例整族闪红。把受测对的快照静默键
+    # 种成夹具窗口（与生产语义一致：快照即用户配置）；测静默的用例自行再种。
+    from utils import character_settings as _cs_scope
+
+    for _k in keys:
+        _cs_scope.write(
+            _k, "card-1",
+            {"quiet_hours_start": (_hour + 2) % 24, "quiet_hours_end": (_hour + 3) % 24},
+        )
     sched.reload_config = lambda: None
     sched._collect_ase_user_keys = lambda: list(keys)
     sched._resolve_proactive_llm = lambda eng=None: object()
@@ -1691,6 +1702,20 @@ def test_other_worker_engine_converges_to_persisted_global(scope_sched):
     _seed_global_config({
         "proactive_runtime": {"threshold": 6.25, "max_daily_messages": 5},
     })
+    # 2026-11-07 补：夹具的静默种子会提前物化快照（threshold 冻结在当时的
+    # 全局 2.0），而快照是用户自己的真源、不再跟随全局——先重置，让下一拍
+    # 的 effective() 按「当前全局 6.25」重新物化，再补种静默避开窗
+    # （23-7 时段防止前置闸拦在对齐步之前）。
+    from proactive.ase_engine import _local_now as _conv_now
+    from utils import character_settings as _cs_conv
+
+    _h = _conv_now().hour
+    for _k in keys:
+        _cs_conv.reset(_k, "card-1")
+        _cs_conv.write(
+            _k, "card-1",
+            {"quiet_hours_start": (_h + 2) % 24, "quiet_hours_end": (_h + 3) % 24},
+        )
 
     _tick(sched)
 

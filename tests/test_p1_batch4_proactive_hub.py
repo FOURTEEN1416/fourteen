@@ -220,6 +220,16 @@ def _nonquiet(s: ProactiveScheduler) -> None:
 
     h = _local_now().hour
     s._quiet_hours = ((h + 3) % 24, (h + 5) % 24)
+    # 2026-11-07 v1.65 快照语义补丁：静默判定读「用户×角色」快照（默认 23-7），
+    # 23:00-06:59 跑测试时快照窗压过夹具全局窗 → 不测静默的用例整族闪红。
+    # 把受测键的快照静默键种成夹具窗口；需要「静默命中」的用例自行再种。
+    from utils import character_settings
+
+    for cid in ("default", "current-character"):
+        character_settings.write(
+            "4:peer@im.wechat", cid,
+            {"quiet_hours_start": (h + 3) % 24, "quiet_hours_end": (h + 5) % 24},
+        )
 
 
 @pytest.fixture()
@@ -338,6 +348,15 @@ def test_llm_proactive_quiet_pre_gate_skips_llm(sched, hub_tmp, monkeypatch):
     monkeypatch.setattr(lp, "decide_proactive", lambda *a, **k: called.append(1) or {})
     h = _local_now().hour
     sched._quiet_hours = (h, (h + 1) % 24)  # 当前小时在静默窗内
+    # v1.65 快照语义：静默命中读用户快照窗（夹具 _nonquiet 已种成避开窗），
+    # 这里把受测键的快照静默键改种成「当前小时在窗内」才走得到前置闸。
+    from utils import character_settings
+
+    for cid in ("default", "current-character"):
+        character_settings.write(
+            "4:peer@im.wechat", cid,
+            {"quiet_hours_start": h, "quiet_hours_end": (h + 1) % 24},
+        )
     sched._llm_proactive_one_user(hub_tmp, "4:peer@im.wechat")
     assert called == [], "P1-49：静默时段不得先烧 LLM 再在投递层丢弃"
 

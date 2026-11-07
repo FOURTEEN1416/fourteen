@@ -86,6 +86,16 @@ def test_llm_wait_window_survives_restart(sched_sandbox, monkeypatch):
     sched_sandbox._resolve_proactive_llm = lambda eng=None: object()
     sched_sandbox._resolve_character_id = lambda sk: "micai"
     key = "7:wx_b@im.wechat"
+    # v1.65 快照语义（2026-11-07 补）：静默判定读用户×角色快照（默认 23-7），
+    # 23 点后会把不测静默的本用例拦在前置闸——把快照静默键种成夹具的避开窗。
+    # reborn（重启实例）不做角色 stub，真实解析回落 "default"，一并种上。
+    from utils import character_settings
+
+    _qw = _quiet_window_excluding_now()
+    for _cid in ("micai", "default"):
+        character_settings.write(
+            key, _cid, {"quiet_hours_start": _qw[0], "quiet_hours_end": _qw[1]},
+        )
     sched_sandbox._llm_proactive_one_user(_Hub(), key)
 
     assert sched_sandbox._llm_proactive_next_ok[key] > time.time() + 40 * 60

@@ -164,6 +164,9 @@ def test_proactive_uses_current_identity_and_history_then_cancels_stale_draft(mo
     decisions = []
     events = []
     monkeypatch.setattr(s, "_is_quiet_hours", lambda: False)
+    # v1.65 快照语义（2026-11-07）：per-user 静默判定读「用户×角色」快照
+    # （默认 23-7），23:00-06:59 运行会拦在不测静默的本用例前置——一并替身化。
+    monkeypatch.setattr(s, "_is_quiet_hours_for", lambda cfg: False)
     monkeypatch.setattr(s, "_resolve_character_id", lambda sk: current[0])
     monkeypatch.setattr(s, "_resolve_proactive_llm", lambda eng=None: object())
     # 2026-10-15 统一真源批：scheduler 人设主路改走 proactive_context

@@ -144,6 +144,9 @@ def test_llm_proactive_persona_falls_back_to_character_resolver(monkeypatch):
     s = _bare_scheduler()
     monkeypatch.setattr(lp_mod, "read_web_proactive_config", lambda: {"enabled": True})
     monkeypatch.setattr(s, "_is_quiet_hours", lambda: False)
+    # v1.65 快照语义（2026-11-07）：per-user 静默判定读快照（默认 23-7），
+    # 23:00-06:59 运行会拦在不测静默的本用例前置——一并替身化。
+    monkeypatch.setattr(s, "_is_quiet_hours_for", lambda cfg: False)
     delivered: list[tuple[str, str | None]] = []
     monkeypatch.setattr(
         s, "_deliver",
