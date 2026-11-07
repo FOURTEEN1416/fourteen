@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import RolesPage from '../../pages/RolesPage'
 import { queryKeys } from '../../hooks/useQueries'
-import { activateCharacter } from '../../api/characters'
+import { activateCharacter, deactivateCharacter } from '../../api/characters'
 import type { UnifiedCharacter } from '../../types/api'
 
 vi.mock('../../api/characters', async (importOriginal) => {
@@ -13,6 +13,7 @@ vi.mock('../../api/characters', async (importOriginal) => {
   return {
     ...actual,
     activateCharacter: vi.fn(async () => ({ status: 'activated' })),
+    deactivateCharacter: vi.fn(async () => ({ status: 'reset', character_id: 'default' })),
   }
 })
 
@@ -161,5 +162,54 @@ describe('RolesPage 加载态与空态收编', () => {
     // ④ 标题走 EmptyState 的 title 槽位样式（旧是裸 <p className="text-sm">）
     expect(screen.getByText('暂无角色').className).toContain('font-medium')
     expect(screen.getByText('暂无角色').className).not.toContain('text-sm text-gray-500')
+  })
+})
+
+// ── 2026-11-07：误选角色后可恢复默认人设（内置十四不在卡库，必须固定列出）──
+describe('RolesPage 恢复默认人设', () => {
+  const renderPage = (qc = new QueryClient()) =>
+    render(
+      <Shell qc={qc}>
+        <MemoryRouter>
+          <RolesPage />
+        </MemoryRouter>
+      </Shell>,
+    )
+
+  it('无激活角色时默认人设卡显示「当前使用中」，不出现恢复按钮', () => {
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: {
+        characters: [
+          { id: 'a', name: 'A', description: '', is_active: false, core_anchors: [] },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    renderPage()
+    const card = screen.getByTestId('default-persona-card')
+    expect(card.textContent).toContain('当前使用中')
+    expect(screen.queryByRole('button', { name: '恢复默认' })).toBeNull()
+  })
+
+  it('有激活角色时点「恢复默认」→ 调端点并失效角色查询', async () => {
+    const qc = new QueryClient()
+    const invalidateSpy = vi.spyOn(qc, 'invalidateQueries')
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: { characters: CARDS },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    })
+    renderPage(qc)
+
+    fireEvent.click(await screen.findByRole('button', { name: '恢复默认' }))
+    await waitFor(() => expect(deactivateCharacter).toHaveBeenCalledTimes(1))
+
+    const calledKeys = invalidateSpy.mock.calls
+      .map(c => (c[0] as { queryKey?: readonly unknown[] }).queryKey)
+      .filter(Boolean)
+    expect(calledKeys).toContainEqual(queryKeys.characters.all)
   })
 })

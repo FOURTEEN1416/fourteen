@@ -111,6 +111,16 @@ export function activateCharacter(id: string): Promise<{ status: string; charact
   return client.post(`/characters/${id}/activate`).then(r => r.data as { status: string; character_id: string })
 }
 
+/**
+ * POST /api/characters/deactivate — 恢复默认人设（内置十四）
+ *
+ * 激活是单向的，且内置十四不在角色卡库里（列表列不出它）。误选角色后
+ * 这是唯一的 UI 回退路径：清个人激活行 + 复位微信绑定 + 热切运行缓存。
+ */
+export function deactivateCharacter(): Promise<{ status: string; character_id: string }> {
+  return client.post('/characters/deactivate').then(r => r.data as { status: string; character_id: string })
+}
+
 // ════════════════════════════════════════════════════
 //  人设 (Persona)
 // ════════════════════════════════════════════════════

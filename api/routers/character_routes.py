@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Security, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.auth import verify_api_key_dep
@@ -35,6 +35,7 @@ from utils.character_helpers import (
     sanitize_character_name,
     sanitize_honesty_boundary,
 )
+from utils.character_resolver import BUILTIN_CHARACTER_ID
 from utils.project_paths import project_path
 
 PRESETS_DIR = project_path("data", "presets")
@@ -914,6 +915,84 @@ async def activate_character(
             )
 
     return {"status": "activated", "character_id": character_id}
+
+
+@router.post("/characters/deactivate")
+async def deactivate_character(
+    _auth: bool = Security(verify_api_key_dep),
+    principal: AuthPrincipal | None = Security(get_optional_principal),
+    db: AsyncSession = Depends(get_db),
+):
+    """恢复默认人设（内置十四 `default`）——把「误选了角色」退回「什么都没选」。
+
+    **为什么需要**：激活是单向的（只有 `/activate`），而内置十四不在
+    `config/characters/` 卡库里，角色列表根本列不出它 —— 用户一旦点了
+    「设为活跃」，UI 上再无任何路径回到默认人设（2026-11-07 用户报障）。
+
+    个人面（有 Bearer）复位三处，缺一不可：
+      1. `user_active_characters`：删除该用户的行（列表回到「无激活」）；
+      2. `wechat_bindings.character_card_id`：该用户全部绑定置 `default`
+         （微信回复人设的真源，`UserScheduler._resolve_character_id` 读它）；
+      3. 运行中缓存：`upsert_binding` 刷新 `_bindings` 与活实例，
+         并对扫码人会话键 `{uid}:{wxid}` 热切（避免重启前仍按旧卡开口）。
+
+    机器面（无 Bearer，部署脚本 / E2E）：没有个人表可清，复位卡片级系统默认
+    `is_active`（与旧 `/activate` 机器分支对称）。
+    """
+    if principal is not None:
+        user_id = int(principal.user_id)
+        # 先取该用户全部 wxid：内存缓存要逐个刷，不能只依赖扫码人清单
+        rows = await db.execute(
+            select(WechatBinding.wxid).where(WechatBinding.user_id == user_id)
+        )
+        wxids = [str(r[0]) for r in rows.all() if r[0]]
+
+        await db.execute(
+            delete(UserActiveCharacter).where(UserActiveCharacter.user_id == user_id)
+        )
+        if wxids:
+            await db.execute(
+                update(WechatBinding)
+                .where(WechatBinding.user_id == user_id)
+                .values(character_card_id=BUILTIN_CHARACTER_ID)
+            )
+        await db.commit()
+
+        gf = deps.gf
+        if gf is not None:
+            # 用户键实例（数字字符串）与微信绑定缓存/实例
+            with contextlib.suppress(Exception):
+                gf.set_user_character(str(user_id), BUILTIN_CHARACTER_ID)
+            if hasattr(gf, "upsert_binding"):
+                for wxid in wxids:
+                    with contextlib.suppress(Exception):
+                        await gf.upsert_binding(
+                            wxid,
+                            {"wxid": wxid, "character_card_id": BUILTIN_CHARACTER_ID},
+                        )
+                    # 会话键实例（谁扫码谁聊的 {uid}:{wxid}）不在 upsert_binding 覆盖面内
+                    with contextlib.suppress(Exception):
+                        gf.set_user_character(f"{user_id}:{wxid}", BUILTIN_CHARACTER_ID)
+
+        logger.info(
+            "用户 %s 恢复默认人设（内置 %s）；复位绑定 %d 条",
+            user_id, BUILTIN_CHARACTER_ID, len(wxids),
+        )
+        return {"status": "reset", "character_id": BUILTIN_CHARACTER_ID}
+
+    # 机器面：清空卡片级系统默认标记（normalize=False 防有损回写，同 activate 教训）
+    reset_ids: list[str] = []
+    for card in _list_all_characters(normalize=False):
+        if card.get("is_active"):
+            card["is_active"] = False
+            if _save_character(card["id"], card):
+                reset_ids.append(str(card.get("id")))
+    logger.info("机器面恢复默认人设：已清除 %d 张卡的全局 is_active", len(reset_ids))
+    return {
+        "status": "reset",
+        "character_id": BUILTIN_CHARACTER_ID,
+        "reset_cards": reset_ids,
+    }
 
 
 @router.get("/characters/{character_id}/persona")

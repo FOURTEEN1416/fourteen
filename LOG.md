@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-11-07 — 恢复默认人设根治（用户报障「用户误操作选了人设，如何恢复为默认人设？」）· 激活单向缺陷 → deactivate 端点 + 角色页固定入口 + 聊天链 default 语义收口
+
+- **定位**：`api/routers/character_routes.py::activate_character`（`:778`）只有激活、没有反向；`frontend/src/pages/RolesPage.tsx` 只有「设为活跃」按钮；`config/characters/` 41 张卡里不存在内置十四（`config/persona.yaml:1 name: "十四"`，id=`default`，`utils/character_resolver.py:34` 为唯一 id 真源），因此角色列表 UI 永远列不出它。
+- **根因（四处叠加，缺一不可）**：① 激活是单向写——`user_active_characters`（个人选择）+ `wechat_bindings.character_card_id`（微信回复人设真源）+ 运行中实例缓存三处同时改，无任何复原路径；② 内置十四不是卡文件，列表 `list_characters` 只遍历 `config/characters/`，故「什么都没选」的状态在 UI 上不可见、不可选；③ 前端 `useActiveCharacter` 无激活时返回 null（NEW-8 明确禁止静默回退），微信页显示「尚未选择」，但实际聊天已回落内置十四——展示与行为不一致；④ `chat_routes._resolve_character_id` 把显式 `"default"` 当「未指定」，回落到卡片级全局 `is_active`（本地实测为 `0f2cbe83 孙颖莎`）——即使用户在 WS/HTTP 明确要内置十四，也会被别的卡顶替。
+- **改动**：
+  - **后端** `POST /api/characters/deactivate`（`character_routes.py`）：个人面三处一起复位——删除 `user_active_characters` 行、该用户全部 `wechat_bindings` 置 `default`、`deps.gf` 热切（用户键 + 全部绑定 wxid + 扫码人会话键 `{uid}:{wxid}`）；机器面（无 Bearer）清卡片级 `is_active`（`normalize=False` 防有损回写，沿用 activate 的 P1-37 教训）。幂等、按 principal 隔离。
+  - **后端** `chat_routes._resolve_character_id`：真人面显式 `default` 直接返回内置十四，不再回落全局 `is_active`；空串与机器面保留旧契约（兼容部署脚本/E2E）。
+  - **前端** `api/characters.ts::deactivateCharacter` + `RolesPage` 新增固定「默认人设（内置）」卡（不参与搜索/排序）：无激活显示「当前使用中」，有激活显示「恢复默认」；成功后 invalidate 账号维度角色查询并 toast。
+  - **测试**：新增 `tests/test_character_deactivate.py`（5 例：三处复位 / 多用户隔离 / 幂等 / 机器面全局复位 / 聊天链显式 default 语义）；`RolesPage.test.tsx` +2 例（无激活态、点击恢复并 invalidate）。
+- **验证**：`tests/test_character_deactivate.py` **5 passed**；受影响面回归 `test_api_routes` + `test_w1_identity_authorization` + `test_block_e_hardening` + `test_attribution_closure_batch_c` **95 passed**；聊天链路 `test_attribution_context_contract` + `test_connection_lifecycle` + `test_sweep_chat_chain` + `test_chat_history_user_scope` **79 passed**；前端 `RolesPage.test.tsx` **6/6**；`tsc --noEmit` 0 错；ruff 改动文件 0 错。端点内省 **253/207 → 254/208**（+1 = `/api/characters/deactivate`）。
+- **未部署**：A 档代码改动本地完成；推送与三端部署随用户裁决。
+
 ## 2026-10-30 — 供应商管理文案清理（用户报障「描述太复杂太杂乱，疑似调试过程泄露」）· 纯文案零逻辑
 
 - **定位**：`config/llm_providers.json` 的 `providers.*.description`——管理页 `AdminProvidersPage.tsx:307` 全文展示、用户端 `SettingsLLM.tsx:313` 单行截断；教程 tips 同源展示于 `ProviderGuideModal`。

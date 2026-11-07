@@ -37,6 +37,7 @@ from api.database import User, get_db
 from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
 from api.session_manager import resolve_owned_session
+from utils.character_resolver import BUILTIN_CHARACTER_ID
 from utils.local_time import now_local
 
 logger = logging.getLogger("api.routers.chat_routes")
@@ -71,9 +72,15 @@ async def _resolve_character_id(character_id: str, principal: AuthPrincipal | No
     - 私人卡只允许本人与管理员；失败与 require_character_access 同文案 404
       （不区分「不存在」与「无权限」，防枚举他人卡 id）。
     """
-    if character_id and character_id != "default":
+    if character_id and character_id != BUILTIN_CHARACTER_ID:
         _assert_character_visible(character_id, principal)
         return character_id
+    if character_id == BUILTIN_CHARACTER_ID and principal is not None:
+        # 真人面：显式 default = 内置十四。不得回落到卡片级全局 is_active——
+        # 旧实现把 "default" 当「未指定」，恢复默认人设后 WS/HTTP 仍会拿到
+        # 别的卡（与 `_personal_active_character_id` 的个人激活语义分裂）。
+        return BUILTIN_CHARACTER_ID
+    # 未指定（空串）或机器面：回落卡片级系统默认（兼容既有部署脚本/E2E 契约）。
     # P1-10：目录扫描是磁盘 IO（现已带指纹缓存，见 character_routes），
     # 仍不在事件循环上直接跑。
     from api.routers.character_routes import get_active_character_id

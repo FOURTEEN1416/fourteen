@@ -1,9 +1,9 @@
 import { useNavigate, Link } from 'react-router-dom'
 import { useMemo, useState } from 'react'
-import { Plus, Search, Sparkles, AlertTriangle, Gift, X } from 'lucide-react'
+import { Plus, Search, Sparkles, AlertTriangle, Gift, X, UserRound } from 'lucide-react'
 import { AnimatedPage, Skeleton, EmptyState } from '../components/shared'
 import { useUnifiedCharacters, queryKeys } from '../hooks/useQueries'
-import { activateCharacter } from '../api/characters'
+import { activateCharacter, deactivateCharacter } from '../api/characters'
 import { useQueryClient } from '@tanstack/react-query'
 import { anchorTone, deriveCardSummary, sanitizeCharacterName } from '../utils/character'
 import { useErrorStore } from '../store/errorStore'
@@ -29,6 +29,55 @@ function useInitialCharacterNotice(hasActive: boolean) {
     }
   }
   return { show: visible && hasActive, dismiss }
+}
+
+/**
+ * 内置默认人设（十四）的固定入口 —— 2026-11-07「误选角色无法回退」根治。
+ *
+ * 内置十四不是 `config/characters/` 里的卡，旧角色列表永远列不出它；
+ * 而激活是单向的，用户一旦点了「设为活跃」，UI 上再无回到「什么都没选」的路径。
+ * 这张卡不参与搜索/排序，始终固定在列表上方。
+ */
+function DefaultPersonaCard({
+  active,
+  onReset,
+  resetting,
+}: {
+  active: boolean
+  onReset: () => void
+  resetting: boolean
+}) {
+  return (
+    <div
+      data-testid="default-persona-card"
+      className={`glass-card mb-4 rounded-2xl p-4 flex items-center gap-3 ${
+        active ? 'border-2 border-macaron-blue/40' : ''
+      }`}
+    >
+      <div className="shrink-0 rounded-full bg-macaron-blue-light/40 p-2 text-macaron-blue-deep">
+        <UserRound className="h-5 w-5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold text-gray-800">默认人设（内置）</div>
+        <div className="mt-0.5 text-xs text-gray-500">
+          {active ? '当前使用中：没有选择任何角色卡' : '不选择任何角色卡时使用的人设'}
+        </div>
+      </div>
+      {active ? (
+        <span className="shrink-0 rounded-full bg-macaron-blue px-2.5 py-1 text-[10px] text-text-primary">
+          当前活跃
+        </span>
+      ) : (
+        <button
+          onClick={onReset}
+          disabled={resetting}
+          className="shrink-0 rounded-lg border border-macaron-blue/40 px-3 py-1.5 text-xs text-macaron-blue-deep hover:bg-macaron-blue-light/30 transition-colors disabled:opacity-50"
+        >
+          {resetting ? '恢复中…' : '恢复默认'}
+        </button>
+      )}
+    </div>
+  )
 }
 
 function RoleCard({
@@ -117,6 +166,7 @@ export default function RolesPage() {
   const hasActive = characters.some(c => c.is_active)
   const initialNotice = useInitialCharacterNotice(hasActive)
   const [activatingId, setActivatingId] = useState<string | null>(null)
+  const [resetting, setResetting] = useState(false)
   const [keyword, setKeyword] = useState('')
 
   const visible = useMemo(() => {
@@ -152,6 +202,26 @@ export default function RolesPage() {
     }
   }
 
+  /** 恢复默认人设：清个人激活 + 复位微信绑定 + 热切运行缓存（后端三处一起做） */
+  const handleReset = async () => {
+    setResetting(true)
+    try {
+      const res = await deactivateCharacter()
+      // 契约 {"status":"reset"}；非 reset 视为失败，不静默吞掉
+      if (res?.status !== 'reset') {
+        useErrorStore.getState().addToast({ type: 'warning', message: '恢复默认人设未生效（后端未确认），请重试' })
+        return
+      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.characters.all })
+      useErrorStore.getState().addToast({ type: 'success', message: '已恢复默认人设' })
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : '恢复默认人设失败，请重试'
+      useErrorStore.getState().addToast({ type: 'error', message })
+    } finally {
+      setResetting(false)
+    }
+  }
+
   return (
     <AnimatedPage>
       <div className="px-4 py-6 sm:px-6 lg:px-8">
@@ -179,6 +249,11 @@ export default function RolesPage() {
                 <X className="h-4 w-4" />
               </button>
             </div>
+          )}
+
+          {/* 2026-11-07：内置默认人设固定入口——角色卡库不含它，不列出来就无路可退 */}
+          {!isLoading && !isError && (
+            <DefaultPersonaCard active={!hasActive} onReset={handleReset} resetting={resetting} />
           )}
 
           {isLoading ? (

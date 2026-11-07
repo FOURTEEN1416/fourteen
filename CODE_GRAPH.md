@@ -1,6 +1,6 @@
 # 代码图谱 — unique-you (唯一的你) **v3.8.37**（2026-10-31 表述分离 + 用户主权 per-user 化批口径）
 
-> **v3.8.37（2026-10-31 表述分离 + 用户主权 per-user 化批 · 8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 已三端部署 @ 43aeaae）**：`psych`（五端点 admin 全量 / 普通用户仅本人会话 scope）/ `proactive-backend`（新增 `utils/proactive_config.py` 879 行三级合并 + `user_proactive_config` 覆盖表 + 4 个 `/api/user/proactive*` 端点）/ `proactive-frontend`（消息 tab 对全体用户开放，个人覆盖/继承全局徽章）/ `wechat`（遗留全局端点保持 admin + 新增 `wechat_direct/media_upload.py` 出站 CDN 上传）/ `clone`（数据集 `data/clone/<user_id>/` per-user 分区）/ `voice`（音色 owner 单一规则 + 角色音色写门 `require_character_write`；全局 switch-voice/set-engine 保持 admin）/ `topic`（快照读面本人会话白名单）/ `docs-naming`（训练→风格提取）。端点 249/205 → **253/207**（+4 全部为 user/proactive）；新增 §4.17。测试口径（本批 `python scripts/regression_gate.py` 实跑）：后端四分块 **4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（3 个存量失败族由 conftest users 主库隔离根治）+ ruff 0；前端 vitest **354/354（47 文件）** + tsc 0。角色卡 **41 张**（不变）。读数见 §1.1。
+> **v3.8.38（2026-11-07 恢复默认人设根治批 · 本地完成未部署）**：新增 `POST /api/characters/deactivate`——个人面三处复位（删 `user_active_characters` 行 / 该用户全部 `wechat_bindings` 置 `default` / `deps.gf` 热切）+ 机器面清卡片级 `is_active`；`chat_routes._resolve_character_id` 真人面显式 `default` 直返内置十四（旧实现回落到卡片级全局 `is_active`）；前端角色页固定「默认人设（内置）」卡 + `deactivateCharacter()`。端点 253/207 → **254/208**（+1）；方法分布 **119/92/18/24 → 119/93/18/24**；`character` tag 21→**22**。测试：新增 `tests/test_character_deactivate.py` 5 例 + RolesPage 2 例；受影响面回归 **95 + 79 passed**，前端 **6/6**、tsc 0、ruff 0；⚠️ 全量基线未重跑（沿用 4500 收集）。读数见 §1.1。
 > **结构真源 = AOCI**（`aoci.txt` 卷头 → `aoci.code.txt` 实体条目 **1116 行** → `aoci.meta.txt` 词表）；本文件只保留人读的规模读数、分层骨架与维护指针。**历史版本（v3.8.36 批 7 收尾 / v3.8.35 话题状态机/拟人化部署批 / v3.8.34 八项裁决批 / v3.8.33 重建批 / v1.55·v1.54 质量批）要点压缩归档至 `LOG.md` 对应条目，本文件不再逐条保留**。
 > 批次详情、生产取证与历史版本见 `LOG.md`（唯一只追加不覆盖文件）。
 
@@ -16,7 +16,7 @@
 | 维度 | 数值 | 核实方法 |
 |------|------|---------|
 | 仓库 HEAD | **本批工作树基于 HEAD `ccfa197`**；`origin/main` = `cdbe546`，本地领先 **22 提交**；本批 8 域实现 + 文档**全部未提交**（`git status --porcelain` = **47 项：37 修改 + 10 新文件**）；**未部署** | `git log -1 --oneline` + `git rev-list --count origin/main..HEAD` + `git status --porcelain \| wc -l`（本批实跑） |
-| API 业务端点 | **253 `APIRoute` / 207 条唯一路径**；`len(app.routes)` = **257**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） | `create_api_app()` 内省（本批实跑，`AI_GF_ENV=dev`）：`len([r for r in app.routes if isinstance(r, APIRoute)])` = **253**；唯一路径 **207**。较 v3.8.36 的 249/205 **+4**——全部为 `/api/user/proactive-config` GET/POST/DELETE + `/api/user/proactive/pause` POST（D20 用户自助主动调度） |
+| API 业务端点 | **254 `APIRoute` / 208 条唯一路径**；`len(app.routes)` = **258**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） | `create_api_app()` 内省（本批实跑，`AI_GF_ENV=dev`）：`len([r for r in app.routes if isinstance(r, APIRoute)])` = **254**；唯一路径 **208**。较 v3.8.37 的 253/207 **+1**——`/api/characters/deactivate` POST（恢复默认人设） |
 | 方法分布 | **119 GET / 92 POST / 18 PUT / 24 DELETE** | 同上，按 `route.methods` 计数（本批实跑） |
 | 路由挂载 | 字面 **22 处 `app.include_router(`**（其中 1 处在 `_mount_required_router` 辅助函数内 `:361`）+ **9 处 `_mount_required_router(...)` 调用** → 运行期路由挂载点 **30 处**；另加 `setup_shisi` 一处（`api/app_factory.py:297-302`） | `grep -c "app\.include_router(" api/app_factory.py` = 22；`grep -c "_mount_required_router("` = 10（含 def，本批实跑）。公告双挂载 `announcement_router`/`announcement_admin_router` @ `:276-277`；`topic_state_router` @ `:273` |
 | 域路由模块 | **26 个**（`api/routers/*.py` 不含 `__init__.py`；26 个全部带路由；+`announcement_routes.py` 一双 router 文件） | `ls api/routers/*.py \| grep -v __init__ \| wc -l`（本批实跑） |
@@ -120,43 +120,43 @@
 
 > **架构演进（历史归档）**：`_run_fast_mode` + `_run_full_mode` 于 2026-07-28 合并为 `_run_orchestrator`，`console_chat` 已自 main.py 迁出——详见 `LOG.md` 2026-07-28 / 2026-08-28 条。
 
-### 4.2 API 层（**253 业务端点 / 207 唯一路径** — 2026-10-31 本批内省实扫）
+### 4.2 API 层（**254 业务端点 / 208 唯一路径** — 2026-11-07 本批内省实扫）
 
 | 来源 | 路径 | 端点数 | 文件数 | 说明 |
 |------|------|--------|------|------|
-| `api/routers/` | **26 个域路由模块**（不含 `__init__.py`；26 个全部带路由） | **218** | 27（含 `__init__.py`） | character / auth / admin / invite / voice / mimo_voice / storyline / wechat / wechat_channel / emotion / memory / knowledge / persona_card / chat / clone / misc / personality / safety / tools / training / users / llm_providers / agent_plane / character_template / topic / **announcement（批 4 新增，一双 router 文件）**；本批 training +4（`/api/user/proactive*`） |
+| `api/routers/` | **26 个域路由模块**（不含 `__init__.py`；26 个全部带路由） | **219** | 27（含 `__init__.py`） | character / auth / admin / invite / voice / mimo_voice / storyline / wechat / wechat_channel / emotion / memory / knowledge / persona_card / chat / clone / misc / personality / safety / tools / training / users / llm_providers / agent_plane / character_template / topic / **announcement（批 4 新增，一双 router 文件）**；本批 character +1（`POST /api/characters/deactivate`） |
 | `api/`（非 routers） | `health_routes.py` / `qrcode_store.py` / `app_factory.py` 内联 | **5** | 3 | health 3（含 `/api/metrics`）+ qrcode 1（admin 兼容面）+ app_factory 内联 `/api/shisi/status` 1（untagged） |
 | `shisi/api/` | v1（`v2/` 死模块 2026-09-18 删除） | **30** | 11（其中 **8** 个文件带路由） | character 7 / memory 6 / sticker 5 / affinity 4 / emotion_stage 3 / persona 3 / stats 1 / vital_signs 1（+ 上面内联 status = 31 域面）；`__init__` / `common` / `registry` 无路由 |
-| **合计** | | **253** | | 119 GET / 92 POST / 18 PUT / 24 DELETE；`len(app.routes)`=257 |
+| **合计** | | **254** | | 119 GET / 93 POST / 18 PUT / 24 DELETE；`len(app.routes)`=258 |
 
-> 🔢 **两个数字不是同一件事**（易误读，特此点明；本批用 `inspect.getmodule` 分组实测）：表中 `api/routers/` 行的 **218 = 该层端点数**（26 文件）；§1.1 的 **207 = 全站唯一路径数**。校验：218（routers）+ 30（shisi/api，8 个文件带路由）+ **5**（api 非 routers：health 3 + qrcode 1 + app_factory 内联 1）= **253** = `APIRoute` 总数 ✓。
+> 🔢 **两个数字不是同一件事**（易误读，特此点明；本批用 `inspect.getmodule` 分组实测）：表中 `api/routers/` 行的 **219 = 该层端点数**（26 文件）；§1.1 的 **208 = 全站唯一路径数**。校验：219（routers）+ 30（shisi/api，8 个文件带路由）+ **5**（api 非 routers：health 3 + qrcode 1 + app_factory 内联 1）= **254** = `APIRoute` 总数 ✓。
 
-> ⚠️ **口径纠错**：旧口径「206 / 208 端点」取自 `len(app.routes)`，其中固定含 4 条 FastAPI 框架路由，系统性偏高 4。**业务端点 = `APIRoute` 实例数**。演进链：2026-09-21 `220/186` → +W4 forwards 1 +W10 metrics 1 +W12 templates 2 +W9 自服务 5 = 229 → D16 退役 peers 3 = **226/193** → v3.8.33 重建批 **229/194** → v3.8.34 **231/195**（R7 reply-mode 2）→ v3.8.35 **235/197**（+4 = `/api/topic-state` ×3 + `DELETE /api/humanize/config`）→ v3.8.36 **249/205**（+14 = 批 1–6 体验面四组）→ **v3.8.37** 实测 **253/207**（+4 = `/api/user/proactive*` 四端点）。
+> ⚠️ **口径纠错**：旧口径「206 / 208 端点」取自 `len(app.routes)`，其中固定含 4 条 FastAPI 框架路由，系统性偏高 4。**业务端点 = `APIRoute` 实例数**。演进链：2026-09-21 `220/186` → +W4 forwards 1 +W10 metrics 1 +W12 templates 2 +W9 自服务 5 = 229 → D16 退役 peers 3 = **226/193** → v3.8.33 重建批 **229/194** → v3.8.34 **231/195**（R7 reply-mode 2）→ v3.8.35 **235/197**（+4 = `/api/topic-state` ×3 + `DELETE /api/humanize/config`）→ v3.8.36 **249/205**（+14 = 批 1–6 体验面四组）→ v3.8.37 **253/207**（+4 = `/api/user/proactive*` 四端点）→ **v3.8.38** 实测 **254/208**（+1 = `POST /api/characters/deactivate`）。
 
-**按 tag 的端点分布**（内省实测，权威口径；较 v3.8.36 变化：**training 23→27**，其余一致）：
+**按 tag 的端点分布**（内省实测，权威口径；较 v3.8.37 变化：**character 21→22**，其余一致）：
 
 ```
-training 27 │ character 21 │ misc 17 │ auth 13 │ safety-infra 12 │ chat 11
+training 27 │ character 22 │ misc 17 │ auth 13 │ safety-infra 12 │ chat 11
 memory 11 │ personality 10 │ wechat 9 │ clone 8 │ knowledge 8 │ admin 8
 users 7 │ characters 7 │ tools 6 │ wechat-channel 6 │ voice 6 │ mimo-tts 6
 storyline 6 │ llm-providers 6 │ agent-plane 5 │ stickers 5 │ affinity 4 │ invite 4
 admin-announcements 4 │ health 3 │ topic-state 3 │ emotion-stage 3 │ persona 3 │ persona-card 3
 announcements 2 │ admin-wechat 2 │ character-templates 2 │ emotion 2 │ vital-signs 1 │ stats 1
 (untagged) 1
-                                          ────────── 合计 253
+                                          ────────── 合计 254
 ```
 
 > 注：`character`(21) = `api/routers/character_routes.py`；`characters`(7) = `shisi/api/character_routes.py`。`memory`(11) = api `memory_routes`(5) + shisi `memory_routes`(6)。`auth`(13) = 原 8 + W9 自服务 5。`training`(27) = training 5 + proactive 6 + humanize/config 4 + knowledge/collect-config 2 + reply-mode 2 + **user/humanize 自助 4**（NEW-34）+ **user/proactive 自助 4**（本批 D20，`/api/user/proactive-config` GET/POST/DELETE + `/api/user/proactive/pause` POST）——`api/routers/training_routes.py` 单文件承载七组。`misc`(17) = 原 16 + `POST /api/user/llm-config/test`（NEW-13）。`admin`(8) = 原 5 + audit 1 + global-view 2（NEW-21 / V2-1）。`announcements`(2) + `admin-announcements`(4) = `api/routers/announcement_routes.py` 一双 router 文件（V2-5）。`wechat-channel`(6) + `admin-wechat`(2) 同属 `wechat_channel_routes.py`。`(untagged)`(1) = app_factory 内联 `/api/shisi/status`。
 
-> 📐 **子集口径注记（批 6 F9 更正 + 本批更新）**：`tests/test_api_routes.py:171-189` 契约断言「9 子路由合计 = **101**」（misc 17 / chat 11 / personality 10 / users 7 / training **27** / tools 6 / safety 12 / clone 8 / topic 3）；批 6 收编登记的管理/自助子集 **106** = 97 + announcements 6 + admin 新增 3，本批 training +4 后为 **110**。⚠️ 该子集记账≠全站口径，图谱权威口径始终以本表 `APIRoute` 全量 **253/207** 为准。
+> 📐 **子集口径注记（批 6 F9 更正 + 本批更新）**：`tests/test_api_routes.py:171-189` 契约断言「9 子路由合计 = **101**」（misc 17 / chat 11 / personality 10 / users 7 / training **27** / tools 6 / safety 12 / clone 8 / topic 3）；批 6 收编登记的管理/自助子集 **106** = 97 + announcements 6 + admin 新增 3，本批 training +4 后为 **110**。⚠️ 该子集记账≠全站口径，图谱权威口径始终以本表 `APIRoute` 全量 **254/208** 为准。
 
 **`api/app_factory.py:94 create_api_app()`** 是 FastAPI 应用唯一构造入口（`FastAPI(..., version="3.1.0")`），被 `api/run_api.py:626` 与 `main.py` 调用。挂载清单（源码逐行核对；22 处字面 `app.include_router`（含辅助函数内 1 处）+ 9 处 `_mount_required_router` 辅助调用 + `setup_shisi` @`:297-302`；`topic_state_router` @`:273`，公告双挂载 @`:276-277`）：
 
-**按定义模块的端点归属**（`inspect.getmodule(route.endpoint)` 实测，合计 218 + 30 + 5 = **253**）：
+**按定义模块的端点归属**（`inspect.getmodule(route.endpoint)` 实测，合计 219 + 30 + 5 = **254**）：
 
 ```
-api/routers/（26 文件，218 端点）
-  training_routes 27 │ character_routes 21 │ misc_routes 17 │ auth_routes 13
+api/routers/（26 文件，219 端点）
+  training_routes 27 │ character_routes 22 │ misc_routes 17 │ auth_routes 13
   safety_routes 12 │ chat_routes 11 │ personality_routes 10 │ clone_routes 8
   knowledge_routes 8 │ wechat_channel_routes 8 │ wechat_routes 8 │ admin_routes 8
   users_routes 7 │ tools_routes 6 │ announcement_routes 6 │ mimo_voice_routes 6
@@ -480,7 +480,7 @@ tools/
 | **topic** | `api/routers/topic_routes.py`（139 行） | 快照读面 admin 任意键 / 普通用户本人绑定键 ∪ 活跃 web 会话白名单（`_owned_session_keys` `:67`）；不解析客户端自报数字 id；`POST /config` 仍 admin。`tests/api/test_topic_state_api.py` +6 例 |
 | **docs-naming** | `frontend/src/api/training.ts` / `client.ts` / `docs/CODEMAPS/*` / `AGENTS.md` §2 Owner Map | 「训练」→「风格提取（训练管线）」；目录名 `clone_training/`、`TrainingStateManager`、`deps.training_mgr`、`/api/training/*`、`queryKeys.training`、`'training'` 字面量零改。Owner Map 复查一致 |
 
-**端点/测试口径（本批实跑）**：`create_api_app()` = **253 APIRoute / 207 唯一路径 / len(app.routes)=257**（119 GET / 92 POST / 18 PUT / 24 DELETE；+4 = user/proactive）；`python scripts/regression_gate.py` = **PASS**：pytest 四分块 **987 + 1332 + 1092 + 1036 = 4498 通过 + 2 跳过**（`--collect-only` 4500、0 失败；3 个存量失败族由 `tests/conftest.py` users 主库隔离根治）；vitest **354/354（47 文件）**；tsc 0；ruff 0。测试文件 269→**275**；角色卡 **41**。
+**端点/测试口径（本批实跑）**：`create_api_app()` = **254 APIRoute / 208 唯一路径 / len(app.routes)=258**（119 GET / 93 POST / 18 PUT / 24 DELETE；+1 = `POST /api/characters/deactivate`）；本批为定向验证（全量基线未重跑，沿用 v3.8.37 的 4500 收集口径）：`tests/test_character_deactivate.py` **5 passed**；受影响面 `test_api_routes` + `test_w1_identity_authorization` + `test_block_e_hardening` + `test_attribution_closure_batch_c` **95 passed**；聊天链 `test_attribution_context_contract` + `test_connection_lifecycle` + `test_sweep_chat_chain` + `test_chat_history_user_scope` **79 passed**；前端 `RolesPage.test.tsx` **6/6**；tsc 0；ruff 0。测试文件 +1（新增 `test_character_deactivate.py`）；角色卡 **41**。
 
 **遗留（deferred）**：① voice 公共卡前端控件与 `CharacterVoiceManager (character_id,user_id)` 二级键；② `clone_training` 的 LLM 调用 per-user 化（拆到 user BYOK）；③ 「消息」tab 纯新用户 UX 细化 P2；④ 存量越权音色绑定只读审计、不自动迁移；⑤ 已三端部署 @ 43aeaae（2026-10-31）。
 
@@ -564,6 +564,7 @@ tools/
 
 | 版本 | 日期 | 要点 |
 |------|------|------|
+| **v3.8.38** | **2026-11-07** | **恢复默认人设根治批（本地完成未部署）**：新增 `POST /api/characters/deactivate`（`character_routes.py`，个人面三处复位 + 机器面清 `is_active`）；`chat_routes._resolve_character_id` 真人面显式 `default` 直返内置十四；前端 `api/characters.ts` + `RolesPage` 固定内置默认卡与恢复入口。端点 **253/207 → 254/208**（+1；`len(app.routes)` 257→**258**）；方法分布 **119/92/18/24 → 119/93/18/24**；`character` tag 21→**22**；新增测试文件 `tests/test_character_deactivate.py`（5 例）+ RolesPage 2 例；定向回归 **95 + 79 passed**、前端 **6/6**、tsc 0、ruff 0；⚠️ 全量基线未重跑（沿用 4500 收集）；角色卡 41 不变。 |
 | **v3.8.37** | **2026-10-31** | **表述分离 + 用户主权 per-user 化批（8 域 · 7/8 独立对抗验收通过 · 全量回归通过 · 已三端部署 @ 43aeaae）**：新增 §4.17；端点 **249/205 → 253/207**（+4 全部为 `/api/user/proactive*`；`len(app.routes)` 253→**257**）；方法分布 **119/92/18/24**；`training` tag 23→**27**；新增 `utils/proactive_config.py`（879 行）+ `wechat_direct/media_upload.py`（287 行）+ `scripts/regression_gate.py` / `audit_voice_bindings.py`；utils 26→**27** / wechat_direct 4→**5** / scripts 19→**21**；测试文件 269→**275**；主控实跑后端 **4498 通过 + 2 跳过 / 收集 4500 / 0 失败**（3 存量失败族由 conftest users 主库隔离根治）+ 前端 **354/47** + ruff 0 + tsc 0；徽章 **4853**；角色卡 41 不变；voice 公共卡写侧 404 产品回退 deferred。 |
 | **v3.8.36** | **2026-10-30** | **批 7 收尾口径（D20 前端全站体验批 1–6 + 批 6 对抗收编 + 批 7 四收编；本地全链领先 origin、未部署）**：新增 §4.16；端点 **235/197 → 249/205**（+14：misc +1 / training +4 / announcements +6 / admin +3；批 7 零新端点）；方法分布 113/85/16/21 → **118/90/18/23**；路由挂载 28 → **30**（公告双挂载 `:276-277`）；域路由 25 → **26**（+`announcement_routes`）；Python tracked 589/159,543 → **594/161,394**；api 49 → **51**（+`audit.py` / `announcement_routes.py`）；frontend/src 138 → **154**；页面 19 → **20**（+HelpGuidePage `/help`）；API 模块 15 → **16**（+announcements）；store 5 → **6**（+globalViewStore）；测试文件 266 → **269**（+3）；主控实测后端 **4297 通过 / 2 跳过 / 3 存量失败族**（均 HEAD 对照实证）+ 前端 **342/47** + ruff 0 + tsc 0 + 突变验红 4/4；徽章口径 **4508 → 4640**（README 同步归收口批）；users.db 口径新增 **14 表**（+4）；⚠️ 角色卡 42 → **41** 漂移登记。 |
 | v3.8.35 | 2026-10-28 | 工作区整理批：话题状态机 `3fe2771`（§4.12）/ 拟人化 v1.57（§4.15）/ 四项跟进 + CI 修复 + hotfix 整本回扫；新增 §4.13 骰子闸 / §4.14 行为蒸馏；端点 231/195→235/197；收集 4263（266 文件）/ 4256+2+4；徽章 4508；store 4→5（+topicState）。要点归档 `LOG.md` 2026-10-28 条。 |
