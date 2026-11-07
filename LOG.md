@@ -7,6 +7,13 @@
 
 ---
 
+## 2026-11-07 — 对抗验收（adversarial-acceptance · 恢复默认人设根治批 `2e9a2bb`）· 判定通过
+
+- **四步对抗**：① 病灶复现在 HEAD~1 worktree 行为级重做（非 diff 审读）——四项病灶全确认，反向端点实测 **405**（比预估 404 更强：路径模板被 `DELETE /{character_id}` 占位、无 POST 处理器）；② 执行位矩阵补 5 格作者未测面（多条绑定全复位+扫码会话键热切 / 零绑定 / `deps.gf=None` / API Key 启用时匿名恢复 401 且全局 `is_active` 不被清 / `{uid}:{wxid}` 热切）→ **发现即修**，4 例入 `tests/test_character_deactivate_adversarial.py` 全绿；③ 突变验红 **4/4 全中**（M1 个人行不删→2红 / M2 绑定不复位→2红 / M3 扫码键不热切→1红 / M4 显式 default 分支删→1红），突变后 `git checkout` 恢复干净；④ 口径对账——git 实物 10 文件 562+/24- 与宣称一致、deactivate 函数体零手写 `"default"`（真源 `BUILTIN_CHARACTER_ID`）、四件文档 254/208 一致、E2E（断言不依赖角色身份）与 `remote_check.py`（无认证头=机器面旧契约）消费面零影响。
+- **全量补跑（上轮未验证项）**：后端四分块 **4507 passed + 2 skipped / 0 失败 / 收集 4509**（1142+1007+1137+1221，278 文件 `find` 递归）= 基线 4500 + 作者 5 + 验收 4 精确吻合；前端 **356/47** + tsc 0；ruff 全仓 0（含验收新文件）。
+- **发现清单**：#1 验收脚本自身缺陷（参数错位/async 内 asyncio.run）当场修，非产品缺陷；#2 覆盖缺口已补（见②）；#3 **预先存在死引用**——`scripts/remote_check.py:108` 调 `/api/demo/chat/stream`，后端全仓无此端点（真孤儿，HEAD~1 同样存在，待专项处置）；#4 口径澄清（405 vs 404，病灶结论不变）。
+- **报告**：`docs/verification/2026-11-07-deactivate-acceptance.md`（判定**通过**，保留意见：生产真机验证待部署后）；复现 worktree 已清理。
+
 ## 2026-11-07 — 恢复默认人设根治（用户报障「用户误操作选了人设，如何恢复为默认人设？」）· 激活单向缺陷 → deactivate 端点 + 角色页固定入口 + 聊天链 default 语义收口
 
 - **定位**：`api/routers/character_routes.py::activate_character`（`:778`）只有激活、没有反向；`frontend/src/pages/RolesPage.tsx` 只有「设为活跃」按钮；`config/characters/` 41 张卡里不存在内置十四（`config/persona.yaml:1 name: "十四"`，id=`default`，`utils/character_resolver.py:34` 为唯一 id 真源），因此角色列表 UI 永远列不出它。
