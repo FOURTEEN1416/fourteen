@@ -124,6 +124,18 @@ describe('StatusCenter', () => {
     expect(screen.getByText(/char-001/)).toBeDefined()
   })
 
+  it('内置默认卡（default）→ 正常整页渲染（2026-11-07 裁决：default 是后端合成正式卡）', () => {
+    mockUseUnifiedCharacter.mockReturnValue({
+      data: { id: 'default', name: '十四', description: '', user_id: 'system', builtin: true, is_active: true },
+      isLoading: false,
+    })
+    renderWithQuery(<StatusCenter />, '/roles/default/status')
+    expect(screen.queryByText(/未找到角色/)).toBeNull()
+    // 整页三卡俱全：自我介绍 / 最近主动消息 / 心理画像
+    expect(screen.getByTestId('self-intro-card')).toBeDefined()
+    expect(screen.getByTestId('recent-proactive-card')).toBeDefined()
+  })
+
   it('renders emotion, affinity level and memory count', async () => {
     mockUseUnifiedCharacter.mockReturnValue({ data: FAKE_CHARACTER, isLoading: false })
     mockUseDashboard.mockReturnValue({ data: FAKE_STATS, isLoading: false })

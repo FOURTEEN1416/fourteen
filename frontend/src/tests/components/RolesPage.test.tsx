@@ -165,8 +165,8 @@ describe('RolesPage 加载态与空态收编', () => {
   })
 })
 
-// ── 2026-11-07：误选角色后可恢复默认人设（内置十四不在卡库，必须固定列出）──
-describe('RolesPage 恢复默认人设', () => {
+// ── 2026-11-07 用户裁决：内置十四=default 是正式默认角色卡（前后端对齐）──
+describe('RolesPage 内置默认卡', () => {
   const renderPage = (qc = new QueryClient()) =>
     render(
       <Shell qc={qc}>
@@ -176,10 +176,11 @@ describe('RolesPage 恢复默认人设', () => {
       </Shell>,
     )
 
-  it('无激活角色时默认人设卡显示「当前使用中」，不出现恢复按钮', () => {
+  it('后端点亮内置卡（无其他激活）→ 默认人设卡「当前使用中」，且网格不重复渲染内置卡', () => {
     mockUseUnifiedCharacters.mockReturnValue({
       data: {
         characters: [
+          { id: 'default', name: '十四', description: '', user_id: 'system', builtin: true, is_active: true, core_anchors: [] },
           { id: 'a', name: 'A', description: '', is_active: false, core_anchors: [] },
         ],
       },
@@ -191,13 +192,21 @@ describe('RolesPage 恢复默认人设', () => {
     const card = screen.getByTestId('default-persona-card')
     expect(card.textContent).toContain('当前使用中')
     expect(screen.queryByRole('button', { name: '恢复默认' })).toBeNull()
+    // 内置卡由固定卡表示，网格只渲染卡文件角色
+    expect(screen.getByText('A')).toBeDefined()
+    expect(screen.queryByText('十四')).toBeNull()
   })
 
-  it('有激活角色时点「恢复默认」→ 调端点并失效角色查询', async () => {
+  it('其他卡激活（内置卡熄灭）时点「恢复默认」→ 调端点并失效角色查询', async () => {
     const qc = new QueryClient()
     const invalidateSpy = vi.spyOn(qc, 'invalidateQueries')
     mockUseUnifiedCharacters.mockReturnValue({
-      data: { characters: CARDS },
+      data: {
+        characters: [
+          { id: 'default', name: '十四', description: '', user_id: 'system', builtin: true, is_active: false, core_anchors: [] },
+          ...CARDS,
+        ],
+      },
       isLoading: false,
       isError: false,
       refetch: vi.fn(),

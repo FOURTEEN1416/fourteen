@@ -515,6 +515,8 @@ export interface UnifiedCharacter {
   updated_at: string
   version: number
   voice_config?: VoiceConfig | null
+  /** 内置默认卡（default/十四）：后端合成视图，不落盘为卡文件（2026-11-07 裁决） */
+  builtin?: boolean
 }
 
 export interface UnifiedCharacterCreate {

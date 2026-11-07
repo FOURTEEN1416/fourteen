@@ -282,6 +282,17 @@ export default function StorylineEditor({ characterId, standalone = false }: Sto
     )
   }
 
+  // 2026-11-07 用户裁决后 default 是正式卡，但剧情线配置写进卡文件，内置卡
+  // 没有卡文件——后端显式 400，这里给友好空态而不是错误横幅。
+  // （守卫放在全部 hooks 之后，满足 rules-of-hooks）
+  if (characterId === 'default') {
+    return (
+      <div className="glass-card rounded-xl p-6 text-center text-sm text-gray-500" data-testid="storyline-builtin-empty">
+        内置默认人设（十四）没有独立剧情线配置——先在角色配置页激活一个角色卡，再回到这里编排剧情。
+      </div>
+    )
+  }
+
   // ── 渲染 ──
 
   return (

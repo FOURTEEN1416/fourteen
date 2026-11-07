@@ -105,6 +105,8 @@ export default function StatusCenter() {
     )
   }
   if (!activeCharacter) {
+    // 2026-11-07 用户裁决后 default 是后端合成的正式卡（GET /characters/default
+    // 200），正常永远取得到；走到这里只剩「URL 里的角色真的不存在」。
     return (
       <div className="px-4 sm:px-6 lg:px-8 py-16 mx-auto w-full max-w-6xl text-center text-gray-400 text-sm">
         未找到角色（{roleId}）——可能已被删除
@@ -170,7 +172,7 @@ export default function StatusCenter() {
 
 /** P7（2026-11-07）：最近主动消息（本人作用域）。
  *  服务端只返回自己会话（可选按角色过滤）的出站事实；这里绝不展示他人消息。 */
-function RecentProactiveCard({ characterId }: { characterId: string }) {
+function RecentProactiveCard({ characterId }: { characterId?: string }) {
   const [items, setItems] = useState<MyProactiveItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -266,8 +268,12 @@ function SelfIntroCard() {
       setText(res.self_intro ?? '')
       setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
       addToast({ type: 'success', message: '自我介绍已保存，聊天时会优先按它了解你' })
-    } catch {
-      addToast({ type: 'error', message: '保存失败，请重试' })
+    } catch (err) {
+      // 后端的 409/400 带中文指引（如「尚未绑定微信…请先在微信扫码绑定」），
+      // 必须透传给新用户——只显示通用文案会让人不知道下一步做什么
+      // （与 CharacterSettingsPanel 同款范式，2026-11-07 对抗验收发现）。
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      addToast({ type: 'error', message: detail || '保存失败，请重试' })
     } finally {
       setSaving(false)
     }

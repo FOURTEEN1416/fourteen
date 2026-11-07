@@ -194,10 +194,14 @@ async def test_deactivate_resets_all_three_layers(d_app):
     assert ("set", str(_ALICE), "default") in fake_gf.calls
     assert ("upsert", "wx_alice", {"wxid": "wx_alice", "character_card_id": "default"}) in fake_gf.calls
 
-    # 列表视角：没有任何卡是 active
+    # 列表视角：恢复默认 = **内置十四卡点亮**（2026-11-07 用户裁决：default 是
+    # 正式默认角色卡，「什么都没选」的旧语义由「默认激活十四」取代），
+    # 其余卡文件全部熄灭
     resp = await client.get("/api/characters", headers=_auth(token))
     assert resp.status_code == 200
-    assert all(not c["is_active"] for c in resp.json()["characters"])
+    by_id = {c["id"]: c for c in resp.json()["characters"]}
+    assert by_id["default"]["is_active"] is True
+    assert all(not c["is_active"] for c in resp.json()["characters"] if c["id"] != "default")
 
     # 卡文件本体的 is_active 不被个人恢复动作改写（D2：个人选择与卡文件解耦）
     card = json.loads((chars_dir / f"{card_id}.json").read_text(encoding="utf-8"))

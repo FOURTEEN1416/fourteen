@@ -35,7 +35,7 @@ from utils.character_helpers import (
     sanitize_character_name,
     sanitize_honesty_boundary,
 )
-from utils.character_resolver import BUILTIN_CHARACTER_ID
+from utils.character_resolver import BUILTIN_CHARACTER_ID, is_builtin
 from utils.project_paths import project_path
 
 PRESETS_DIR = project_path("data", "presets")
@@ -109,6 +109,11 @@ async def require_character_access(
     - 机器面（无 Bearer）：不干预，交由各路由维持既有行为。
     - 有主体但无权：一律 404（不区分「不存在」与「无权限」，防状态码枚举他人卡）。
     """
+    # 2026-11-07 用户裁决：内置默认卡（default/十四）是正式卡——读面放行
+    # （机器面与 Bearer 主体一致，与列表无条件前置同语义），统一返回合成视图
+    # （不读卡文件；人设真源在 persona.yaml/persona_service）。
+    if is_builtin(character_id):
+        return _builtin_default_card()
     if principal is None:
         return {}
     data = _load_character(character_id)
@@ -156,12 +161,52 @@ def _overlay_personal_activation(
 ) -> list[dict[str, Any]]:
     """把「个人激活态」叠加到卡片视角上（不写回卡文件）。
 
-    卡文件里的 `is_active` 不是某人的选择，故对真实用户一律以本表为准：
-    没有个人记录就是「都没有激活」，由前端按首张卡兜底，避免多张卡同时点亮。
+    卡文件里的 `is_active` 不是某人的选择，故对真实用户一律以本表为准。
+    2026-11-07 用户裁决：「进入系统默认激活的是十四这一张角色卡，前后端都能
+    对齐，算作是默认角色卡」——没有个人激活记录 = **内置默认卡（default）
+    处于激活态**（`is_builtin` 语义与聊天链 `character_resolver` 完全一致），
+    而不是「什么都没激活」。内置卡由 :func:`_builtin_default_card` 合成，
+    不落盘、不占卡文件。
     """
+    from utils.character_resolver import BUILTIN_CHARACTER_ID
+
+    effective = str(active_id).strip() if active_id else BUILTIN_CHARACTER_ID
     for card in characters:
-        card["is_active"] = bool(active_id) and str(card.get("id")) == active_id
+        card["is_active"] = str(card.get("id")) == effective
     return characters
+
+
+def _builtin_default_card() -> dict[str, Any]:
+    """内置默认角色卡（十四，id=`default`）的统一 API 视图。
+
+    2026-11-07 用户裁决：内置 persona 在控制台与 API 上都算一张**正式卡**
+    （前后端对齐）——列表可见、可作为激活态、可挂「我 × 这个角色」设置；
+    但不落盘为卡文件：人设真源仍是 `config/persona.yaml` +
+    `shisi/application/persona_service.py`（聊天链 `character_resolver` 不变）。
+    """
+    from utils.character_resolver import BUILTIN_CHARACTER_ID, display_name
+
+    try:
+        mtime = project_path("config", "persona.yaml").stat().st_mtime
+        stamp = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+    except OSError:
+        stamp = "1970-01-01T00:00:00+00:00"
+    return {
+        "id": BUILTIN_CHARACTER_ID,
+        "name": display_name(BUILTIN_CHARACTER_ID) or "十四",
+        "description": "内置默认人设——不激活任何角色卡时与你聊天的就是她；可以像普通角色一样调「我 × 这个角色」设置。",
+        "personality": {},
+        "speaking_style": {},
+        "core_anchors": [],
+        "tags": ["内置"],
+        "user_id": "system",
+        "schema_version": 1,
+        "is_active": False,  # 由 _overlay_personal_activation 按个人激活态覆盖
+        "builtin": True,
+        "created_at": stamp,
+        "updated_at": stamp,
+        "version": 1,
+    }
 
 
 # ── 请求/响应模型 ────────────────────────────────────────
@@ -515,10 +560,14 @@ async def list_characters(
 ):
     """列出角色：私人卡只对本人（与管理员）可见，无主存量卡只对平台面可见。
 
-    客户端传 `user_id` 只能**收窄**已授权的范围，不能借此越权读取他人卡片。
+    2026-11-07 用户裁决：内置默认卡（default/十四）**永远在列**（前后端对齐，
+    进入系统即默认激活它）；个人激活态为空时由
+    :func:`_overlay_personal_activation` 把它点亮。客户端传 `user_id` 只能
+    **收窄**已授权的范围，不能借此越权读取他人卡片。
     """
     characters = [
-        c for c in _list_all_characters() if card_access_allowed(c, principal)
+        _builtin_default_card(),
+        *(c for c in _list_all_characters() if card_access_allowed(c, principal)),
     ]
     if user_id:
         characters = [c for c in characters if c.get("user_id") == user_id]

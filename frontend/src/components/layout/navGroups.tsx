@@ -30,6 +30,8 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
       label: '角色',
       items: [
         { to: '/roles', icon: Library, label: '角色配置' },
+        // 2026-11-07 用户裁决：进入系统默认激活内置十四卡（default）——
+        // activeRoleId 恒非空（加载期除外），三个子页不再有「整体消失」态
         ...(activeRoleId
           ? [
               { to: `/roles/${activeRoleId}/settings`, icon: Settings, label: '角色设置' },

@@ -60,7 +60,7 @@ function DefaultPersonaCard({
       <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold text-gray-800">默认人设（内置）</div>
         <div className="mt-0.5 text-xs text-gray-500">
-          {active ? '当前使用中：没有选择任何角色卡' : '不选择任何角色卡时使用的人设'}
+          {active ? '当前使用中：进入系统的默认角色卡' : '不选择任何角色卡时使用的默认角色卡'}
         </div>
       </div>
       {active ? (
@@ -171,21 +171,27 @@ export default function RolesPage() {
   // NEW-9：isError 不得伪装成「暂无角色」空态（用户会误以为角色全没了）
   const { data, isLoading, isError, refetch } = useUnifiedCharacters()
   const characters = data?.characters ?? []
+  // 2026-11-07 用户裁决：内置十四（default）是正式默认卡——列表里恒在且
+  // 「无其他激活时 is_active=true」。它的 UI 表示就是下方固定的 DefaultPersonaCard
+  // （含恢复默认入口），网格里不再重复渲染；激活态语义以列表真源为准。
+  const builtinCard = characters.find(c => c.builtin || c.id === 'default')
+  const defaultActive = Boolean(builtinCard?.is_active)
   const hasActive = characters.some(c => c.is_active)
   const initialNotice = useInitialCharacterNotice(hasActive)
   const [activatingId, setActivatingId] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
   const [keyword, setKeyword] = useState('')
   const visible = useMemo(() => {
+    const gridPool = characters.filter(c => !(c.builtin || c.id === 'default'))
     const kw = keyword.trim().toLowerCase()
     const matched = kw
-      ? characters.filter(
+      ? gridPool.filter(
           (c) =>
             sanitizeCharacterName(c.name).toLowerCase().includes(kw) ||
             (c.description ?? '').toLowerCase().includes(kw) ||
             c.core_anchors?.some((a) => a.toLowerCase().includes(kw)),
         )
-      : characters
+      : gridPool
     // 活跃角色置顶，其余按名字稳定排序
     return [...matched].sort((a, b) => Number(b.is_active) - Number(a.is_active))
   }, [characters, keyword])
@@ -273,7 +279,7 @@ export default function RolesPage() {
 
           {/* 2026-11-07：内置默认人设固定入口——角色卡库不含它，不列出来就无路可退 */}
           {!isLoading && !isError && (
-            <DefaultPersonaCard active={!hasActive} onReset={handleReset} resetting={resetting} />
+            <DefaultPersonaCard active={defaultActive} onReset={handleReset} resetting={resetting} />
           )}
 
           {isLoading ? (

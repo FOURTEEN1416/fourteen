@@ -20,13 +20,24 @@ describe('App.tsx 路由声明守卫', () => {
     const all = [...appSrc.matchAll(/<Route\s+path="([^"]+)"/g)].map((m) => m[1])
     const absolute = new Set(all.filter((r) => r.startsWith('/')).map((r) => r.replace(/:\w+/g, 'x')))
     const relative = new Set(all.filter((r) => !r.startsWith('/')).map((r) => r.replace(/:\w+/g, 'x')))
+    // 形态匹配：声明路由的动态段（:roleId 等）可吃掉导航里的任意一段具体值
+    // （如 /roles/default/status ↔ /roles/:roleId/status，2026-11-07 无激活态入口）
+    const segsOf = (p: string) => p.split('/').filter(Boolean)
+    const absoluteSegs = all.filter((r) => r.startsWith('/')).map(segsOf)
     for (const p of navPaths) {
-      const full = ('/' + p).replace(/:\w+/g, 'x')
+      const full = '/' + p
+      const segs = segsOf(full)
       const idx = full.lastIndexOf('/')
       const parent = full.slice(0, idx)
       const leaf = full.slice(idx + 1)
+      const shapeMatch = absoluteSegs.some(
+        (d) => d.length === segs.length && d.every((s, i) => s.startsWith(':') || s === segs[i]),
+      )
       const reachable =
-        absolute.has(full) || (relative.has(leaf) && absolute.has(parent)) || (absolute.has(parent) && leaf === '')
+        shapeMatch ||
+        absolute.has(full) ||
+        (relative.has(leaf) && absolute.has(parent)) ||
+        (absolute.has(parent) && leaf === '')
       expect(reachable, `navGroups 引用的 /${p} 在 App.tsx 无对应 Route`).toBe(true)
     }
   })
