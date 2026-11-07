@@ -19,7 +19,7 @@
 - **P8 后端**：`self_intro` 进画像投影（`profile_projection` 标量字段）+ `user_profile` 自动补列 + 主链画像槽优先展示；端点 `GET/PUT /api/user/self-profile`（写 EventLedger，actor=user）；状态页新增「我的自我介绍」卡片。测试：`test_self_profile_p8.py` 6 例。
 - **未落地（登记下一批）**：P5 消息设置页四组归位前端重构（后端已具备数据面）；P7 最近主动消息迁状态页（需先建本人作用域读面，现 `/api/proactive/history` 仍 admin-only）；P9 剧情线与时间线合并；P8 心理画像页并入状态页（仅完成自述与注入）；HelpGuidePage 模板文案更新；AGENTS/CODE_GRAPH/FUNCTION_INVENTORY 全口径回扫。
 - **已知设计后果（需用户知悉）**：用户裁决「每人每角色一份全量快照」⇒ 之后修改全局出厂默认**不会**回头影响已物化的用户×角色（只有新组合继承新默认）。管理端仍是出厂默认唯一写方。
-- **验证**：前端全量 **351 passed**（删 3 模板页用例、加 1 账号页用例后的净值）+ `tsc --noEmit` 0；后端受影响面 157 + 63 + 199 + 7 + 6 + 13 例全绿；后端四分块全量基线见下一条（若本条目先落，基线结果以紧随其后的运行记录为准）。
+- **验证**：后端四分块全量 **4556 passed + 2 skipped / 收集 4559**（1022 + 1115+1skip + 1196 + 1223+1skip；较 v1.63 的 4509 收集 +50 例，与本批新增 50 例精确吻合）；唯一失败 `test_session_locks::test_concurrent_sessions_dont_block_each_other` 为时序敏感偶发，单文件复跑 **12/12 通过**，与改动面无交集；ruff 改动文件 0；前端全量 **351 passed**（删 3 模板页用例、加 1 账号页用例后的净值）+ `tsc --noEmit` 0。
 - **部署**：未部署（A 档本地完成，推送/部署随用户裁决）。
 
 ## 2026-11-07 — 对抗验收（adversarial-acceptance · 恢复默认人设根治批 `2e9a2bb`）· 判定通过
