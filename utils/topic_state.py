@@ -66,6 +66,10 @@ DEFAULTS: dict[str, Any] = {
     "park_idle_hours": 6,
     "switch_theta1": 0.2,
     "switch_theta2": 0.35,
+    # P10（2026-11-07 用户报障）：同一话题的「同时段」窗——超过该时长没再被
+    # 提到就不再算「正在聊」，且续聊钩子只取窗内的用户原话。出厂 120 分钟
+    # （用户原话「相隔两三个小时让他们连在一起」），可经管理端调整。
+    "same_session_minutes": 120,
 }
 
 #: Q1/Q3/Q4/Q5/Q6 的固化边界：这些值不是"可调建议"，而是裁决；
@@ -80,6 +84,9 @@ _BOUNDS: dict[str, tuple[float, float]] = {
     "park_idle_hours": (6, 6),  # Q2/状态机：6h 无活动
     "switch_theta1": (0.0, 1.0),
     "switch_theta2": (0.0, 1.0),
+    # P10：同时段窗 30 分钟 ~ 24 小时（出厂 120）；不得为 0（否则永远没有
+    # 「正在聊」，话题块退化成只剩历史）。
+    "same_session_minutes": (30, 1440),
 }
 
 _SCHEMA = """
@@ -506,14 +513,46 @@ def _short_title(topic: dict[str, Any], limit: int = 10) -> str:
     return _sanitize_topic_text(topic.get("title"), limit)
 
 
-def render_topic_state_block(snapshot: dict[str, Any]) -> str:
+def render_topic_state_block(
+    snapshot: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    fresh_minutes: int | None = None,
+) -> str:
     """渲染状态数据块（≤160 字）；无 active/parked → ``""``。
 
     只放数据，不含长指令；标题/锚点全部经 ``_sanitize_topic_text`` 清洗。
     超长按末行截断，始终保留标题行。
+
+    P10（2026-11-07 用户报障）：`active` 里 ``last_active_at`` 超过「同时段」
+    （默认 120 分钟，`topic_state.same_session_minutes`）的话题不再算「正在聊」，
+    降级显示在「之前没聊完」——避免把两三小时前的事标成当前话题继续教唆。
     """
     active = list(snapshot.get("active") or [])
     parked = list(snapshot.get("parked") or [])
+    if not active and not parked:
+        return ""
+
+    # 同时段判定：太久没再提到的话题降级为「之前没聊完」。
+    try:
+        cfg = read_topic_config()
+        window = int(
+            fresh_minutes if fresh_minutes is not None
+            else cfg.get("same_session_minutes", 120)
+        )
+    except Exception:  # noqa: BLE001
+        window = int(fresh_minutes or 120)
+    wall_now = now or datetime.now()
+    still_active: list[dict[str, Any]] = []
+    stale_active: list[dict[str, Any]] = []
+    for topic in active:
+        dt = _parse_ts(topic.get("last_active_at"))
+        if dt is not None and (wall_now - dt).total_seconds() > window * 60:
+            stale_active.append(topic)
+        else:
+            still_active.append(topic)
+    active = still_active
+    parked = parked + stale_active
     if not active and not parked:
         return ""
 
@@ -522,10 +561,15 @@ def render_topic_state_block(snapshot: dict[str, Any]) -> str:
 
     if active:
         chunks: list[str] = []
+        seen_titles: set[str] = set()
         for topic in active[:3]:
             title = _short_title(topic)
             if not title:
                 continue
+            # 同一话题只列一次（旧实现同一标题能出现 3 次 = 「反复说同一件事」的放大器）
+            if title in seen_titles:
+                continue
+            seen_titles.add(title)
             turns = _safe_int(topic.get("turn_count"), 0)
             chunks.append(f"{title}（{turns}轮）")
         if chunks:
@@ -547,7 +591,7 @@ def render_topic_state_block(snapshot: dict[str, Any]) -> str:
     parked_titles: list[str] = []
     for topic in parked[:2]:
         title = _short_title(topic)
-        if title:
+        if title and title not in parked_titles:
             parked_titles.append(title)
     if parked_titles:
         body.append("- 之前没聊完：" + "；".join(parked_titles))

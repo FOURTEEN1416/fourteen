@@ -7,6 +7,21 @@
 
 ---
 
+## 2026-11-07 — 体验/架构痛点研讨批（前端 IA 与设置归属）· 第一批落地（未完成全部 9 条）
+
+- **来源**：用户 9 条报障 + 五轮对齐（四组归位、用户×角色、每人每角色一份、管理员只做基础体验默认值+站点运维）。研讨报告见工作流产物《痛点研讨报告（9 条）》。
+- **本批已落地（5 条）**：
+  - **P4 写门治理**：`PUT /characters/{id}/persona` + 知识库 5 个写端点（documents 上传/删除、vault、crawl、enrich）+ 成就重算，全部从读门改挂 `require_character_write`（公共池卡对普通用户只读）。新增 `tests/test_p4_character_write_gates.py`（13 例：静态路由守卫 + 行为级 404/放行/机器面）。
+  - **P11 账号页假数据**：拟人节奏 GET 失败不再把硬编码默认当真值渲染，改显式错误态+重试；删「见后续版本」残留文案。前端新增 1 例。
+  - **P1 用户×角色设置（后端）**：新 owner `utils/character_settings.py`（声明式 44 字段 × 五组、全量快照、读侧容错/写侧严格、首次物化继承旧 per-user 覆盖）；表 `user_character_settings`（user_key, character_id 主键）；新端点 `GET/PUT/DELETE /api/characters/{id}/my-settings`；调度器/编排器接线（proactive 8 键、LLM 决策 6 键、骰子闸 10 键、humanize 18 键、话题 2 键）；`scripts/backfill_character_settings.py` 存量物化；旧 per-user 写入同步到已物化快照（防假回执）、旧「恢复默认」同步清快照。测试：`test_character_settings.py` 14 例 + `test_character_settings_api.py` 5 例。
+  - **P10 话题同时段**：续聊锚点窗从 24h 收窄为 `topic_state.same_session_minutes`（出厂 120 分钟）；锚点去重（归一化+包含判定，最新说法优先，上限 2 条）；状态块同一标题只列一次，超窗 active 降级为「之前没聊完」。测试：`test_topic_same_session_p10.py` 7 例；`test_topic_state.py` 默认键数 11→12 连带更新。
+  - **P2/P3/P4 前端**：`/roles` 页头新增「新建角色」主按钮（删列表末尾虚线卡）；公共角色卡分段（全部用户可见/只读/克隆）；`/templates` 路由重定向 `/roles`，导航项移除，`TemplatesPage` 与其 3 个测试删除（DELETION_LOG 已登记）。
+- **P8 后端**：`self_intro` 进画像投影（`profile_projection` 标量字段）+ `user_profile` 自动补列 + 主链画像槽优先展示；端点 `GET/PUT /api/user/self-profile`（写 EventLedger，actor=user）；状态页新增「我的自我介绍」卡片。测试：`test_self_profile_p8.py` 6 例。
+- **未落地（登记下一批）**：P5 消息设置页四组归位前端重构（后端已具备数据面）；P7 最近主动消息迁状态页（需先建本人作用域读面，现 `/api/proactive/history` 仍 admin-only）；P9 剧情线与时间线合并；P8 心理画像页并入状态页（仅完成自述与注入）；HelpGuidePage 模板文案更新；AGENTS/CODE_GRAPH/FUNCTION_INVENTORY 全口径回扫。
+- **已知设计后果（需用户知悉）**：用户裁决「每人每角色一份全量快照」⇒ 之后修改全局出厂默认**不会**回头影响已物化的用户×角色（只有新组合继承新默认）。管理端仍是出厂默认唯一写方。
+- **验证**：前端全量 **351 passed**（删 3 模板页用例、加 1 账号页用例后的净值）+ `tsc --noEmit` 0；后端受影响面 157 + 63 + 199 + 7 + 6 + 13 例全绿；后端四分块全量基线见下一条（若本条目先落，基线结果以紧随其后的运行记录为准）。
+- **部署**：未部署（A 档本地完成，推送/部署随用户裁决）。
+
 ## 2026-11-07 — 对抗验收（adversarial-acceptance · 恢复默认人设根治批 `2e9a2bb`）· 判定通过
 
 - **四步对抗**：① 病灶复现在 HEAD~1 worktree 行为级重做（非 diff 审读）——四项病灶全确认，反向端点实测 **405**（比预估 404 更强：路径模板被 `DELETE /{character_id}` 占位、无 POST 处理器）；② 执行位矩阵补 5 格作者未测面（多条绑定全复位+扫码会话键热切 / 零绑定 / `deps.gf=None` / API Key 启用时匿名恢复 401 且全局 `is_active` 不被清 / `{uid}:{wxid}` 热切）→ **发现即修**，4 例入 `tests/test_character_deactivate_adversarial.py` 全绿；③ 突变验红 **4/4 全中**（M1 个人行不删→2红 / M2 绑定不复位→2红 / M3 扫码键不热切→1红 / M4 显式 default 分支删→1红），突变后 `git checkout` 恢复干净；④ 口径对账——git 实物 10 文件 562+/24- 与宣称一致、deactivate 函数体零手写 `"default"`（真源 `BUILTIN_CHARACTER_ID`）、四件文档 254/208 一致、E2E（断言不依赖角色身份）与 `remote_check.py`（无认证头=机器面旧契约）消费面零影响。

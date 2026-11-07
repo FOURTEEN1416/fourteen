@@ -1371,3 +1371,84 @@ async def proactive_history(
         return {"history": history[-limit:], "total": len(history)}
     return {"history": [], "total": 0}
 
+
+
+# ── 用户自填画像（2026-11-07 P8）──────────────────────────────
+#
+# 用户裁决：「心理画像其实属于记忆的一部分」「为了让 LLM 更了解用户，
+# 用户可以填写属于自己的画像（自我介绍）」。
+#
+# 写权威仍是 EventLedger（profile_correct 事件，actor=user）；`user_profile`
+# 表只做投影缓存。读入口复用主链唯一的 `project_profile_for`，因此自述会
+# 出现在主链 prompt 的画像槽里，且优先级高于模型推测的字段。
+
+class SelfProfileRequest(BaseModel):
+    self_intro: str = Field(
+        default="",
+        max_length=600,
+        description="用户本人的自我介绍（≤600 字；空串 = 清空）",
+    )
+
+
+@router.get("/api/user/self-profile")
+async def get_my_self_profile(
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db=Depends(get_db),
+):
+    """读取「我的自我介绍」；未绑定微信 → 空（不猜键）。"""
+    uk = await _user_session_key_for(int(user_id), db)
+    if not uk:
+        return {"status": "ok", "user_key_present": False, "self_intro": ""}
+    try:
+        from shisi.agent_plane.runtime import project_profile_for
+
+        projection = project_profile_for(uk)
+        return {
+            "status": "ok",
+            "user_key_present": True,
+            "self_intro": str(projection.get("self_intro") or ""),
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("读取自我介绍失败 user=%s: %s", uk, exc)
+        return {"status": "ok", "user_key_present": True, "self_intro": ""}
+
+
+@router.put("/api/user/self-profile")
+async def put_my_self_profile(
+    req: SelfProfileRequest,
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db=Depends(get_db),
+):
+    """保存「我的自我介绍」：写 EventLedger（唯一写权威）+ 物化投影缓存。"""
+    uk = await _user_session_key_for(int(user_id), db)
+    if not uk:
+        raise HTTPException(
+            status_code=409,
+            detail="尚未绑定微信，无法确定你的会话键（不猜键）；请先在微信扫码绑定",
+        )
+    text = str(req.self_intro or "").strip()
+    try:
+        from shisi.agent_plane.profile_projection import write_profile_event
+        from shisi.agent_plane.runtime import (
+            get_ledger,
+            materialize_profile_cache,
+            project_profile_for,
+        )
+
+        projection = write_profile_event(
+            get_ledger(),
+            session_key=uk,
+            payload={"self_intro": text},
+            correct=True,  # 用户本人更正：允许用空串清空
+            actor="user",
+        )
+        materialize_profile_cache(uk, projection)
+        return {
+            "status": "ok",
+            "self_intro": str(project_profile_for(uk).get("self_intro") or ""),
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("保存自我介绍失败 user=%s: %s", uk, exc)
+        raise HTTPException(status_code=500, detail="自我介绍保存失败，请重试") from exc

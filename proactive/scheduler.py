@@ -1610,13 +1610,36 @@ class ProactiveScheduler:
         )
         from utils import topic_state as _topic_state
 
+        # 2026-11-07 用户裁决：设置按「我 × 这个角色」全量快照（唯一真源
+        # `utils.character_settings`）。角色先解析一次，本函数后续所有闸位与
+        # 引擎下发都用同一对 (user_key, character_id)，避免同拍内换角色。
+        character_id = self._resolve_character_id(str(user_key))
+        character_snapshot: dict[str, Any] | None = None
         web_cfg = read_web_proactive_config()
-        # 2026-10-30 D20：per-user 主动调度覆盖（用户覆盖 > 全局 > 默认）。
-        # 一次热读拿到该会话的生效值与「真正被覆盖的键」——本函数后续三道前置
-        # 闸（暂停 / 总开关 / 静默）都按它判据，全局值仍是 ``scheduler_config.json``
-        # （与 admin 端点同一真源，admin 面原样不动）。读库失败/脏值已在
-        # ``utils.proactive_config`` 内逐字段回落全局，**绝不抛异常炸主链**。
-        user_cfg = proactive_config_mod.effective(str(user_key))
+        # 角色级 LLM 决策参数（③组）覆盖全局：旧调用方/测试对
+        # `read_web_proactive_config` 的替身仍然生效，这里只做逐键覆盖。
+        try:
+            from utils import character_settings as _cs
+
+            _snap = _cs.read(str(user_key), str(character_id))
+            character_snapshot = _snap
+            web_cfg = {
+                **web_cfg,
+                # 运维覆盖：全局关（出厂总开关）优先于角色快照——事故时能一键停
+                "enabled": bool(web_cfg.get("enabled", True)) and bool(_snap.get("llm_enabled", True)),
+                "respect_quiet_hours": bool(_snap.get("respect_quiet_hours", True)),
+                "intensity": str(_snap.get("intensity", "normal")),
+                "style_hint": str(_snap.get("style_hint", "")),
+                "character_hint": str(_snap.get("character_hint", "")),
+                "jitter_seconds": int(_snap.get("jitter_seconds", 120)),
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("角色级 LLM 决策参数读取失败（用全局）user=%s: %s", user_key, exc)
+        # 2026-10-30 D20 → 2026-11-07：per-(用户×角色) 主动调度。
+        # 一次热读拿到该角色下的生效值与覆盖键；读库失败/脏值已在
+        # `utils.character_settings` / `utils.proactive_config` 内逐字段回落，
+        # **绝不抛异常炸主链**。
+        user_cfg = proactive_config_mod.effective(str(user_key), character_id=character_id)
         # 该会话生效的静默时段（覆盖哪一端用哪一端）——决策闸、上下文、judge
         # 与投递必须**同一份**窗口，否则「用户把静默窗改窄」会在决策层放行、
         # 又被投递层的全局静默拦回（设置看起来保存成功却永不生效）。
@@ -1627,15 +1650,22 @@ class ProactiveScheduler:
         _quiet_window = self._quiet_hours_for(user_cfg) if _quiet_overridden else None
 
         def _gate(key: str, global_value: Any) -> Any:
-            """闸位取值：用户覆盖了该键就用用户值，否则用**运行时全局**。
+            """闸位取值：角色快照优先，但**全局急停/总开关是运维覆盖层**。
 
-            全局来源保持原样（``self._paused`` / ``read_web_proactive_config()``）
-            ——不是 ``global_config()`` 的文件快照：调度器内存中的全局值是
-            ``_load_config_file`` 每 tick 热载的同一真源，且既有调用方/测试对
-            `read_web_proactive_config` 的替身必须继续生效（零行为变更）。
+            2026-11-07：设置改为「用户 × 角色」全量快照后，每个快照都带
+            ``paused=False`` / ``enabled=True`` —— 若直接按覆盖键取值，管理员
+            的全局暂停/总开关会被逐对快照架空（事故时按不下去）。因此：
+            - ``paused``：全局或用户任一为真 ⇒ 暂停（安全优先）；
+            - ``enabled``：全局与用户都为真才启用（全局关闭可强制停）。
+            其余键仍按快照值（快照内即完整设置）。
             """
+            user_value = user_cfg.get(key, global_value)
+            if key == "paused":
+                return bool(global_value) or bool(user_value)
+            if key == "enabled":
+                return bool(global_value) and bool(user_value)
             if key in user_cfg.overridden_keys:
-                return user_cfg.get(key, global_value)
+                return user_value
             return global_value
         # 🔴 墓碑回滚必须排在所有「此刻不开口」闸**之前**（2026-10-30 复核 high）：
         # paused / enabled=false 的用户根本走不到下面的引擎下发点，墓碑会永远
@@ -1801,6 +1831,13 @@ class ProactiveScheduler:
         self._apply_user_engine_config(
             hub, eng, str(user_key), user_cfg, engine_globals=engine_globals,
         )
+        # 2026-11-07：角色级骰子闸（④组）注入该用户的引擎——放在掷骰之前，
+        # 否则 `evaluate_dice_gate` 读的仍是全局块（用户改了不生效）。
+        if eng is not None and character_snapshot is not None and hasattr(eng, "set_character_settings"):
+            try:
+                eng.set_character_settings(character_snapshot)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("角色级骰子闸注入失败（下一拍重试）user=%s: %s", user_key, exc)
         # D16（2026-10-12「谁扫码谁聊」）：节奏按**账号**聚合（`account_pacing_state`
         # 单一真源）——同 owner 前缀的多条通道取「最近一次投递」与「最近一次
         # 聊天」，消除同账号双通道各记各账、几分钟内连发（生产实证残留根因）。

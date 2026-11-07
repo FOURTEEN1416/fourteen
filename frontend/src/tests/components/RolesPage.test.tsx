@@ -6,6 +6,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import RolesPage from '../../pages/RolesPage'
 import { queryKeys } from '../../hooks/useQueries'
 import { activateCharacter, deactivateCharacter } from '../../api/characters'
+import { listTemplates } from '../../api/templates'
+
+// P2/P4（2026-11-07）：角色页新增「公共角色卡」分段，测试里默认空清单（不打真接口）
+vi.mock('../../api/templates', () => ({
+  listTemplates: vi.fn(async () => ({ total: 0, templates: [] })),
+  cloneTemplate: vi.fn(async () => ({ id: 'c1', name: 'x', status: 'created' })),
+  isCloneAccepted: (r: { status?: string }) => r?.status === 'created',
+}))
 import type { UnifiedCharacter } from '../../types/api'
 
 vi.mock('../../api/characters', async (importOriginal) => {
@@ -16,6 +24,8 @@ vi.mock('../../api/characters', async (importOriginal) => {
     deactivateCharacter: vi.fn(async () => ({ status: 'reset', character_id: 'default' })),
   }
 })
+
+void listTemplates
 
 const CARDS: UnifiedCharacter[] = [
   {
@@ -144,7 +154,7 @@ describe('RolesPage 加载态与空态收编', () => {
     expect(await screen.findByText('暂无角色')).toBeDefined()
     // EmptyState 的 action 槽位承载两个入口（能力入口不因收编而消失）
     expect(screen.getByRole('button', { name: '创建角色' })).toBeDefined()
-    expect(screen.getByRole('link', { name: '从模板挑一个' })).toBeDefined()
+    expect(screen.getByRole('link', { name: '从公共卡挑一个' })).toBeDefined()
 
     const description = screen.getByText('注册时如未自动分配初始角色，可在这里创建一个开始使用')
     // ── 以下四条钉住「确实换成了 shared/EmptyState」，旧手写块会全红 ──

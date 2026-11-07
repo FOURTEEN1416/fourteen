@@ -31,7 +31,7 @@ const SettingsAccount = lazy(() => import('./pages/SettingsAccount'))
 const ToolsDashboard = lazy(() => import('./pages/ToolsDashboard'))
 const SettingsLogs = lazy(() => import('./pages/SettingsLogs'))
 const RolesPage = lazy(() => import('./pages/RolesPage'))
-const TemplatesPage = lazy(() => import('./pages/TemplatesPage'))
+
 
 // ScrollProgress 是 eager 图里唯一拉 framer-motion 的组件；改 lazy 后 motion chunk
 // （≈45KB gz）退出首屏 modulepreload 关键路径（公开页 /intro 不再为其付费）。
@@ -143,7 +143,8 @@ export default function App() {
 
           {/* 角色 */}
           <Route path="/roles" element={<AnimatedSuspense><RolesPage /></AnimatedSuspense>} />
-          <Route path="/templates" element={<AnimatedSuspense><TemplatesPage /></AnimatedSuspense>} />
+          {/* P2（2026-11-07）：模板页并入 /roles 的「公共角色卡」分段；旧链接重定向 */}
+          <Route path="/templates" element={<Navigate to="/roles" replace />} />
           <Route path="/roles/create" element={<AnimatedSuspense><CreateRole /></AnimatedSuspense>} />
           <Route path="/roles/:roleId/settings" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />
           <Route path="/roles/:roleId/settings/:tab" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />

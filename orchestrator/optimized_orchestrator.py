@@ -1374,11 +1374,21 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         try:
             from utils.local_time import now_local as _now_local
             from utils.prompt_sanitize import _extract_user_anchor_sentences
+            from utils.topic_state import read_topic_config as _read_topic_cfg
 
             _wn = _now_local()
+            # P10（2026-11-07 用户报障「相隔两三个小时硬连在一起」）：
+            # 续聊钩子的取材窗从 24h 收窄到「同时段」——默认 120 分钟，
+            # 由 topic_state.same_session_minutes 配置（出厂 120，可调）。
+            _topic_cfg = _read_topic_cfg()
+            _same_session_h = max(1, int(_topic_cfg.get("same_session_minutes", 120))) / 60.0
             current_topics = _extract_user_anchor_sentences(
                 chat_history,
                 current_user_message=user_msg_clean,
+                max_age_hours=_same_session_h,
+                # 2026-11-07：同一话题只留最新一条（去重后限 2 条），
+                # 旧实现 3 条常是同一件事的三种说法 → 模型反复回放。
+                limit=2,
                 now=_wn.replace(tzinfo=None) if getattr(_wn, "tzinfo", None) is not None else _wn,
             )
         except Exception as e:  # noqa: BLE001
@@ -2029,7 +2039,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 from utils.humanize_config import read_humanize
                 from utils.humanize_typo import maybe_apply_typo
 
-                final = maybe_apply_typo(final, read_humanize(str(session_id or "")))
+                final = maybe_apply_typo(
+                    final, read_humanize(str(session_id or ""), str(character_id or ""))
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.debug("口误应用跳过: %s", exc)
         return final
@@ -2144,6 +2156,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 rhythm = await self._apply_humanize_rhythm(
                     session_id, user_msg_clean, ctx,
                     typing_capable=typing_sender is not None,
+                    character_id=str(character_id or ""),
                 )
                 if rhythm["superseded"]:
                     logger.info("[humanize][step=superseded] session=%s", session_id)
@@ -2366,7 +2379,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
     async def _apply_humanize_rhythm(
         self, session_id: str, user_msg: str, ctx: dict[str, Any],
-        *, typing_capable: bool = False,
+        *, typing_capable: bool = False, character_id: str = "",
     ) -> dict[str, Any]:
         """阅读延迟 + supersede 判定（P0-B，2026-10-27）。
 
@@ -2382,7 +2395,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             from utils.humanize_config import read_humanize
             from utils.humanize_read_delay import compute_read_delay_ms
 
-            cfg = read_humanize(str(session_id or ""))
+            cfg = read_humanize(str(session_id or ""), str(character_id or ""))
             typing_on = bool(typing_capable and cfg.typing_enabled)
             out["typing"] = typing_on
             if not cfg.read_delay_enabled:

@@ -12,6 +12,8 @@ import {
   useUnifiedCharacter,
 } from '../hooks/useQueries'
 import { adminListUsers } from '../api/admin'
+import { getMySelfProfile, saveMySelfProfile } from '../api/selfProfile'
+import { useErrorStore } from '../store/errorStore'
 import { useAuthStore } from '../store/authStore'
 import { useGlobalViewStore } from '../store/globalViewStore'
 import type { AchievementsResponse, DashboardStats } from '../types/api'
@@ -144,12 +146,101 @@ export default function StatusCenter() {
 
           <EmotionInsightCard trend={trendData?.trend ?? []} distribution={distData?.distribution ?? []} distTotal={distData?.total ?? 0} />
 
+          {/* P8（2026-11-07）：用户自填自我介绍——写 EventLedger，主链画像槽优先展示 */}
+          <SelfIntroCard />
+
           <AchievementsCard data={achievements} />
         </div>
 
         <MemorySystemCard characterId={activeCharacter.id} recentFacts={recentFacts} ownerNames={ownerNames} />
       </div>
     </div>
+  )
+}
+
+/** P8（2026-11-07）：我的自我介绍——用户本人填写，LLM 画像槽优先采信。
+ *  空内容 = 清空；加载失败显式报错，不拿空串冒充「没填过」。 */
+function SelfIntroCard() {
+  const addToast = useErrorStore(s => s.addToast)
+  const [text, setText] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [savedAt, setSavedAt] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    getMySelfProfile()
+      .then((res) => {
+        if (!cancelled) setText(res.self_intro ?? '')
+      })
+      .catch(() => {
+        if (!cancelled) setError('自我介绍加载失败，当前显示的不是你的真实内容')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const res = await saveMySelfProfile(text)
+      setText(res.self_intro ?? '')
+      setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
+      addToast({ type: 'success', message: '自我介绍已保存，聊天时会优先按它了解你' })
+    } catch {
+      addToast({ type: 'error', message: '保存失败，请重试' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <section className="glass-card rounded-xl p-4" data-testid="self-intro-card">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-gray-700">我的自我介绍</h3>
+        <span className="text-[10px] text-gray-400">写给你自己看的「我是谁」，聊天时会优先采信</span>
+      </div>
+      {loading ? (
+        <p className="py-2 text-xs text-gray-400">加载中…</p>
+      ) : error ? (
+        <div className="space-y-2 rounded-lg border border-red-200/50 bg-red-50/40 p-3 text-center">
+          <p className="text-xs text-red-600">{error}</p>
+          <button
+            type="button"
+            onClick={() => { setError(null); setLoading(true); void getMySelfProfile().then(r => setText(r.self_intro ?? '')).catch(() => setError('自我介绍加载失败')).finally(() => setLoading(false)) }}
+            className="rounded-lg border border-red-200 bg-white/80 px-3 py-1 text-xs text-red-600 hover:bg-white"
+          >
+            重试
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <textarea
+            value={text}
+            maxLength={600}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="例如：我是默默，做后端和安全；喜欢安静、讨厌被叫「夏夏」；希望你先听我说完再给建议。"
+            className="h-24 w-full resize-y rounded-lg border border-gray-200 bg-white/70 px-3 py-2 text-xs leading-relaxed text-gray-700 outline-none focus:border-macaron-blue/50"
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] text-gray-400">{text.length}/600{savedAt ? ` · 已保存 ${savedAt}` : ''}</span>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving}
+              className="rounded-lg bg-primary-500 px-4 py-1.5 text-xs font-medium text-white hover:bg-primary-400 disabled:opacity-50"
+            >
+              {saving ? '保存中…' : '保存自我介绍'}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 

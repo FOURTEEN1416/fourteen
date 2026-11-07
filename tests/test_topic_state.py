@@ -148,9 +148,11 @@ def test_defaults_when_file_missing(tmp_path):
     cfg = ts.read_topic_config()
     assert cfg == ts.DEFAULTS
     assert set(cfg) == set(ts.DEFAULTS)
-    assert len(cfg) == 11
+    assert len(cfg) == 12
     assert cfg["enabled"] is True
     assert cfg["llm_judge_enabled"] is True
+    # P10（2026-11-07）：同时段窗出厂 120 分钟（续聊钩子与「正在聊」判定共用）
+    assert cfg["same_session_minutes"] == 120
 
 
 def test_bad_values_fall_back_per_field(tmp_path):

@@ -304,4 +304,21 @@ describe('SettingsAccount 个人偏好（NEW-34）', () => {
       expect(screen.getAllByText('个人覆盖').length).toBeGreaterThan(0)
     })
   })
+
+  it('拟人节奏加载失败：错误态 + 重试，绝不拿硬编码默认值冒充现状（P11）', async () => {
+    mockGetMyHumanize.mockRejectedValue({ response: { data: { detail: '后端不可用' } } })
+    render(<SettingsAccount />)
+    // 错误文案落到页面
+    expect(await screen.findByText(/后端不可用|加载失败/)).toBeDefined()
+    // 表单不渲染：没有「保存个人节奏」按钮，也没有假的「每字 45」
+    expect(screen.queryByText('保存个人节奏')).not.toBeInTheDocument()
+    expect(screen.queryByText(/每字/)).not.toBeInTheDocument()
+    // 重试入口可用
+    const retry = screen.getByRole('button', { name: '重试' })
+    mockGetMyHumanize.mockResolvedValue({
+      data: { status: 'ok', config: { delay_mode: 'dynamic', per_char_ms: 45, fixed_ms: 600, proactive_split: false }, scope: 'global', user_key: '2:wx' },
+    })
+    fireEvent.click(retry)
+    expect(await screen.findByText('保存个人节奏')).toBeInTheDocument()
+  })
 })

@@ -1284,6 +1284,31 @@ class ASEEngine:
 
     # ── 零 token 骰子闸（2026-10-28 dsh-speak-up 批）──────────
 
+    def set_character_settings(self, settings: dict[str, Any] | None) -> None:
+        """注入「我 × 这个角色」的设置快照（2026-11-07）。
+
+        目前消费 ④ 骰子闸组（`dice_enabled` / `dice_dry_run` / 8 个概率参数）。
+        由 `ProactiveScheduler._llm_proactive_one_user` 每拍在掷骰前注入该用户
+        当前角色的快照；`None` 表示回落到全局块。**逐拍覆盖、不做缓存**——
+        用户改完下一次 tick 立即生效。
+        """
+        self._character_settings = dict(settings) if settings else {}
+
+    def _dice_config_effective(self) -> dict[str, Any]:
+        """骰子闸生效配置：角色快照（若有）逐键覆盖全局块。"""
+        from proactive.frequency import DICE_GATE_DEFAULTS, read_dice_gate_config
+
+        base = read_dice_gate_config()
+        snap = getattr(self, "_character_settings", None) or {}
+        if not snap:
+            return base
+        return {
+            **base,
+            **{k: v for k, v in DICE_GATE_DEFAULTS.items() if k in snap},
+            "enabled": bool(snap.get("dice_enabled", base.get("enabled", False))),
+            "dry_run": bool(snap.get("dice_dry_run", base.get("dry_run", True))),
+        }
+
     def evaluate_dice_gate(
         self, *, requested_mode: str = "live",
     ) -> tuple[bool, Any]:
@@ -1303,9 +1328,10 @@ class ASEEngine:
         观测组件，不该成为单点故障）。
         """
         try:
-            from proactive.frequency import evaluate_dice_roll, read_dice_gate_config
+            from proactive.frequency import evaluate_dice_roll
 
-            cfg = read_dice_gate_config()
+            # 2026-11-07：角色级快照（若已注入）逐键覆盖全局骰子闸。
+            cfg = self._dice_config_effective()
             if not cfg.get("enabled", False):
                 self._dice_dry_miss_streak = 0
                 self._dice_live_miss_streak = 0

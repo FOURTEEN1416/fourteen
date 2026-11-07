@@ -561,19 +561,41 @@ def validate_partial(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def effective(user_key: str | None = None) -> EffectiveConfig:
-    """热读该会话的生效配置（用户覆盖 → 全局 → 默认）。
+def effective(
+    user_key: str | None = None, character_id: str | None = None
+) -> EffectiveConfig:
+    """热读生效配置（2026-11-07 起：用户×角色快照 → 全局；旧 per-user 链保留兜底）。
 
     Args:
         user_key: 完整会话键（v1.28 形态 ``N:wxid``）。``None``/空串 → 只读
             全局默认（后台线 / 无会话上下文的调用点保持旧行为）。
+        character_id: 卡片 id。**给了就走「我 × 这个角色」的全量快照**
+            （`utils.character_settings` 唯一真源，2026-11-07 用户裁决
+            「每个角色各自一套设置」）；不给维持旧的 per-user 覆盖链。
 
     语义（D15 显式声明、绝不猜测）：
-      - 覆盖表里没有该 user_key 的行 → 回落全局，不做任何模糊匹配；
-      - 行存在但单字段非法 → 该字段回落全局（不信任脏数据，不抛异常）；
-      - 覆盖库不可用（缺失 / 损坏 / 权限）→ 回落全局，**绝不抛异常炸主链**。
+      - 快照行全量存在（首次读取物化），所以 ``overridden_keys`` 为该组全部键；
+      - 快照不可用 → 回落旧 per-user 覆盖链 → 全局，**绝不抛异常炸主链**。
     """
     base = global_config()
+
+    if user_key and character_id:
+        try:
+            from utils import character_settings
+
+            snapshot = character_settings.read(str(user_key).strip(), str(character_id).strip())
+            values = {**base, **{k: v for k, v in snapshot.items() if k in FIELDS_ALL}}
+            return EffectiveConfig(
+                values=values,
+                overridden_keys=frozenset(FIELDS_ALL),
+                global_values=base,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "角色级主动设置读取失败，回落全局 user=%s ch=%s: %s",
+                user_key, character_id, exc,
+            )
+
     overrides = read_override(user_key)
     if not overrides:
         return EffectiveConfig(values=base, overridden_keys=frozenset(), global_values=base)
@@ -664,6 +686,14 @@ def write_proactive_config(*, user_key: str, **partial: Any) -> EffectiveConfig:
         if revert:
             stored[_REVERT_KEY] = sorted(revert)
         _write_override_conn(conn, uk, stored)
+    # 2026-11-07：旧界面写 per-user 行时必须同步到该用户已物化的角色快照，
+    # 否则新真源（用户×角色）下会「保存成功但不生效」= 假回执。
+    try:
+        from utils import character_settings
+
+        character_settings.propagate_user_patch(uk, payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("同步角色快照失败 user=%s: %s", uk, exc)
     return effective(uk)
 
 
@@ -687,6 +717,14 @@ def clear_override(user_key: str) -> bool:
     uk = str(user_key or "").strip()
     if not uk:
         return False
+    # 2026-11-07：同步清空该用户的全部「用户 × 角色」快照——旧界面的
+    # 「恢复默认」必须继续成立；只删旧行不删快照 = 回执成功但行为不变。
+    try:
+        from utils import character_settings
+
+        character_settings.purge_user(uk)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("清除角色快照失败 user=%s: %s", uk, exc)
     with _override_txn() as conn:
         stored = _read_raw_conn(conn, uk, strict=True)
         raw_revert = stored.get(_REVERT_KEY)

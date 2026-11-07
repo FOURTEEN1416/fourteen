@@ -15,7 +15,10 @@ from pydantic import BaseModel, Field
 from api.auth import verify_api_key_dep
 from api.auth_jwt import AuthPrincipal, get_optional_principal
 from api.path_security import sanitize_id
-from api.routers.character_routes import require_character_access
+from api.routers.character_routes import (
+    require_character_access,
+    require_character_write,
+)
 from shisi.character.character_card_v2 import CharaCardV2Parser
 from shisi.character.models import CharaCardV2
 from shisi.knowledge.character_knowledge_service import (
@@ -199,9 +202,10 @@ async def upload_knowledge_document(
     character_id: str,
     file: UploadFile = File(...),  # noqa: B008
     _auth: bool = Security(verify_api_key_dep),
-    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
-    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
-    _owned: dict = Depends(require_character_access),
+    # P4（2026-11-07 写门治理）：上传文档写的是**角色级**知识库，属写操作。
+    # 旧用 require_character_access → 普通用户可往公共池成品卡里塞内容（跨用户污染）。
+    # 与 voice 写侧同口径：他人私有卡 / 无主公共卡一律 404。
+    _owned: dict = Depends(require_character_write),
 ):
     """上传文档到角色知识库（文本文件，自动分块索引）"""
     raw = _load_character_data(character_id)
@@ -265,9 +269,8 @@ async def delete_knowledge_document(
     character_id: str,
     doc_id: str,
     _auth: bool = Security(verify_api_key_dep),
-    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
-    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
-    _owned: dict = Depends(require_character_access),
+    # P4（2026-11-07 写门治理）：删除角色级知识来源＝写操作（同上传侧）。
+    _owned: dict = Depends(require_character_write),
 ):
     """删除角色知识库中的文档（W5：按来源粒度 ``doc:{doc_id}`` 从源存储移除）"""
     service = get_knowledge_service()
@@ -291,9 +294,8 @@ async def collect_knowledge_vault(
     character_id: str,
     req: VaultCollectRequest = VaultCollectRequest(),  # noqa: B008
     _auth: bool = Security(verify_api_key_dep),
-    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
-    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
-    _owned: dict = Depends(require_character_access),
+    # P4（2026-11-07 写门治理）：宝库收集会重建角色级 BM25 索引＝写操作。
+    _owned: dict = Depends(require_character_write),
 ):
     """触发知识宝库收集：从角色卡提取 PersonaFeatures → 知识块 → BM25 索引。"""
     card = _load_character_card(character_id)
@@ -365,9 +367,9 @@ async def crawl_persona_knowledge(
     req: CrawlPersonaRequest,
     _auth: bool = Security(verify_api_key_dep),
     principal: AuthPrincipal | None = Security(get_optional_principal),
-    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
-    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
-    _owned: dict = Depends(require_character_access),
+    # P4（2026-11-07 写门治理）：爬取结果写入角色级知识索引＝写操作。
+    # 公共池卡对普通用户只读，不允许把网络素材挂到别人的/公共的卡上。
+    _owned: dict = Depends(require_character_write),
 ):
     """从网络抓取人物资料并写入角色知识索引。"""
     _enforce_user_rate_limit("crawl", principal)  # F3：每用户限速前置（配额不因 404/502 泄漏）
@@ -420,9 +422,8 @@ async def enrich_character_persona(
     req: EnrichRequest,
     _auth: bool = Security(verify_api_key_dep),
     principal: AuthPrincipal | None = Security(get_optional_principal),
-    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
-    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
-    _owned: dict = Depends(require_character_access),
+    # P4（2026-11-07 写门治理）：人设增强结果持久化到角色级知识库＝写操作。
+    _owned: dict = Depends(require_character_write),
 ):
     """火爬虫 + AgentReach 人设增强：抓取多源网络素材 → 处理为知识块 → 写入角色知识库。
 

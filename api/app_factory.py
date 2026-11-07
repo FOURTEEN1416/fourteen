@@ -380,6 +380,14 @@ def create_api_app(
         deps.route_mounts["character_templates"] = False
         logger.warning("角色模板面API挂载失败: %s", e)
 
+    # ── 「我 × 这个角色」设置（2026-11-07 P1：用户自管，无管理员代设）──
+    try:
+        from api.routers.character_settings_routes import router as character_settings_router
+        _mount_required_router("character_settings", character_settings_router)
+    except Exception as e:
+        deps.route_mounts["character_settings"] = False
+        logger.warning("角色级设置API挂载失败: %s", e)
+
     # ── 角色音色绑定 API ──
     try:
         from api.routers.voice_routes import router as voice_router

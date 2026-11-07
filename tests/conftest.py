@@ -244,6 +244,18 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 「用户 × 角色」设置唯一真源（2026-11-07 痛点批 P1）：默认库是宿主
+    # data/sqlite.db。任何直接调用 character_settings.read/write 的测试都会在
+    # 真实库建表/写行——同 2026-09-22 块E 事故型，不隔离就会被 gitignore 掩盖。
+    try:
+        from utils import character_settings as _cs
+
+        monkeypatch.setattr(
+            _cs, "_DB_PATH", sandbox / "character_settings.db", raising=False,
+        )
+    except Exception:
+        pass
+
     # 主动 parked 复提的 judge 读同一物理 scheduler_config.json；不重定向会让
     # 测试随宿主 judge_enabled 漂移（2026-10-27 Task 1 Step 7 / 2026-10-28 复核）。
     try:

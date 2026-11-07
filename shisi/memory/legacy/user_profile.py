@@ -61,10 +61,17 @@ class UserProfileStore:
                     preferences TEXT DEFAULT '[]',
                     commitments TEXT DEFAULT '[]',
                     notes TEXT DEFAULT '',
+                    self_intro TEXT DEFAULT '',
                     updated_at TEXT DEFAULT ''
                 )
                 """
             )
+            # 2026-11-07 P8：存量库补列（CREATE IF NOT EXISTS 不会改已有表）。
+            cols = {
+                str(row[1]) for row in conn.execute("PRAGMA table_info(user_profile)").fetchall()
+            }
+            if "self_intro" not in cols:
+                conn.execute("ALTER TABLE user_profile ADD COLUMN self_intro TEXT DEFAULT ''")
 
     @staticmethod
     def _now() -> str:
@@ -112,6 +119,7 @@ class UserProfileStore:
             if "commitments" in fields
             else (cur.get("commitments") or []),
             "notes": _pick("notes"),
+            "self_intro": _pick("self_intro"),
         }
         if fields.get("clear_birthday"):
             merged["birthday"] = ""
@@ -124,8 +132,8 @@ class UserProfileStore:
                 """
                 INSERT INTO user_profile
                 (user_key, nickname, birthday, occupation, location,
-                 preferences, commitments, notes, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?)
+                 preferences, commitments, notes, self_intro, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(user_key) DO UPDATE SET
                   nickname=excluded.nickname,
                   birthday=excluded.birthday,
@@ -134,6 +142,7 @@ class UserProfileStore:
                   preferences=excluded.preferences,
                   commitments=excluded.commitments,
                   notes=excluded.notes,
+                  self_intro=excluded.self_intro,
                   updated_at=excluded.updated_at
                 """,
                 (
@@ -145,6 +154,7 @@ class UserProfileStore:
                     json.dumps(prefs, ensure_ascii=False),
                     json.dumps(commits, ensure_ascii=False),
                     merged["notes"],
+                    merged["self_intro"],
                     self._now(),
                 ),
             )
@@ -238,6 +248,9 @@ class UserProfileStore:
         if not p:
             return ""
         lines: list[str] = ["# 用户画像（稳定事实，以本段为准；段外信息禁止编造）"]
+        # 2026-11-07 P8：用户自述优先于模型推测字段
+        if p.get("self_intro"):
+            lines.append(f"- 用户自述（本人填写，优先采信）：{p['self_intro']}")
         if p.get("nickname"):
             lines.append(f"- 称呼：{p['nickname']}")
         if p.get("birthday"):

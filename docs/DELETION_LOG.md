@@ -1113,3 +1113,11 @@ equire() in MessageList.tsx even though MessageList is unused
 - **根因**：`frontend/e2e/w11_journey.spec.ts`「账号维度」用例每次注册 fresh 账号并触发默认角色克隆，用例无收尾清理 → 每跑一次泄漏一张；第 4 张为初跑接错库（真实 `data/users.db`）的残留。
 - **处置**：四张卡连同 `data/knowledge/<id>.json` 派生索引一并删除（索引可由源重建）；该用例已补收尾清理（用 fresh 账号 token 删净名下角色卡），复跑实证角色卡稳定 41 张。
 - **登记**：对抗验收三轮发现（e2e 首次真机执行 + 长期泄漏），非批 7 代码缺陷。
+
+## 2026-11-07 — TemplatesPage 与专属测试删除（P2 模板页并入角色页）
+
+- **对象**：`frontend/src/pages/TemplatesPage.tsx`（167 行）+ `frontend/src/tests/components/TemplatesPage.test.tsx`（153 行）。
+- **依据**：用户裁决「/templates 和 /roles 属于冗余设计」；公共卡浏览/克隆职能已并入 `/roles` 的「公共角色卡」分段（`RolesPage.tsx` 新增 `PublicCard`），`/templates` 路由改为重定向 `/roles`，导航项移除。
+- **删除前核验**：全文件读完；全仓 grep 引用面 = App 路由（已改重定向）、navGroups（已移除）、Breadcrumb（保留 `/templates` 归「角色」，重定向后不渲染）、HelpGuidePage（指引文案待下一批更新）、RolesPage（入口已改锚点）。克隆能力本体（`api/templates.ts`、`/api/character-templates`）**未删除**，只删页面外壳。
+- **可恢复性**：git 历史可取回（`git show <commit>^:frontend/src/pages/TemplatesPage.tsx`）。
+- **效果**：删除 3 个页面级用例；克隆成功/失败判定的行为由 RolesPage 的公共卡逻辑承接（后续补对应用例）。

@@ -283,6 +283,8 @@ def _is_topic_noise(word: str) -> bool:
 # 完整短句，而不是全句随机切词。生产实测旧关键词袋给出 `['的话','哈喽']`
 # —— 既不是话题，也没有说话人；模型拿到的只是噪声，于是每轮另起炉灶。
 _TOPIC_SENTENCE_SPLIT_RE = re.compile(r"[。！？!?…\n，,；;]+")
+# 去重用的归一化：去掉标点/空白后比较，避免「假链接。」与「假链接」被当成两条。
+_TOPIC_DEDUP_STRIP_RE = re.compile(r"[\s，,。.！!？?、；;：:~～…·\"'“”‘’]+")
 # 纯寒暄/应答整句：不构成话题，进锚点只会教唆空转（「哈喽」「嗯」「好的」）。
 # 2026-10-20 二轮补充「暂时没有／不知道／随便」这类**空应答**：它们带否定词，
 # 但不是可接住的具体内容；单纯靠 `_TOPIC_ANCHOR_HINTS` 的「没」会被误放行。
@@ -331,7 +333,7 @@ def _extract_user_anchor_sentences(
         limit: 最多返回几条（越新越靠后，调用方通常取尾部）。
 
     Returns:
-        按时间正序的短句列表（不含重复）。
+        **最新优先**的短句列表（去重后，最多 ``limit`` 条）。
     """
     candidates: list[str] = []
     wall_now = None
@@ -359,8 +361,24 @@ def _extract_user_anchor_sentences(
         candidates.append(str(current_user_message))
 
     anchors: list[str] = []
-    seen: set[str] = set()
-    for blob in candidates:
+    seen_keys: list[str] = []
+
+    def _dup(key: str) -> bool:
+        """完全相同、或一条完整包含另一条 ⇒ 视为同一话题（保留最新说法）。"""
+        if not key:
+            return True
+        for other in seen_keys:
+            if key == other:
+                return True
+            # 只对 ≥2 字的短串做包含判定：避免单字噪声把不同话题并掉。
+            if len(key) >= 2 and len(other) >= 2 and (key in other or other in key):
+                return True
+        return False
+
+    # 2026-11-07（P10）：从**最新**往回取，重复/近似重复只保留最新说法。
+    # 旧实现按时间正序 `sentence in seen` 去重 → 同一话题的旧表述占位，
+    # 模型拿到的永远是几小时前的原句（「反复说同一件事」的素材来源）。
+    for blob in reversed(candidates):
         for raw in _TOPIC_SENTENCE_SPLIT_RE.split(str(blob or "")):
             sentence = raw.strip(" \t，,。.！!？?、；;：:~～…·\"'“”‘’")
             if len(sentence) < 2 or len(sentence) > 40:
@@ -369,14 +387,20 @@ def _extract_user_anchor_sentences(
                 continue
             if _EMPTY_ANSWER_RE.match(sentence):
                 continue
-            if sentence in seen:
+            key = _TOPIC_DEDUP_STRIP_RE.sub("", sentence)
+            if _dup(key):
                 continue
             # 只保留「在说一件具体的事」的句子：含动作/状态词，或本身足够长。
             if len(sentence) < 4 and not any(h in sentence for h in _TOPIC_ANCHOR_HINTS):
                 continue
-            seen.add(sentence)
+            seen_keys.append(key)
             anchors.append(sentence)
-    return anchors[-limit:] if limit > 0 else anchors
+            if limit > 0 and len(anchors) >= limit:
+                break
+        if limit > 0 and len(anchors) >= limit:
+            break
+    # 取的是「最新 N 条」，最新在前——调用方渲染时按此顺序。
+    return anchors
 
 
 def extract_current_topics(

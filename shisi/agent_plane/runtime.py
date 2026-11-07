@@ -63,7 +63,7 @@ def materialize_profile_cache(session_key: str, projection: dict[str, Any]) -> N
     try:
         store = _store()
         fields: dict[str, Any] = {}
-        for k in ("nickname", "birthday", "occupation", "location", "notes"):
+        for k in ("nickname", "birthday", "occupation", "location", "notes", "self_intro"):
             if k in projection:
                 fields[k] = str(projection.get(k) or "")
         for k in ("preferences", "commitments"):
@@ -296,12 +296,16 @@ def format_profile_prompt_block(
     投影里也不注入 prompt（写侧否决门防新增，读侧守卫防存量继续带偏）。
     """
     p = projection or {}
-    if not any(p.get(k) for k in ("nickname", "birthday", "occupation", "location", "notes")) and not (
-        p.get("preferences") or p.get("commitments")
-    ):
+    if not any(
+        p.get(k) for k in ("nickname", "birthday", "occupation", "location", "notes", "self_intro")
+    ) and not (p.get("preferences") or p.get("commitments")):
         return ""
     denied = {str(x) for x in (denied_names or []) if str(x or "").strip()}
     lines: list[str] = ["# 用户画像（稳定事实，以本段为准；段外信息禁止编造）"]
+    # 2026-11-07 P8：用户自述是**本人声明**，优先于模型推测的字段展示。
+    self_intro = str(p.get("self_intro") or "").strip()
+    if self_intro:
+        lines.append(f"- 用户自述（本人填写，优先采信）：{self_intro}")
     nick = str(p.get("nickname") or "").strip()
     if nick and nick not in denied:
         lines.append(f"- 称呼：{nick}")

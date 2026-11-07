@@ -275,13 +275,18 @@ def _effective_global_values(block: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def read_humanize(user_key: str | None = None) -> HumanizeConfig:
-    """热读当前拟人度配置（用户覆盖 → 全局块 → 默认值）。
+def read_humanize(
+    user_key: str | None = None, character_id: str | None = None
+) -> HumanizeConfig:
+    """热读当前拟人度配置（2026-11-07 起：用户×角色快照 → 全局块 → 默认值）。
 
     Args:
         user_key: 完整会话键（v1.28 形态 ``N:wxid``，由
             ``StructuredMemory.user_key_from_session`` 产出）。``None``/空串
             → 只读全局默认（后台线/提醒线等无会话上下文的调用点保持旧行为）。
+        character_id: 卡片 id。**给了就走「我 × 这个角色」的全量快照**
+            （`utils.character_settings` 唯一真源，用户裁决「每个角色各自一套」）；
+            不给则维持旧的 per-user 覆盖链（机器面/无角色上下文的调用点）。
 
     语义（D15 显式声明、绝不猜测）：
       - 覆盖表里没有该 user_key 的行 → 回落全局块，不做任何模糊匹配；
@@ -297,6 +302,27 @@ def read_humanize(user_key: str | None = None) -> HumanizeConfig:
     if not isinstance(block, dict):
         block = {}
     values = _effective_global_values(block)
+
+    if user_key and character_id:
+        # 2026-11-07 用户裁决：设置按「我 × 这个角色」全量快照，不再回落到
+        # 跨角色的 per-user 层。行不存在时 read() 会从出厂默认整份物化。
+        try:
+            from utils import character_settings
+
+            snapshot = character_settings.read(str(user_key).strip(), str(character_id).strip())
+            for name in ("delay_mode", "per_char_ms", "fixed_ms", "random_min_ms",
+                         "random_max_ms", "delay_floor_ms", "delay_ceil_ms",
+                         "bracket_delay_ms", "proactive_split", "read_delay_enabled",
+                         "read_delay_min_ms", "read_delay_max_ms",
+                         "read_delay_chars_per_second", "read_delay_max_total_ms",
+                         "read_delay_channel_cap_ms", "typing_enabled", "typo_rate",
+                         "max_segments"):
+                if name in snapshot:
+                    values[name] = snapshot[name]
+            return HumanizeConfig(**values)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("角色级拟人设置读取失败，回落全局 user=%s ch=%s: %s",
+                           user_key, character_id, exc)
 
     if user_key and values.get("user_override_enabled", True):
         override = _read_override(str(user_key).strip())
@@ -450,6 +476,14 @@ def write_humanize(*, user_key: str | None = None, **partial: Any) -> HumanizeCo
         stored = _read_override_raw(uk)
         stored.update(payload)
         _write_override(uk, stored)
+        # 2026-11-07：旧界面写 per-user 行时必须同步到该用户已物化的角色快照，
+        # 否则新真源（用户×角色）下会「保存成功但不生效」= 假回执。
+        try:
+            from utils import character_settings
+
+            character_settings.propagate_user_patch(uk, payload)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("同步角色快照失败 user=%s: %s", uk, e)
         return read_humanize(uk)
 
     def _mutate(data: dict[str, Any]) -> None:
@@ -483,17 +517,29 @@ def has_user_override(user_key: str) -> bool:
 
 
 def clear_humanize_override(user_key: str) -> bool:
-    """删除该用户的覆盖行（回落全局默认）。返回是否有行被删。"""
+    """删除该用户的覆盖行（回落全局默认）。返回是否有行被删。
+
+    2026-11-07：同时清空该用户的全部「用户 × 角色」快照——旧界面的
+    「恢复跟随全局」语义必须继续成立；只删旧行不删快照会让用户看到
+    「已恢复」而行为仍按旧快照跑（假成功）。
+    """
     uk = str(user_key or "").strip()
     if not uk:
         return False
+    purged = 0
+    try:
+        from utils import character_settings
+
+        purged = character_settings.purge_user(uk)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("清除角色快照失败 user=%s: %s", uk, e)
     try:
         with closing(_override_conn()) as conn, conn:
             cur = conn.execute(f"DELETE FROM {OVERRIDE_TABLE} WHERE user_key = ?", (uk,))
-            return bool(cur.rowcount)
+            return bool(cur.rowcount) or purged > 0
     except Exception as e:  # noqa: BLE001
         logger.warning("清除拟人度覆盖失败 user=%s: %s", uk, e)
-        return False
+        return purged > 0
 
 
 # ── per-user 覆盖存储（2026-10-27 G-2）──────────────────────────

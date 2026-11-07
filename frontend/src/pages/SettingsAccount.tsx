@@ -391,6 +391,8 @@ function MyPreferencesSection() {
 
   // 拟人节奏
   const [hLoading, setHLoading] = useState(true)
+  const [hError, setHError] = useState<string | null>(null)
+  const [hReloadToken, setHReloadToken] = useState(0)
   const [hScope, setHScope] = useState<'user' | 'global'>('global')
   const [delayMode, setDelayMode] = useState('dynamic')
   const [perCharMs, setPerCharMs] = useState(45)
@@ -400,6 +402,8 @@ function MyPreferencesSection() {
 
   useEffect(() => {
     let cancelled = false
+    setHLoading(true)
+    setHError(null)
     void getMyReplyMode()
       .then((res) => {
         if (cancelled) return
@@ -420,12 +424,21 @@ function MyPreferencesSection() {
         setProactiveSplit(!!cfg.proactive_split)
         setHScope(d.scope === 'user' ? 'user' : 'global')
       })
-      .catch(() => undefined)
+      .catch((err: unknown) => {
+        // P11（2026-11-07）：旧实现 catch 静默吞掉并把硬编码初值（dynamic/45/600）
+        // 当真实设置渲染——用户看到的「当前值」是代码默认，不是服务端真值。
+        // 改为显式错误态 + 重试；未拿到真值前绝不让表单冒充现状。
+        if (cancelled) return
+        const msg =
+          (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+          || '拟人节奏加载失败，当前显示的不是你的真实设置'
+        setHError(msg)
+      })
       .finally(() => {
         if (!cancelled) setHLoading(false)
       })
     return () => { cancelled = true }
-  }, [])
+  }, [hReloadToken])
 
   const handleReplyMode = async (mode: ReplyMode) => {
     setReplyMode(mode)
@@ -534,6 +547,17 @@ function MyPreferencesSection() {
           </p>
           {hLoading ? (
             <p className="text-xs text-gray-400 py-2">加载中…</p>
+          ) : hError ? (
+            <div className="rounded-xl border border-red-200/50 bg-red-50/40 p-3 text-center space-y-2">
+              <p className="text-xs text-red-600">{hError}</p>
+              <button
+                type="button"
+                onClick={() => setHReloadToken((t) => t + 1)}
+                className="rounded-lg border border-red-200 bg-white/80 px-3 py-1 text-xs text-red-600 hover:bg-white transition-colors"
+              >
+                重试
+              </button>
+            </div>
           ) : (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -588,7 +612,7 @@ function MyPreferencesSection() {
                 )}
               </div>
               <p className="text-[10px] text-gray-400">
-                节奏只在你的微信会话生效；主动消息的整体频率与免打扰时段属全局调度，个人档调节见后续版本。
+                节奏与主动消息频率按「角色」分别保存，请到对应角色的「设置 → 消息」调整；这里只作用于你自己的微信会话。
               </p>
             </div>
           )}

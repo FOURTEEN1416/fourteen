@@ -1394,34 +1394,39 @@ def test_per_user_disabled_only_blocks_that_user(scope_sched):
 
 
 def test_per_user_quiet_hours_use_own_window(scope_sched):
-    """per-user 静默时段 = 覆盖了哪一端用哪一端，另一端沿用全局时段；
-    且决策上下文里的 ``quiet_hours`` 必须是同一份窗口（否则上下文说「别打扰」
-    而闸放行 = 自相矛盾）。"""
+    """2026-11-07 起：静默窗口按「用户 × 角色」各自一份全量快照。
+
+    旧口径是「覆盖了哪一端用哪一端，另一端沿用全局」；用户裁决改为每角色
+    一套完整设置后，每个用户都有自己的一份窗口（首次物化自出厂默认），
+    改全局不再回头影响已物化的用户。本用例锁定：
+    - A 的窗口 = 自己快照（现在静默 → 落 quiet_hours 账本）；
+    - B 的窗口 = 自己快照（现在不静默 → 进入决策，上下文窗口是 B 自己的）。
+    """
     from proactive.ase_engine import _local_now
-    from utils import proactive_config
+    from utils import character_settings, proactive_config
 
     sched, _hub, keys, events, spy = scope_sched
     hour = _local_now().hour
-    # 全局时段明显不含当前小时（把「现在」排除在外）
-    sched._quiet_hours = ((hour + 2) % 24, (hour + 3) % 24)
-    # 只覆盖「开始」为当前小时、结束为下一小时 → 该用户进入静默
-    proactive_config.write_proactive_config(
-        user_key=keys[0],
-        quiet_hours_start=hour,
-        quiet_hours_end=(hour + 1) % 24,
+    character_settings.write(
+        keys[0], "card-1",
+        {"quiet_hours_start": hour, "quiet_hours_end": (hour + 1) % 24},
+    )
+    character_settings.write(
+        keys[1], "card-1",
+        {"quiet_hours_start": (hour + 2) % 24, "quiet_hours_end": (hour + 3) % 24},
     )
 
     _tick(sched)
 
     assert [e["session_key"] for e in events if e.get("reason") == "quiet_hours"] == [keys[0]]
     assert [c["session_key"] for c in spy.contexts] == [keys[1]]
-    # 半对覆盖：未覆盖的「结束」沿用全局（不是回落到 7）
-    start, end = sched._quiet_hours_for(proactive_config.effective(keys[0]))
-    assert (start, end) == (hour, (hour + 1) % 24)
-    assert sched._quiet_hours_for(proactive_config.effective(keys[1])) == (
+    assert sched._quiet_hours_for(proactive_config.effective(keys[0], "card-1")) == (
+        hour, (hour + 1) % 24,
+    )
+    assert sched._quiet_hours_for(proactive_config.effective(keys[1], "card-1")) == (
         (hour + 2) % 24, (hour + 3) % 24,
     )
-    # 走通的用户：上下文里的窗口 = 该会话的窗口（全局值，无覆盖）
+    # 走通的用户：上下文里的窗口 = 该用户自己的窗口
     assert spy.contexts[0]["quiet_hours"] == ((hour + 2) % 24, (hour + 3) % 24)
 
 
@@ -1468,16 +1473,19 @@ def test_decision_passes_per_user_quiet_window_to_delivery(scope_sched, monkeypa
     """
     import proactive.llm_proactive as lp
     from proactive.ase_engine import _local_now
-    from utils import proactive_config
+    from utils import character_settings
 
     sched, _hub, keys, events, _spy = scope_sched
     hour = _local_now().hour
-    sched._quiet_hours = (hour, (hour + 1) % 24)          # 全局：现在就是静默
     per_user = ((hour + 6) % 24, (hour + 7) % 24)          # A：现在不静默
-    proactive_config.write_proactive_config(
-        user_key=keys[0],
-        quiet_hours_start=per_user[0],
-        quiet_hours_end=per_user[1],
+    quiet_window = (hour, (hour + 1) % 24)                 # B：现在静默
+    character_settings.write(
+        keys[0], "card-1",
+        {"quiet_hours_start": per_user[0], "quiet_hours_end": per_user[1]},
+    )
+    character_settings.write(
+        keys[1], "card-1",
+        {"quiet_hours_start": quiet_window[0], "quiet_hours_end": quiet_window[1]},
     )
 
     monkeypatch.setattr(
@@ -1498,9 +1506,9 @@ def test_decision_passes_per_user_quiet_window_to_delivery(scope_sched, monkeypa
     _tick(sched)
 
     assert delivered == [(keys[0], per_user)], (
-        "决策链没把 per-user 静默窗口交给投递层（设置端到端不生效）"
+        "决策链没把该角色的静默窗口交给投递层（设置端到端不生效）"
     )
-    # 未覆盖的用户：全局静默仍然生效，且投递层从未被调用
+    # 自己窗口现在是静默的用户：投递层从未被调用
     assert [e["session_key"] for e in events if e.get("reason") == "quiet_hours"] == [keys[1]]
 
 
@@ -1699,29 +1707,46 @@ def test_other_worker_engine_converges_to_persisted_global(scope_sched):
 
 
 def test_dirty_engine_override_row_reverts_engine_to_global(scope_sched):
-    """覆盖行被手改成非法值时，引擎里的旧个人值必须自动回落到全局。
+    """快照行被手改成非法值时，引擎里的旧个人值必须自动回落到出厂默认。
 
-    复核缺陷（2026-10-30 二轮 medium）：``read_override`` 会丢弃非法引擎键，
-    而旧实现只在 ``overridden_keys``/墓碑非空时下发 —— 库行被改成
-    ``threshold=999`` 后读面回落 2.0、引擎却仍停在 9.0，且没有墓碑可触发回滚。
-    修法：目标值 = 用户值 else 全局值 → 丢弃该键后自然对齐全局。
+    2026-11-07 起运行时真源是「用户 × 角色」快照（不再读旧的 per-user 行）。
+    本用例把快照里的 threshold 手改成越界值，锁定：
+    - 读侧逐字段回落（999 → 出厂默认 2.0），不抛异常；
+    - 下一拍把引擎从旧的 9.0 拉回 2.0，不把用户钉死在坏值上。
     """
-    from utils import proactive_config
+    import json
+    import sqlite3
+
+    from utils import character_settings, proactive_config
 
     sched, hub, keys, _events, _spy = scope_sched
-    proactive_config.write_proactive_config(user_key=keys[0], threshold=9.0)
+    character_settings.write(keys[0], "card-1", {"threshold": 9.0})
     _tick(sched)
     eng = hub.get(keys[0])
     assert eng._urgency_threshold == 9.0
 
-    # 手改坏（越界 → sanitize 丢弃）；引擎里仍是 9.0
-    _write_override_row(keys[0], {"threshold": 999})
-    assert proactive_config.read_override(keys[0]) == {}
-    assert proactive_config.effective(keys[0])["threshold"] == 2.0
+    # 手改坏快照行（越界 → 读侧应丢弃并回落）
+    with sqlite3.connect(str(character_settings._DB_PATH)) as conn:
+        row = conn.execute(
+            f"SELECT config FROM {character_settings.TABLE} "
+            "WHERE user_key = ? AND character_id = ?",
+            (keys[0], "card-1"),
+        ).fetchone()
+        assert row is not None
+        cfg = json.loads(row[0])
+        cfg["threshold"] = 999
+        conn.execute(
+            f"UPDATE {character_settings.TABLE} SET config = ? "
+            "WHERE user_key = ? AND character_id = ?",
+            (json.dumps(cfg), keys[0], "card-1"),
+        )
+
+    assert character_settings.read(keys[0], "card-1")["threshold"] == 2.0
+    assert proactive_config.effective(keys[0], "card-1")["threshold"] == 2.0
 
     _tick(sched)
 
-    assert eng._urgency_threshold == 2.0, "非法覆盖行把引擎永远钉在旧个人值"
+    assert eng._urgency_threshold == 2.0, "非法快照把引擎永远钉在旧个人值"
     # 另一用户不受影响
     assert hub.get(keys[1])._urgency_threshold == 2.0
 
@@ -1927,3 +1952,35 @@ def test_purge_owner_data_removes_proactive_override(tmp_path, monkeypatch):
         ) == 0
     finally:
         memory.close()
+
+
+def test_global_pause_and_switch_override_character_snapshots(scope_sched):
+    """2026-11-07：全局急停/总开关是运维覆盖层，不得被逐对快照架空。
+
+    用户裁决「设置按 用户×角色」后，每份快照都带 paused=False / enabled=True。
+    若调度器只按快照取值，管理员事故时按不下全局暂停 —— 本用例钉死：
+    - 全局 paused=True ⇒ 所有用户都跳过（即使各自快照 paused=False）；
+    - 全局 enabled=False ⇒ 所有用户都跳过（即使各自快照 enabled=True）。
+    """
+    from utils import character_settings
+
+    sched, _hub, keys, events, spy = scope_sched
+    for key in keys:
+        character_settings.write(key, "card-1", {"paused": False, "enabled": True})
+
+    sched._paused = True
+    _tick(sched)
+    assert [e["session_key"] for e in events if e.get("reason") == "paused"] == list(keys)
+    assert spy.contexts == []
+
+    sched._paused = False
+    events.clear()
+    import proactive.llm_proactive as lp
+
+    original = lp.read_web_proactive_config
+    lp.read_web_proactive_config = lambda: {"enabled": False}  # type: ignore[assignment]
+    try:
+        _tick(sched)
+    finally:
+        lp.read_web_proactive_config = original  # type: ignore[assignment]
+    assert spy.contexts == []

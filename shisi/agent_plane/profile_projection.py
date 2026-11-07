@@ -22,6 +22,9 @@ PROFILE_SCALAR_FIELDS = (
     "occupation",
     "location",
     "notes",
+    # 2026-11-07 P8：用户本人填写的自我介绍（用户裁决「用户可以填写属于
+    # 自己的画像」）。它是**用户声明**而非模型推测，注入时优先展示。
+    "self_intro",
 )
 PROFILE_LIST_FIELDS = ("preferences", "commitments")
 

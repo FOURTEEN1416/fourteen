@@ -1031,7 +1031,10 @@ async def update_character_persona(
     character_id: str,
     req: PersonaUpdate,
     _auth: bool = Security(verify_api_key_dep),
-    _owned: dict[str, Any] = Depends(require_character_access),
+    # P4（2026-11-07 写门治理）：人设 PUT 改的是**卡片本体**，与
+    # `PUT /characters/{id}` 同一资源，却曾只挂读门 → 普通用户可改写他人卡/公共池卡
+    # 的人设（跨用户篡改面）。改挂 require_character_write，失败文案同为 404。
+    _owned: dict[str, Any] = Depends(require_character_write),
 ):
     """更新角色人设（部分更新 personality / speaking_style / catchphrases / core_anchors）"""
     data = _owned or _load_character(character_id)
@@ -1648,7 +1651,9 @@ async def recalculate_achievements_endpoint(
     character_id: str,
     db: AsyncSession = Depends(get_db),
     _auth: bool = Security(verify_api_key_dep),
-    _owned: dict[str, Any] = Depends(require_character_access),
+    # P4（2026-11-07 写门治理）：成就行按 character_id 落库（角色级共享状态），
+    # 重算即写库 → 与 GET 不同，属写操作。公共池卡只读，普通用户不得改动其成就。
+    _owned: dict[str, Any] = Depends(require_character_write),
 ):
     """显式触发成就重算（幂等；与 GET 同语义，供维护任务/前端手动刷新）。"""
     from api.achievement_engine import recalculate_achievements
