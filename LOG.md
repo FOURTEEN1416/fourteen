@@ -14,6 +14,7 @@
 - **P8 心理画像页并入状态页**：页面内容抽取为 `components/psych/PsychProfileCard.tsx`（原 363 行页面删除，DELETION_LOG 已登记），状态页左列渲染；`/psych` 重定向到当前角色状态页，导航项移除；三个测试文件改挂卡片组件全绿；免责条与热线文案原样保留。
 - **P5 消息页四组归位**：新 `components/roles/CharacterSettingsPanel.tsx`（①说话节奏 ②主动消息 ③LLM 决策 ④骰子闸 ⑤话题引擎，全部走 `GET/PUT/DELETE /api/characters/{id}/my-settings`，无全局横幅、无管理员代设、无跨角色层）；原 MessageTab 的管理面内容（全局频率/LLM 决策/骰子闸/账本回放/拟人度全局/话题全局）整体改名 `ProactiveOpsTab` 迁往**管理员运维页** `/settings/proactive`（RoleGuard admin + 组件内 isAdmin 双防线），侧栏「管理后台」组新增入口。旧 D21 用户自助端点 UI（/user/proactive-config 表单、独立暂停区）随重构退场——该契约由面板承接，端点本身保留兼容。
 - **测试**：前端全量 **346 passed / 48 文件**（删 14 个钉旧 UI 用例，新增 ProactiveOpsTab 4 + CharacterSettingsPanel 5 + StatusCenter/Psych 改挂）；`tsc --noEmit` 0；后端 ruff 0；`test_p7_my_proactive_history.py` 3 例。
+- **全量基线**：后端四分块 **4564 通过 + 2 跳过 / 0 失败 / 收集 4566**（1079 + 1148+1skip + 1113 + 1224+1skip，与 collect-only 精确吻合；首轮实跑 3 个计数断言失败——W8 心理页源码护栏路径、api_routes 端点计数 103→104——均为断言跟随迁移/新端点更新，修正后重跑分块 0/3 全绿）；前端 **346 passed / 48 文件** + `tsc --noEmit` 0；ruff 0。
 - **部署**：未部署（随用户裁决）。
 ---
 

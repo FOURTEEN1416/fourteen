@@ -248,7 +248,8 @@ def test_quick_screen_level_is_band_for_zero_signal(text: str, expect_hit: bool)
 # ═══════════════════════════════════════════════════════════
 
 FRONTEND_API_TYPES = Path(__file__).resolve().parents[1] / "frontend" / "src" / "types" / "api.ts"
-FRONTEND_PSCH_PAGE = Path(__file__).resolve().parents[1] / "frontend" / "src" / "pages" / "PsychProfilePage.tsx"
+# P8（2026-11-07）：画像页并入状态页，护栏跟随内容迁移到卡片组件
+FRONTEND_PSCH_PAGE = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "psych" / "PsychProfileCard.tsx"
 
 
 def _ts_interface_fields(name: str) -> set[str]:
