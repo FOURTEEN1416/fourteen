@@ -38,7 +38,6 @@ def _principal(user_id: int, role: str = "user") -> AuthPrincipal:
 
 #: 必须挂写门的 7 条写路由（读路由不在此列：GET persona / POST knowledge/search 等）。
 WRITE_ROUTES: list[tuple[str, str]] = [
-    ("PUT", "/api/characters/{character_id}/persona"),
     ("POST", "/api/characters/{character_id}/knowledge/documents"),
     ("DELETE", "/api/characters/{character_id}/knowledge/documents/{doc_id}"),
     ("POST", "/api/characters/{character_id}/knowledge/vault"),
@@ -71,6 +70,21 @@ def _find_route(app, method: str, path: str):
 @pytest.fixture(scope="module")
 def app():
     return create_api_app()
+
+
+PERSONAL_OVERLAY_ROUTES: list[tuple[str, str]] = [
+    ("PUT", "/api/characters/{character_id}/persona"),
+]
+
+
+@pytest.mark.parametrize(("method", "path"), PERSONAL_OVERLAY_ROUTES)
+def test_persona_put_uses_access_gate_for_personal_overlay(app, method: str, path: str) -> None:
+    """persona PUT = 读门 + 分支：自己的卡写文件、公开卡写私人覆盖（免克隆）。"""
+    route = _find_route(app, method, path)
+    assert route is not None, f"路由未挂载: {method} {path}"
+    names = _dependency_names(route)
+    assert "require_character_access" in names
+    assert "require_character_write" not in names
 
 
 @pytest.mark.parametrize(("method", "path"), WRITE_ROUTES)

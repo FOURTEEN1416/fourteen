@@ -168,6 +168,7 @@ async def test_get_config_defaults_without_orchestrator(api):
         "park_idle_hours",
         "switch_theta1",
         "switch_theta2",
+        "same_session_minutes",
     }
     assert body["config"]["enabled"] is True
     assert body["config"]["llm_judge_enabled"] is True
