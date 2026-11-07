@@ -324,6 +324,42 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # shisi 迁移/角色存储/收藏转发（2026-11-07 对抗验收 High 缺口）：
+    # create_api_app() 无参调用 setup_shisi(run_migrate=True) 时 db_path=None，
+    # run_migrations(None) 会落到 shisi.migrations._DB_DEFAULT（真实
+    # data/sqlite.db）执行迁移写库——沙箱旅程 md5 对照实锤（063bf109→6b918765）。
+    # conftest 此前恰好缺这两个 patch 点，pytest 全量中所有走 create_api_app
+    # 的用例同样暴露。CharacterStore/FavoriteManager/ForwardManager 同族同补。
+    try:
+        from shisi import migrations as _shm
+        from shisi.character import store as _shstore
+        from shisi.memory import favorite_manager as _fav
+        from shisi.memory import forward_manager as _fwd
+
+        shisi_db = sandbox / "shisi.db"
+        monkeypatch.setattr(_shm, "_DB_DEFAULT", shisi_db, raising=False)
+        monkeypatch.setattr(_shstore, "_DB_DEFAULT", shisi_db, raising=False)
+        monkeypatch.setattr(_fav, "_DB_DEFAULT", shisi_db, raising=False)
+        monkeypatch.setattr(_fwd, "_DB_DEFAULT", shisi_db, raising=False)
+    except Exception:
+        pass
+
+    # 角色卡目录（2026-11-08 对抗验收发现，与上方 DB 防线同族）：注册分发
+    # 初始角色（W12 阶段2 `provision_initial_character`）会把种子模板克隆写进
+    # character_routes 的 CHARACTERS_DIR——不隔离则每次跑带注册流的用例都在
+    # 真实 config/characters 落一张新卡（gitignore 掩盖；实测一晚 +5 张
+    # uid=4 林挽夏克隆，卡库 43→48，persona 参数化基数随之漂移）。
+    # 自行 patch 该目录的用例（w12/公开覆盖/deactivate 等）其测试级
+    # monkeypatch 在本夹具之后生效，正常覆盖回来。
+    try:
+        from api.routers import character_routes as _cr_mod
+
+        monkeypatch.setattr(
+            _cr_mod, "CHARACTERS_DIR", sandbox / "characters", raising=False,
+        )
+    except Exception:
+        pass
+
     # W7 语音链（2026-09-27）：音色 catalog 与角色语音绑定都是运行时状态文件；
     # 未隔离会把测试音色/绑定写进开发机真实 data/（catalog 单例需一并重置，
     # 否则首测创建的实例把旧路径烤进缓存）。

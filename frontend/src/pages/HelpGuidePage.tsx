@@ -39,13 +39,13 @@ const GUIDE_ITEMS: GuideItem[] = [
   },
   {
     to: '/roles',
-    title: '公共角色卡 · 一键克隆',
-    desc: '角色配置页下半部分就是公共卡库（全部用户可见、只读）；看中哪个点「克隆到我的角色」，生成你自己的一份后再激活。',
+    title: '公共角色卡 · 人人可用',
+    desc: '角色配置页里带「公共卡」徽标的就是公共卡库——不用克隆，每个用户天生拥有全部公共卡；看中哪个直接自定义，改的只是你自己的那一份，公共卡本身不受影响。',
   },
   {
     to: '/roles/current/settings',
     title: '角色设置 · 人设与语音',
-    desc: '基础（性格/口头禅/核心锚点）、语音（音色）、消息（拟人节奏：阅读延迟/拆条/口误）、数据导出。管理员还可调主动消息与话题状态。',
+    desc: '基础（性格/口头禅/核心锚点）、语音（音色）、消息（拟人节奏：阅读延迟/拆条/口误）、数据导出。消息设置是「你 × 这个角色」自己的面板；管理员另有全局运维页。',
     needsRole: true,
   },
   {
@@ -61,9 +61,9 @@ const GUIDE_ITEMS: GuideItem[] = [
     needsRole: true,
   },
   {
-    to: '/psych',
+    to: '/roles/current/status',
     title: '心理画像 · 了解你的角色',
-    desc: '基于对话的心理维度画像（非医疗用途）。',
+    desc: '基于对话的心理维度画像（非医疗用途），就在状态中心页里，和情绪、记忆体系在同一页。',
     needsRole: true,
   },
   {
@@ -121,7 +121,7 @@ export default function HelpGuidePage() {
   const [tourActive, setTourActive] = useState(false)
 
   const doneCount = useMemo(
-    () => GUIDE_ITEMS.filter(i => done[i.to]).length,
+    () => GUIDE_ITEMS.filter(i => done[i.title]).length,
     [done],
   )
 
@@ -192,23 +192,25 @@ export default function HelpGuidePage() {
             </span>
           </div>
           <p className="mt-2 text-[11px] text-gray-400">
-            提示：「角色设置 / 状态中心 / 剧情线 / 心理画像」需要先在角色配置里激活一个角色才会出现在侧栏。
+            提示：「角色设置 / 状态中心 / 剧情线」需要先在角色配置里激活一个角色才会出现在侧栏；心理画像在状态中心页里。
           </p>
         </div>
 
         <div className="space-y-2">
           {GUIDE_ITEMS.map((item, i) => (
             <div
-              key={item.to}
+              // 进度键用标题而不是 to：两张卡可指向同一页（如 /roles），
+              // 用 to 作键会互相覆盖「已学会」进度（2026-11-07 对抗验收发现）
+              key={item.title}
               id={`guide-step-${i}`}
-              className={`glass-card rounded-xl px-4 py-3 flex items-start gap-3 ${done[item.to] ? 'opacity-70' : ''}`}
+              className={`glass-card rounded-xl px-4 py-3 flex items-start gap-3 ${done[item.title] ? 'opacity-70' : ''}`}
             >
               <button
-                onClick={() => toggleDone(item.to)}
-                aria-label={done[item.to] ? '标记为未学' : '标记为已学会'}
+                onClick={() => toggleDone(item.title)}
+                aria-label={done[item.title] ? '标记为未学' : '标记为已学会'}
                 className="mt-0.5 shrink-0 text-macaron-mint-deep hover:opacity-80"
               >
-                {done[item.to] ? <CircleCheck className="w-5 h-5" /> : <Circle className="w-5 h-5 text-gray-300" />}
+                {done[item.title] ? <CircleCheck className="w-5 h-5" /> : <Circle className="w-5 h-5 text-gray-300" />}
               </button>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-gray-700">

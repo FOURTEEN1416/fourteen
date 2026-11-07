@@ -55,8 +55,11 @@ describe('HelpGuidePage', () => {
     const checkboxes = screen.getAllByLabelText('标记为已学会')
     fireEvent.click(checkboxes[0])
     expect(screen.getByTestId('guide-progress').textContent).toMatch(/^1\/\d+ 已学会$/)
-    // localStorage 键带 user_id（V2-4①：进度按 user 持久化）；值形 {"/wechat":true}
-    expect(localStorage.getItem('guide-progress-7')).toBe('{"/wechat":true}')
+    // localStorage 键带 user_id（V2-4①）；进度键用**标题**而不是 to——两张卡可
+    // 指向同一页（/roles），用 to 作键会互相覆盖进度（2026-11-07 对抗验收发现）
+    expect(localStorage.getItem('guide-progress-7')).toBe(
+      JSON.stringify({ '微信连接 · 开始对话': true }),
+    )
   })
 
   it('渲染导览重放按钮与 /intro 深链', () => {

@@ -463,10 +463,13 @@ function MyPreferencesSection() {
   const handleSaveHumanize = async () => {
     setHSaving(true)
     try {
+      // 保存前钳位到后端合法域（per_char_ms ge=5 le=200 / fixed_ms le=5000）：
+      // 输入框范围只是提示，手输越界值不该靠 422 英文报错兜底
+      const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(v) || 0))
       const res = await saveMyHumanize({
         delay_mode: delayMode,
-        per_char_ms: perCharMs,
-        fixed_ms: fixedMs,
+        per_char_ms: clamp(perCharMs, 5, 200),
+        fixed_ms: clamp(fixedMs, 0, 5000),
         proactive_split: proactiveSplit,
       })
       if ((res.data as { status?: string }).status !== 'ok') {
@@ -576,14 +579,17 @@ function MyPreferencesSection() {
                 {delayMode === 'dynamic' && (
                   <label className="inline-flex items-center gap-1">
                     每字
-                    <input type="number" min={0} max={2000} value={perCharMs} onChange={(e) => setPerCharMs(Number(e.target.value) || 0)} className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-xs text-center" />
+                    {/* 范围与后端校验（ge=5 le=200）及「我 × 角色」五组面板滑条一致——
+                        旧上限 2000 保存必 422 且报错是英文（2026-11-07 对抗验收发现） */}
+                    <input type="number" min={5} max={200} value={perCharMs} onChange={(e) => setPerCharMs(Number(e.target.value) || 0)} className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-xs text-center" />
                     ms
                   </label>
                 )}
                 {delayMode === 'fixed' && (
                   <label className="inline-flex items-center gap-1">
                     固定
-                    <input type="number" min={0} max={60000} value={fixedMs} onChange={(e) => setFixedMs(Number(e.target.value) || 0)} className="w-24 rounded-lg border border-gray-200 px-2 py-1 text-xs text-center" />
+                    {/* 范围与后端校验（le=5000）一致 */}
+                    <input type="number" min={0} max={5000} value={fixedMs} onChange={(e) => setFixedMs(Number(e.target.value) || 0)} className="w-24 rounded-lg border border-gray-200 px-2 py-1 text-xs text-center" />
                     ms
                   </label>
                 )}

@@ -4,11 +4,13 @@
  * 包裹需要特定角色才能访问的路由：
  * - 未初始化 → 显示加载状态
  * - 未认证 → 不渲染（由 AuthGuard 父级处理跳转）
- * - 角色不符 → 跳转到 fallback 路径
+ * - 角色不符 → 弹一条提示后跳转到 fallback 路径
  * - 角色匹配 → 渲染子组件
  */
+import { useEffect } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import { useErrorStore } from '../../store/errorStore'
 import type { UserRole } from '../../api/admin'
 import type { ReactNode } from 'react'
 
@@ -22,6 +24,20 @@ interface RoleGuardProps {
 
 export default function RoleGuard({ children, roles, fallback = '/' }: RoleGuardProps) {
   const { user, isAuthenticated, isInitialized } = useAuthStore()
+
+  const denied = Boolean(isInitialized && isAuthenticated && (!user || !user.is_active || !roles.includes(user.role)))
+
+  // 无权限不能静默弹回：直接访问 /settings/proactive 等管理员路由的普通用户
+  // 会被丢到一个无关页面且不知道为什么（2026-11-07 对抗验收发现）。
+  // 放 effect 而不是 render：重定向组件只渲染一次，toast 不会重复刷屏。
+  useEffect(() => {
+    if (denied) {
+      useErrorStore.getState().addToast({
+        type: 'warning',
+        message: '该页面仅管理员可用，已带你返回',
+      })
+    }
+  }, [denied])
 
   // 未初始化完成 → 显示加载
   if (!isInitialized) {
@@ -40,9 +56,9 @@ export default function RoleGuard({ children, roles, fallback = '/' }: RoleGuard
     return null
   }
 
-  // 角色不在允许列表中或账号被禁用 → 跳转到 fallback
+  // 角色不在允许列表中或账号被禁用 → 弹提示后跳转到 fallback
   // 修复 P0-5：必须同时校验 is_active，被禁用管理员不应能访问
-  if (!user || !user.is_active || !roles.includes(user.role)) {
+  if (denied) {
     return <Navigate to={fallback} replace />
   }
 
