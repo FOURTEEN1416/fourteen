@@ -59,11 +59,21 @@ def _dependency_names(route) -> set[str]:
 
 
 def _find_route(app, method: str, path: str):
-    for route in app.routes:
-        if getattr(route, "path", None) != path:
-            continue
-        if method in getattr(route, "methods", set()):
+    """平铺 app.routes 找 (method, path) —— 兼容 FastAPI 0.137+ _IncludedRouter 包装。
+
+    0.137.0 起 include_router 的子路由被包成 _IncludedRouter（path/methods 均为
+    None，真实路由挂在 original_router.routes 下），裸扫 app.routes 会把全部
+    子路由路由「判丢」（CI run 42395306164 实证）。与 test_api_routes
+    的 _flatten_app_routes 同款双形态兼容。
+    """
+    stack = list(app.routes)
+    while stack:
+        route = stack.pop()
+        if getattr(route, "path", None) == path and method in getattr(route, "methods", set()):
             return route
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            stack.extend(getattr(original, "routes", []))
     return None
 
 
