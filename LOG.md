@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-11-08 — CI 三连红根治批：fastapi 路由包装 + UTC 宿主时钟错位 + E2E 产品变更测试债（v1.65.3 · run 42403179359 全绿）
+
+- **批次定位**：用户指令「ci 报错处理一下」。v1.63~v1.65.2 共 14 提交首次 push（`94594b8`/`55df4dd`/`9df80cc` 三条 run 全红，失败面恒为 backend+frontend 两域）。三个独立根因逐一实证闭环：① backend=fastapi 依赖漂移破坏路由枚举；② backend=UTC 宿主时钟错位（两个提交分两轮暴露）；③ frontend=E2E 测试债（产品变更 + 内置默认卡打破空库 skip 掩护）。与 v1.66 批（并行窗）共享主检出，其 `79784b0` 建立在我的 `48a8310` 之上，最终全绿 run 含两批代码。
+- **根因①（run 42395306164 backend @43%）fastapi≥0.137 `_IncludedRouter` 包装**：CI pip 全新解析 fastapi 0.138.2（旧上限 `<0.139` 太松）——0.137.0 起 `include_router` 子路由被包成 `_IncludedRouter`（path/methods=None，真实路由移至 `original_router.routes`），`test_p4_character_write_gates._find_route` 裸扫 `app.routes` 把 PUT persona「判丢」。**一次性 venv 定界实证：0.136.3 平铺 / 0.137.2 + 0.138.2 包装，starlette 1.7/1.10 均不改变该行为（边界由 fastapi 主导）**。修法双保险：pyproject 上限 `<0.139`→`<0.137`（平铺枚举语义=测试/健康检查既定依赖，沿 `9a5fd67` 同一政策）+ `_find_route` 补 `original_router` 递归平铺（与 `test_api_routes._flatten_app_routes` 同款；仓内 test_consent/test_ops_lifecycle 早已兼容，test_invite_codes 实测不在包装面）。
+- **根因②（run 42400118643 @77% → 42401562467 @77% 两轮）UTC 宿主时钟错位**：CI 宿主=UTC，本地=UTC+8，三类形态逐一暴露——(a) 测试传 `now=datetime.now()`（宿主墙钟）给契约 naive 北京墙钟的 `_extract_user_anchor_sentences`（内部 `beijing_wall(ts)` 做 UTC→北京换算）→ 相减恒 ≈ −8h → 3 小时前旧话题「永远不旧」不进窗口过滤；Windows 宿主永不复现，v1.64 上线以来首次 CI 暴露。(b) `utils/topic_state.py:587` `wall_now = now or datetime.now()` 违反模块自身头注「时钟统一 now_local()」（v1.19/v1.20 全仓时钟统一的漏网）→ UTC 部署宿主超窗降级静默失效 → `test_fresh_active_topic_stays_active` 反向必红（新鲜话题被误降级）。(c) 测试 `_beijing_ago` helper 用 `datetime.now().strftime` 造「伪北京串」（实为 UTC 墙钟）→ 同源误判。修法：`_normalize_now(now)` 替换 datetime.now() 回退 + 测试 4 处 `now=now_local()` + `_beijing_ago` 改 `now_local()`（同文件另两处 +1 天余量种子核验 8h 吃不掉，安全）。
+- **根因③（frontend job 6 failed）E2E 产品变更测试债**：v1.65.2 内置默认卡（builtin=true 恒前置）让 CI 空角色库列表从「空→test.skip」变「恒有 default」，**此前靠 skip 掩护的死断言全部暴露**——`heading 状态中心` 自 09-19 审美批次删 h2 起即死断言（页名归面包屑 span）；其余为 P2/P3/P5/P9 已裁决产品变更的旧契约：smoke「创建角色」→「新建角色」（P3）、w11 时间线 tab 删除（P9，改「语音」tab 验深链）、w11 主动面板三用例重写（P5 消息 tab=CharacterSettingsPanel + my-settings 数据源 + 未绑微信 409 诚实门不猜键 + admin 运维迁 `/settings/proactive` + 503 契约随迁）、w17 模板面两用例退役换旧深链重定向守卫（P2 `/templates` 整页删除）、capabilities knowledge 契约改取非内置卡（builtin 无卡文件 404 属产品语义）。成就用例对 default 通过=UXV-10（侧栏三子页对内置卡恒可达）的生产级实证。
+- **UTC 宿主预验方法（终结 CI 打地鼠）**：WSL Ubuntu-24.04 + `TZ=UTC`（`datetime.now()` 实测 18:44Z vs `now_local()` 02:44+08，8h 偏差在场）——① p10 全文件 7/7 过；② 时钟闪红族高危名单 **196 passed**（unanswered_streak / window_tone / window_expiry / decision_history_scrub / dice_gate / model_gate / round3 / w3_scheduler_state——v1.65.2 种子型/替身型修复在 UTC 宿主下复核不回退）；③ 77% 后未执行区间 67 文件 `datetime.now/utcnow` 静态扫描=仅 UTC-aware 自洽用法。
+- **本地验证**：后端 p4+api_routes+consent+ops_lifecycle+invite_codes 81 passed；话题三文件 112 passed；ruff 全仓 0；前端 tsc 0 + vitest 349/349 + **Playwright E2E 全量 35/35（4.0m，vite 需绑 IPv4 `--host 127.0.0.1` 才能对上 playwright 的 127.0.0.1 探活——本地踩坑记录）**。
+- **CI 终态**：run `42403179359` **success**（backend 13m51s + frontend 6m40s + 7 个 ff 守卫门 + adr-integrity 全绿）；中途 run 42400118643/42401562467 的失败即根因②两轮暴露的过程，v1.66 两条 run（42402024732/42402373566）红=基座早于 `_beijing_ago` 修复，最新 HEAD 已全部覆盖。
+- **改动面**：pyproject.toml（fastapi 上限）、tests/test_p4_character_write_gates.py（_find_route 兼容）、utils/topic_state.py（_normalize_now）、tests/test_topic_same_session_p10.py（时钟 5 处）、frontend/e2e 4 spec。提交 `80875b7`+`3ec495b`+`48a8310`+`3b0492a`，均已 push。**部署：A 档代码已随 push 就位，服务器是否再跑 remote_deploy 由用户/并行窗裁决**（本批无生产行为变更——pin 收紧只影响未来安装解析；v1.66 批已自行三端部署 @ `79784b0d`）。
+
+---
+
 ## 2026-11-08 — 对话连续性三案根治批：图片案/语音案/话题案（v1.66 · 已三端部署 @ `79784b0d`）
 
 - **批次定位**：用户报障四条（看图先描述后说没收到 / 明明有语音通道却说没有麦克风 / 单话题反复提 / 同话题隔很久才接话）+ 指令「先去日志和云服务器的会话记录中取证，然后定位根源，再优化修复」。主控亲自取证（生产 chat_history 4021-4043 + app.log + topic_state 三表 + 离线重放）→ 定位四层根因 → 修复（红测先行 + 突变验红 M1-M4）→ 全量门 → A 档闭环。前置事实：生产已运行 v1.65.2 @ `9df80cc`（本批取证对象=最新代码行为，非旧版残留）。
