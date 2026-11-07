@@ -43,6 +43,7 @@ import logging
 import math
 import sqlite3
 from collections.abc import Iterable
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -407,7 +408,7 @@ def read(user_key: str, character_id: str) -> dict[str, Any]:
     if not cid:
         raise ValueError("character_id 不能为空")
 
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         _ensure_table(conn)
         raw = _row_config(conn, uk, cid)
         if raw is None:
@@ -445,7 +446,7 @@ def write(user_key: str, character_id: str, patch: dict[str, Any]) -> dict[str, 
     merged = {**current, **coerced}
     _check_cross(merged)
 
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         _ensure_table(conn)
         _upsert(conn, uk, cid, merged)
     return merged
@@ -457,7 +458,7 @@ def reset(user_key: str, character_id: str) -> bool:
     cid = str(character_id or "").strip()
     if not uk or not cid:
         raise ValueError("user_key / character_id 不能为空")
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         _ensure_table(conn)
         cur = conn.execute(
             f"DELETE FROM {TABLE} WHERE user_key = ? AND character_id = ?", (uk, cid)
@@ -466,7 +467,7 @@ def reset(user_key: str, character_id: str) -> bool:
 
 
 def has_row(user_key: str, character_id: str) -> bool:
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         _ensure_table(conn)
         cur = conn.execute(
             f"SELECT 1 FROM {TABLE} WHERE user_key = ? AND character_id = ?",
@@ -507,7 +508,7 @@ def seed_from_legacy(user_key: str, character_id: str) -> dict[str, Any]:
     if not uk or not cid:
         raise ValueError("user_key / character_id 不能为空")
     values = _legacy_seed_values(uk)
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         _ensure_table(conn)
         _upsert(conn, uk, cid, values)
     return values
@@ -518,7 +519,7 @@ def purge_user(user_key: str) -> int:
     uk = str(user_key or "").strip()
     if not uk:
         return 0
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         _ensure_table(conn)
         cur = conn.execute(f"DELETE FROM {TABLE} WHERE user_key = ?", (uk,))
         return int(cur.rowcount or 0)
@@ -541,7 +542,7 @@ def propagate_user_patch(user_key: str, patch: dict[str, Any]) -> int:
     if not allowed:
         return 0
     updated = 0
-    with _conn() as conn:
+    with closing(_conn()) as conn, conn:
         _ensure_table(conn)
         rows = conn.execute(
             f"SELECT character_id, config FROM {TABLE} WHERE user_key = ?", (uk,)
