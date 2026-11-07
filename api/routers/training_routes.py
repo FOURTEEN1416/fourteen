@@ -1373,6 +1373,47 @@ async def proactive_history(
 
 
 
+# ── 本人主动消息历史（2026-11-07 P7）─────────────────────────
+#
+# 用户裁决：「最近主动消息我觉得可以放到状态页」。admin 全量读面
+# （/api/proactive/history）继续 admin-only + 操作员留痕；本端点只返回
+# **自己会话**的出站事实（服务端按绑定还原会话键，不猜键、不收 client 键）。
+
+
+@router.get("/api/user/proactive/history")
+async def my_proactive_history(
+    character_id: str = Query(default=""),
+    limit: int = Query(default=20, le=50),
+    _auth: bool = Security(verify_api_key_dep),
+    user_id: int = Security(get_current_user_id),
+    db=Depends(get_db),
+):
+    """「最近发给我的主动消息」——本人作用域，状态页消费。"""
+    uk = await _user_session_key_for(int(user_id), db)
+    if not uk:
+        return {"history": [], "total": 0, "bound": False}
+    rp = _plane()
+    rows = (
+        rp.recent_sends_for_session(uk, str(character_id or ""), int(limit))
+        if rp is not None
+        else []
+    )
+    history = [
+        {
+            "id": r.get("id"),
+            "kind": r.get("kind"),
+            "channel": r.get("channel"),
+            "character_id": r.get("character_id"),
+            "message": r.get("message"),
+            "status": r.get("status"),
+            "created_at": r.get("created_at"),
+            "fail_reason": r.get("fail_reason"),
+        }
+        for r in rows
+    ]
+    return {"history": history, "total": len(history), "bound": True}
+
+
 # ── 用户自填画像（2026-11-07 P8）──────────────────────────────
 #
 # 用户裁决：「心理画像其实属于记忆的一部分」「为了让 LLM 更了解用户，

@@ -1,6 +1,6 @@
 import {
   MessageCircle, Sparkles, Mic, Shield, FileText,
-  Settings, Activity, Library, Brain,
+  Settings, Activity, Library,
   User, Wrench, BarChart3, Server, Database, Compass,
 } from 'lucide-react'
 
@@ -35,7 +35,6 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
               { to: `/roles/${activeRoleId}/settings`, icon: Settings, label: '角色设置' },
               { to: `/roles/${activeRoleId}/status`, icon: Activity, label: '状态中心' },
               { to: `/roles/${activeRoleId}/storyline`, icon: BarChart3, label: '剧情线' },
-              { to: '/psych', icon: Brain, label: '心理画像' },
             ]
           : []),
       ],
@@ -60,6 +59,7 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
         ? [
             { to: '/admin/users', icon: User, label: '用户管理', badge: 'admin' },
             { to: '/admin/providers', icon: Server, label: '供应商管理', badge: 'admin' },
+            { to: '/settings/proactive', icon: Activity, label: '主动消息引擎', desc: '出厂默认值与运维（仅管理员）', badge: 'admin' },
           ]
         : [],
     },

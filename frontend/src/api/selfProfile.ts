@@ -21,3 +21,27 @@ export function saveMySelfProfile(selfIntro: string) {
     .put('/user/self-profile', { self_intro: selfIntro })
     .then((r) => r.data as SelfProfileResponse)
 }
+
+/** P7（2026-11-07）：「最近发给我的主动消息」——本人作用域读面 */
+export interface MyProactiveHistoryResponse {
+  history: Array<{
+    id: number
+    kind: string
+    channel: string
+    character_id?: string
+    message: string
+    status: string
+    created_at: number
+    fail_reason?: string
+  }>
+  total: number
+  bound: boolean
+}
+
+export function getMyProactiveHistory(characterId?: string, limit = 5) {
+  return client
+    .get('/user/proactive/history', {
+      params: { ...(characterId ? { character_id: characterId } : {}), limit },
+    })
+    .then((r) => r.data as MyProactiveHistoryResponse)
+}

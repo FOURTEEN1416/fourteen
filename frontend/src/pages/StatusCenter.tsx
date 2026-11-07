@@ -12,8 +12,12 @@ import {
   useUnifiedCharacter,
 } from '../hooks/useQueries'
 import { adminListUsers } from '../api/admin'
-import { getMySelfProfile, saveMySelfProfile } from '../api/selfProfile'
+import { getMyProactiveHistory, getMySelfProfile, saveMySelfProfile } from '../api/selfProfile'
+import type { MyProactiveHistoryResponse } from '../api/selfProfile'
+
+type MyProactiveItem = MyProactiveHistoryResponse['history'][number]
 import { useErrorStore } from '../store/errorStore'
+import { PsychProfileCard } from '../components/psych/PsychProfileCard'
 import { useAuthStore } from '../store/authStore'
 import { useGlobalViewStore } from '../store/globalViewStore'
 import type { AchievementsResponse, DashboardStats } from '../types/api'
@@ -149,12 +153,82 @@ export default function StatusCenter() {
           {/* P8（2026-11-07）：用户自填自我介绍——写 EventLedger，主链画像槽优先展示 */}
           <SelfIntroCard />
 
+          {/* P7（2026-11-07）：最近主动消息——本人作用域读面，只看发给自己（本角色）的 */}
+          <RecentProactiveCard characterId={activeCharacter.id} />
+
+          {/* P8（2026-11-07）：心理画像并入状态页（原 /psych 独立页删除） */}
+          <PsychProfileCard characterId={activeCharacter.id} characterName={activeCharacter.name} />
+
           <AchievementsCard data={achievements} />
         </div>
 
         <MemorySystemCard characterId={activeCharacter.id} recentFacts={recentFacts} ownerNames={ownerNames} />
       </div>
     </div>
+  )
+}
+
+/** P7（2026-11-07）：最近主动消息（本人作用域）。
+ *  服务端只返回自己会话（可选按角色过滤）的出站事实；这里绝不展示他人消息。 */
+function RecentProactiveCard({ characterId }: { characterId: string }) {
+  const [items, setItems] = useState<MyProactiveItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [bound, setBound] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    getMyProactiveHistory(characterId, 5)
+      .then((res) => {
+        if (cancelled) return
+        setItems(res.history ?? [])
+        setBound(res.bound !== false)
+      })
+      .catch(() => {
+        if (!cancelled) setError('主动消息记录加载失败')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [characterId])
+
+  const fmt = (ts: number) => {
+    try {
+      return new Date(ts * 1000).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    } catch {
+      return ''
+    }
+  }
+
+  return (
+    <section className="glass-card rounded-xl p-4" data-testid="recent-proactive-card">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-gray-700">最近主动消息</h3>
+        <span className="text-[10px] text-gray-400">这个角色最近主动发给你</span>
+      </div>
+      {loading ? (
+        <p className="py-2 text-xs text-gray-400">加载中…</p>
+      ) : error ? (
+        <p className="py-2 text-xs text-red-600">{error}</p>
+      ) : !bound ? (
+        <p className="py-2 text-xs text-gray-400">绑定微信后可查看主动消息记录</p>
+      ) : items.length === 0 ? (
+        <p className="py-2 text-xs text-gray-400">还没有主动消息记录</p>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((it) => (
+            <div key={it.id} className="rounded-lg bg-gray-50 px-3 py-1.5 flex items-start justify-between gap-2">
+              <span className="text-[10px] text-gray-400 shrink-0">{it.kind || '—'}</span>
+              <span className="text-[11px] text-gray-600 text-right flex-1 line-clamp-1">{it.message}</span>
+              <span className="text-[10px] text-gray-400 shrink-0">{fmt(it.created_at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 

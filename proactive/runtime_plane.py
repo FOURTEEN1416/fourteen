@@ -580,6 +580,34 @@ async def drain_once_async(
     return accepted
 
 
+def recent_sends_for_session(
+    session_key: str, character_id: str = "", limit: int = 20
+) -> list[dict[str, Any]]:
+    """本人会话的出站事实（P7 用户自助读面，2026-11-07）。
+
+    只按 ``session_key``（必填）与可选 ``character_id`` 过滤——**绝不**返回
+    他人会话的任何行；admin 全量读面仍走 :func:`recent_sends` + 操作员留痕。
+    """
+    sk = str(session_key or "").strip()
+    if not sk:
+        return []
+    cid = str(character_id or "").strip()
+    with _conn() as conn:
+        if cid:
+            rows = conn.execute(
+                "SELECT * FROM outbound_commands WHERE session_key = ? AND character_id = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (sk, cid, int(limit)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM outbound_commands WHERE session_key = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (sk, int(limit)),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def recent_sends(kind_prefix: str = "", limit: int = 50) -> list[dict[str, Any]]:
     """出站事实历史（含回执），跨 worker 统一入口（替代 hub 代理 sent_history）。"""
     with _conn() as conn:

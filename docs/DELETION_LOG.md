@@ -1121,3 +1121,10 @@ equire() in MessageList.tsx even though MessageList is unused
 - **删除前核验**：全文件读完；全仓 grep 引用面 = App 路由（已改重定向）、navGroups（已移除）、Breadcrumb（保留 `/templates` 归「角色」，重定向后不渲染）、HelpGuidePage（指引文案待下一批更新）、RolesPage（入口已改锚点）。克隆能力本体（`api/templates.ts`、`/api/character-templates`）**未删除**，只删页面外壳。
 - **可恢复性**：git 历史可取回（`git show <commit>^:frontend/src/pages/TemplatesPage.tsx`）。
 - **效果**：删除 3 个页面级用例；克隆成功/失败判定的行为由 RolesPage 的公共卡逻辑承接（后续补对应用例）。
+
+## 2026-11-07 — PsychProfilePage 独立页删除（P8 心理画像并入状态页）
+
+- **对象**：`frontend/src/pages/PsychProfilePage.tsx`（363 行）。
+- **依据**：用户裁决「心理画像和状态中心合并，心理画像属于记忆的一部分」。页面内容抽取为 `frontend/src/components/psych/PsychProfileCard.tsx`（`PsychProfileCard({characterId, characterName})`），在角色状态页渲染；`/psych` 旧链接重定向到当前角色的状态页，导航项移除。
+- **删除前核验**：三个测试文件（重置业务判定/scope 同源/情绪信号口径）全部改挂卡片组件并全绿；`/api/psych/*` 后端端点零改动；免责条与热线文案原样保留在卡片内。
+- **可恢复性**：git 历史可取回。

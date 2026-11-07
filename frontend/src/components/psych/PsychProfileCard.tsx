@@ -1,22 +1,18 @@
 /**
- * 心理画像页（T2，2026-08-31）——G-21 零 UI 能力首次落 UI。
+ * 心理画像卡（2026-11-07 P8：并入角色状态页；原独立页 /psych 删除）。
  *
  * 数据：usePsychProfile / usePsychSnapshots（后端 /api/psych/* 五端点在产）。
- * 合规边界：非医疗诊断，仅供自我参考（页内常驻免责条；热线 400-161-9995）。
- * 样式：现有设计系统（三色语义 + glass + LightOnly），零新依赖。
+ * 合规边界：非医疗诊断，仅供自我参考（卡内常驻免责条；热线 400-161-9995）。
  */
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
 import { Brain, Activity, ShieldAlert, RefreshCw, Info } from 'lucide-react'
-import AnimatedPage from '../components/shared/AnimatedPage'
-import ConfirmDialog from '../components/shared/ConfirmDialog'
+import ConfirmDialog from '../shared/ConfirmDialog'
 import {
   usePsychProfile,
   usePsychSnapshots,
   usePsychReset,
-} from '../hooks/useQueries'
-import { useActiveCharacter } from '../hooks/useQueries'
-import { useErrorStore } from '../store/errorStore'
+} from '../../hooks/useQueries'
+import { useErrorStore } from '../../store/errorStore'
 import type {
   OceanTraits,
   PadState,
@@ -24,7 +20,7 @@ import type {
   MentalHealthSnapshot,
   DepressionIndicators,
   AnxietyIndicators,
-} from '../types/api'
+} from '../../types/api'
 
 type Signal = DepressionIndicators | AnxietyIndicators | null | undefined
 
@@ -99,9 +95,13 @@ function SignalCard({ title, signal }: { title: string; signal: Signal }) {
   )
 }
 
-export default function PsychProfilePage() {
-  const { activeCharacter } = useActiveCharacter()
-  const characterId = activeCharacter?.id
+export function PsychProfileCard({
+  characterId,
+  characterName,
+}: {
+  characterId: string
+  characterName?: string
+}) {
   const { data: profile, isLoading } = usePsychProfile(characterId)
   const { data: snapshots } = usePsychSnapshots(10, characterId)
   const resetMutation = usePsychReset()
@@ -132,30 +132,27 @@ export default function PsychProfilePage() {
   const mh: MentalHealthSnapshot | undefined = hasData ? profile?.mental_health : undefined
 
   return (
-    <AnimatedPage>
-      <div className="px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mx-auto max-w-4xl">
-          {/* Header */}
-          <div className="mb-6 flex items-center justify-between">
-            <div>
-              <h1 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <Brain className="w-5 h-5 text-macaron-blue-deep" />
-                心理画像
-              </h1>
-              <p className="mt-0.5 text-sm text-gray-400">
-                {activeCharacter ? `角色「${activeCharacter.name}」对你的理解` : '基于对话的心理特征建模'}
-              </p>
-            </div>
-            {hasData && (
-              <button
-                onClick={() => setConfirmReset(true)}
-                className="flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-200 transition-colors"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                重置画像
-              </button>
-            )}
-          </div>
+    <section className="glass-card rounded-xl p-4" data-testid="psych-profile-card">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <Brain className="w-4 h-4 text-macaron-blue-deep" />
+            心理画像
+          </h3>
+          <p className="mt-0.5 text-[10px] text-gray-400">
+            {characterName ? `角色「${characterName}」对你的理解` : '基于对话的心理特征建模'}
+          </p>
+        </div>
+        {hasData && (
+          <button
+            onClick={() => setConfirmReset(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-200 transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            重置画像
+          </button>
+        )}
+      </div>
 
           {/* 免责条（常驻） */}
           <div className="mb-5 flex items-start gap-2 rounded-xl bg-macaron-yellow-light/60 border border-macaron-yellow/30 px-4 py-3">
@@ -167,15 +164,6 @@ export default function PsychProfilePage() {
               如有心理困扰请联系专业机构；全国心理援助热线 400-161-9995（24 小时）。
             </p>
           </div>
-
-          {/* NEW-8（2026-10-29）：无活跃角色显式提示（旧 useActiveCharacter 静默回退首卡已根治） */}
-          {!activeCharacter && (
-            <div className="mb-5 rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-500">
-              暂无活跃角色——请先到{' '}
-              <Link to="/roles" className="font-medium text-macaron-blue-deep hover:underline">角色配置</Link>{' '}
-              激活一个角色，画像将基于你与活跃角色的对话生成。
-            </div>
-          )}
 
           {isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -190,8 +178,8 @@ export default function PsychProfilePage() {
                 {status === 'insufficient_data' ? '对话样本还不够' : '画像尚未生成'}
               </p>
               <p className="text-xs text-gray-400 max-w-sm mx-auto leading-relaxed">
-                {activeCharacter
-                  ? `「${activeCharacter.name}」还没有从与你的对话中学到足够特征——多聊几轮即可逐步建立。`
+                {characterName
+                  ? `「${characterName}」还没有从与你的对话中学到足够特征——多聊几轮即可逐步建立。`
                   : '多和角色聊几轮，系统会从对话文本中逐步学习你的性格特征、情绪模式与语言风格。'}
               </p>
             </div>
@@ -343,21 +331,19 @@ export default function PsychProfilePage() {
               )}
             </div>
           )}
-        </div>
-      </div>
 
       <ConfirmDialog
         open={confirmReset}
         title="重置心理画像"
         message={
-          activeCharacter
-            ? `将清除角色「${activeCharacter.name}」名下已学习的 ${scopeCount || profile?.snapshots || 0} 份会话心理画像，该角色会重新从对话中认识你。其他角色的画像不受影响。此操作不可撤销。`
+          characterName
+            ? `将清除角色「${characterName}」名下已学习的 ${scopeCount || profile?.snapshots || 0} 份会话心理画像，该角色会重新从对话中认识你。其他角色的画像不受影响。此操作不可撤销。`
             : '将清除所有已学习的心理特征数据，角色会重新从对话中认识你。此操作不可撤销。'
         }
         confirmText="确认重置"
         onConfirm={handleReset}
         onCancel={() => setConfirmReset(false)}
       />
-    </AnimatedPage>
+    </section>
   )
 }

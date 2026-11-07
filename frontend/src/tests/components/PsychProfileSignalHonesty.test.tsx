@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen } from '../utils/test-utils'
 import { api } from '../../api/client'
-import PsychProfilePage from '../../pages/PsychProfilePage'
+import { PsychProfileCard } from '../../components/psych/PsychProfileCard'
 
 const ACTIVE_CHAR = { id: 'char-001', name: '小雅', description: '', is_active: true }
 
@@ -78,12 +78,12 @@ afterEach(() => {
 
 async function renderWithMh(mh: unknown) {
   spy('psychProfile', { data: { ...PROFILE, mental_health: mh } })
-  render(<PsychProfilePage />)
+  render(<PsychProfileCard characterId="char-001" characterName="小雅" />)
   // NEW-15②：页面只渲染会话尾段（peerA），完整内部键不再直出
   return screen.findByText(/当前显示：会话 peerA/)
 }
 
-describe('PsychProfilePage 情绪信号口径', () => {
+describe('PsychProfileCard 情绪信号口径', () => {
   it('不再出现临床量表名与量表分母', async () => {
     await renderWithMh(MH)
     const html = document.body.textContent ?? ''

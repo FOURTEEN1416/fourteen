@@ -68,7 +68,8 @@ export interface WorkspaceTabs {
 
 export type SettingsTab = "general" | "llm" | "voice" | "security" | "extensions" | "logs"
 
-export type RoleSettingsTab = "basic" | "voice" | "message" | "data" | "timeline"
+// P9（2026-11-07）：时间线 tab 删除并重定向剧情线页（TimelineTab 本就只是 StorylineEditor 的外壳）
+export type RoleSettingsTab = "basic" | "voice" | "message" | "data"
 
 export type CreateMethod = "ai-chat" | "wechat-clone" | "file-import"
 

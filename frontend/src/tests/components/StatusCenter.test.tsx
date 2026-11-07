@@ -21,7 +21,10 @@ const { mockUseActiveCharacter, mockUseUnifiedCharacter, mockUseDashboard, mockU
   }),
 )
 
-vi.mock('../../hooks/useQueries', () => ({
+vi.mock('../../hooks/useQueries', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../hooks/useQueries')>()
+  return {
+    ...actual,
   useActiveCharacter: () => mockUseActiveCharacter(),
   useUnifiedCharacter: (id?: string) => mockUseUnifiedCharacter(id),
   useDashboard: () => mockUseDashboard(),
@@ -30,7 +33,8 @@ vi.mock('../../hooks/useQueries', () => ({
   useAchievements: () => mockUseAchievements(),
   useEmotionTrend: () => mockUseEmotionTrend(),
   useEmotionDistribution: () => mockUseEmotionDistribution(),
-}))
+  }
+})
 
 // StatusCenter 用 useQuery 拉 /shisi/emotion-stage/stages；测试固定返回与
 // constants/persona.AFFINITY_STAGES 一致的阶段，避免 CI 无后端时落到空数组。

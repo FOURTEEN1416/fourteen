@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate, useParams, Outlet } from 'react-router-dom'
+import { useActiveCharacter } from './hooks/useQueries'
 import { lazy, Suspense } from 'react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './api/queryClient'
@@ -17,7 +18,6 @@ import { sanitizeCharacterName } from './utils/character'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const IntroPage = lazy(() => import('./pages/IntroPage'))
-const PsychProfilePage = lazy(() => import('./pages/PsychProfilePage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const WeChatPage = lazy(() => import('./pages/WeChatPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
@@ -30,6 +30,7 @@ const SettingsSecurity = lazy(() => import('./pages/SettingsSecurity'))
 const SettingsAccount = lazy(() => import('./pages/SettingsAccount'))
 const ToolsDashboard = lazy(() => import('./pages/ToolsDashboard'))
 const SettingsLogs = lazy(() => import('./pages/SettingsLogs'))
+const AdminProactivePage = lazy(() => import('./pages/SettingsProactivePage'))
 const RolesPage = lazy(() => import('./pages/RolesPage'))
 
 
@@ -57,6 +58,18 @@ function PageLoadingSkeleton() {
 }
 
 /** 剧情线独立页：与角色设置同构的统一外壳（角色头卡 + 表单卡），编辑器组件保持可嵌入复用 */
+/** P8：/psych 旧链接 → 当前角色的状态页（画像卡已并入） */
+function PsychRedirect() {
+  const { activeCharacter } = useActiveCharacter()
+  return <Navigate to={activeCharacter ? `/roles/${activeCharacter.id}/status` : '/roles'} replace />
+}
+
+/** P9：/settings/timeline 旧深链 → 剧情线页（时间线已并入） */
+function TimelineRedirect() {
+  const { roleId } = useParams<{ roleId: string }>()
+  return <Navigate to={roleId ? `/roles/${roleId}/storyline` : '/roles'} replace />
+}
+
 function StorylinePage() {
   const { roleId } = useParams<{ roleId: string }>()
   const characterId = roleId ? decodeURIComponent(roleId) : ''
@@ -148,11 +161,14 @@ export default function App() {
           <Route path="/roles/create" element={<AnimatedSuspense><CreateRole /></AnimatedSuspense>} />
           <Route path="/roles/:roleId/settings" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />
           <Route path="/roles/:roleId/settings/:tab" element={<AnimatedSuspense><RoleSettings /></AnimatedSuspense>} />
+          {/* P9（2026-11-07）：时间线并入剧情线页，旧深链重定向 */}
+          <Route path="/roles/:roleId/settings/timeline" element={<TimelineRedirect />} />
           <Route path="/roles/:roleId/status" element={<AnimatedSuspense><StatusCenter /></AnimatedSuspense>} />
           <Route path="/roles/:roleId/storyline" element={<AnimatedSuspense><StorylinePage /></AnimatedSuspense>} />
           {/* 心理画像需登录：2026-09-19 审美批次并入控制台外壳（此前独立路由无侧栏/面包屑，
               未登录时由 AuthGuard 拦截，请求不会发出） */}
-          <Route path="/psych" element={<AnimatedSuspense><PsychProfilePage /></AnimatedSuspense>} />
+          {/* P8（2026-11-07）：心理画像并入状态页；旧链接重定向到当前角色的状态页 */}
+          <Route path="/psych" element={<PsychRedirect />} />
           <Route path="/help" element={<AnimatedSuspense><HelpGuidePage /></AnimatedSuspense>} />
 
           {/* 系统设置 */}
@@ -164,6 +180,8 @@ export default function App() {
             <Route path="security" element={<AnimatedSuspense><SettingsSecurity /></AnimatedSuspense>} />
             <Route path="account" element={<AnimatedSuspense><SettingsAccount /></AnimatedSuspense>} />
             <Route path="logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
+            {/* P5（2026-11-07）：主动消息引擎 = 出厂默认 + 运维（仅管理员） */}
+            <Route path="proactive" element={<RoleGuard roles={['admin'] as const}><AnimatedSuspense><AdminProactivePage /></AnimatedSuspense></RoleGuard>} />
           </Route>
 
           {/* 管理后台 */}

@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '../utils/test-utils'
 import { api } from '../../api/client'
-import PsychProfilePage from '../../pages/PsychProfilePage'
+import { PsychProfileCard } from '../../components/psych/PsychProfileCard'
 
 const ACTIVE_CHAR = { id: 'char-001', name: '小雅', description: '', is_active: true }
 
@@ -53,20 +53,19 @@ afterEach(() => {
   spies.forEach(fn => fn())
 })
 
-describe('PsychProfilePage 画像 scope 同源', () => {
+describe('PsychProfileCard 画像 scope 同源', () => {
   it('读画像/快照时带上当前角色 id（与生成侧键空间同源）', async () => {
     const profile = spy('psychProfile', { data: PROFILE })
     const snapshots = spy('psychSnapshots', { data: { snapshots: [] } })
-    render(<PsychProfilePage />)
+    render(<PsychProfileCard characterId="char-001" characterName="小雅" />)
 
-    // 首帧还没有角色列表（characterId=undefined），角色到位后按 id 重新取数
     await waitFor(() => expect(profile).toHaveBeenCalledWith('char-001'))
     expect(snapshots).toHaveBeenCalledWith(10, 'char-001')
   })
 
   it('页面说明显示的是哪一份画像、该角色共几份', async () => {
     spy('psychProfile', { data: PROFILE })
-    render(<PsychProfilePage />)
+    render(<PsychProfileCard characterId="char-001" characterName="小雅" />)
 
     // NEW-15②：内部键只露会话尾段
     expect(await screen.findByText(/会话 peerA/)).toBeTruthy()
@@ -76,7 +75,7 @@ describe('PsychProfilePage 画像 scope 同源', () => {
   it('清除只针对当前角色，成功提示用后端回传的真实份数', async () => {
     spy('psychProfile', { data: PROFILE })
     const reset = spy('psychReset', { data: RESET_RESULT })
-    render(<PsychProfilePage />)
+    render(<PsychProfileCard characterId="char-001" characterName="小雅" />)
 
     fireEvent.click(await screen.findByText('重置画像'))
     expect(await screen.findByText(/角色「小雅」名下已学习的 2 份/)).toBeTruthy()
@@ -89,7 +88,7 @@ describe('PsychProfilePage 画像 scope 同源', () => {
     spy('psychProfile', {
       data: { ...PROFILE, status: 'insufficient_data', scope_count: 0, snapshots: 0 },
     })
-    render(<PsychProfilePage />)
+    render(<PsychProfileCard characterId="char-001" characterName="小雅" />)
 
     expect(await screen.findByText('对话样本还不够')).toBeTruthy()
     expect(screen.getByText(/「小雅」还没有从与你的对话中学到足够特征/)).toBeTruthy()

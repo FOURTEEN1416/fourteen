@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
-import PsychProfilePage from '../../pages/PsychProfilePage'
+import { PsychProfileCard } from '../../components/psych/PsychProfileCard'
 import { useErrorStore } from '../../store/errorStore'
 import { queryClient } from '../../api/queryClient'
 
@@ -60,7 +60,7 @@ async function openResetAndConfirm() {
   render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <PsychProfilePage />
+        <PsychProfileCard characterId="char-001" characterName="小雅" />
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -72,7 +72,7 @@ async function openResetAndConfirm() {
   })
 }
 
-describe('PsychProfilePage 重置业务判定（W11-D5）', () => {
+describe('PsychProfileCard 重置业务判定（W11-D5）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     queryClient.clear()

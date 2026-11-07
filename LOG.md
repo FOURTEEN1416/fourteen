@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-11-07 — 痛点批第二批（P5/P7/P9/P8 页面合并）· 9 条全部落地（未部署）
+
+- **P7 最近主动消息迁状态页**：新本人作用域读面 `proactive/runtime_plane.recent_sends_for_session`（按 session_key 必填 + 可选 character_id 过滤，绝不返回他人行）+ 端点 `GET /api/user/proactive/history`（服务端按绑定还原会话键，未绑定 `bound=false`，不走操作员留痕）；状态页新增「最近主动消息」卡。测试 `test_p7_my_proactive_history.py` 3 例（他人消息零泄漏 / 角色过滤 / 未绑定）。
+- **P9 剧情线与时间线合并**：TimelineTab 本就只是 StorylineEditor 外壳——删 tab（SUB_TABS 5→4）与组件，`/roles/:id/settings/timeline` 旧深链重定向 `/roles/:id/storyline`；`RoleSettingsTab` 类型收窄。
+- **P8 心理画像页并入状态页**：页面内容抽取为 `components/psych/PsychProfileCard.tsx`（原 363 行页面删除，DELETION_LOG 已登记），状态页左列渲染；`/psych` 重定向到当前角色状态页，导航项移除；三个测试文件改挂卡片组件全绿；免责条与热线文案原样保留。
+- **P5 消息页四组归位**：新 `components/roles/CharacterSettingsPanel.tsx`（①说话节奏 ②主动消息 ③LLM 决策 ④骰子闸 ⑤话题引擎，全部走 `GET/PUT/DELETE /api/characters/{id}/my-settings`，无全局横幅、无管理员代设、无跨角色层）；原 MessageTab 的管理面内容（全局频率/LLM 决策/骰子闸/账本回放/拟人度全局/话题全局）整体改名 `ProactiveOpsTab` 迁往**管理员运维页** `/settings/proactive`（RoleGuard admin + 组件内 isAdmin 双防线），侧栏「管理后台」组新增入口。旧 D21 用户自助端点 UI（/user/proactive-config 表单、独立暂停区）随重构退场——该契约由面板承接，端点本身保留兼容。
+- **测试**：前端全量 **346 passed / 48 文件**（删 14 个钉旧 UI 用例，新增 ProactiveOpsTab 4 + CharacterSettingsPanel 5 + StatusCenter/Psych 改挂）；`tsc --noEmit` 0；后端 ruff 0；`test_p7_my_proactive_history.py` 3 例。
+- **部署**：未部署（随用户裁决）。
+---
+
 ## 2026-11-07 — 体验/架构痛点研讨批（前端 IA 与设置归属）· 第一批落地（未完成全部 9 条）
 
 - **来源**：用户 9 条报障 + 五轮对齐（四组归位、用户×角色、每人每角色一份、管理员只做基础体验默认值+站点运维）。研讨报告见工作流产物《痛点研讨报告（9 条）》。

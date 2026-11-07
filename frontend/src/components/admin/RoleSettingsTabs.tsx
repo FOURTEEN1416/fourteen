@@ -13,7 +13,6 @@ import TagInput from '../shared/TagInput'
 import Toggle from '../shared/Toggle'
 import ConfirmDialog from '../shared/ConfirmDialog'
 import Badge from '../common/Badge'
-import StorylineEditor from '../storyline/StorylineEditor'
 import type { RoleSettingsTab, RoleSettingsCharacter } from '../../types/framework'
 import type { UnifiedCharacterUpdate } from '../../types/api'
 import { Save, Trash2, Copy, Flame, CircleCheck, CircleAlert, Sun, Theater, Bird, HeartCrack, BrickWall } from 'lucide-react'
@@ -29,6 +28,7 @@ import Section from './RoleSettingsSection'
 import HumanizeSection from './HumanizeSection'
 import TopicStateSection from './TopicStateSection'
 import KnowledgePreview from '../storyline/KnowledgePreview'
+import CharacterSettingsPanel from '../roles/CharacterSettingsPanel'
 
 // ═══ 性格特质图标（NEW-32：全站图标统一 lucide，不再混用 emoji） ═══
 
@@ -761,7 +761,13 @@ export function formatHistoryTime(iso: string, mode: 'datetime' | 'time'): strin
   return mode === 'time' ? d.toLocaleTimeString('zh-CN') : d.toLocaleString('zh-CN')
 }
 
-function MessageTab(_props: { character: RoleSettingsCharacter }) {
+/**
+ * P5（2026-11-07）：原 MessageTab 的管理面内容（全局频率/LLM 决策/骰子闸/
+ * 账本回放/拟人度全局/话题全局）整体转为**管理员运维页**消费的
+ * `ProactiveOpsTab`（路由 /settings/proactive，admin 门在路由层）。
+ * 角色设置页的「消息」tab 改为渲染 CharacterSettingsPanel（用户×角色面板）。
+ */
+export function ProactiveOpsTab() {
   const qc = useQueryClient()
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const [threshold, setThreshold] = useState(2.0)
@@ -1633,6 +1639,12 @@ function MessageTab(_props: { character: RoleSettingsCharacter }) {
 
 // ═══ Tab: Data ═══
 
+// ═══ Tab: Message（P5 重构：用户×角色面板） ═══
+
+function MessageTab({ character }: { character: RoleSettingsCharacter }) {
+  return <CharacterSettingsPanel characterId={character.id} characterName={character.name} />
+}
+
 function DataTab({ character }: { character: RoleSettingsCharacter }) {
   const navigate = useNavigate()
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
@@ -1885,20 +1897,9 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
   )
 }
 
-// ═══ Tab: Timeline ═══
-
-function TimelineTab({ character }: { character: RoleSettingsCharacter }) {
-  return (
-    <div className="space-y-4">
-      <StorylineEditor characterId={character.id} />
-      <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-center">
-        <p className="text-xs text-gray-400">时间线由剧情编辑器自动保存</p>
-      </div>
-    </div>
-  )
-}
-
 // ═══ Tab Router ═══
+// P9（2026-11-07）：TimelineTab 删除——它本就只是 StorylineEditor 的外壳，
+// 时间线已并入独立剧情线页 /roles/:id/storyline（旧链接重定向）。
 
 function ActiveTab({ tab, character }: { tab: RoleSettingsTab; character: RoleSettingsCharacter }) {
   switch (tab) {
@@ -1906,7 +1907,6 @@ function ActiveTab({ tab, character }: { tab: RoleSettingsTab; character: RoleSe
     case 'voice': return <VoiceTab character={character} />
     case 'message': return <MessageTab character={character} />
     case 'data': return <DataTab character={character} />
-    case 'timeline': return <TimelineTab character={character} />
   }
 }
 
