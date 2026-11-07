@@ -198,8 +198,10 @@ test.describe.serial('W11 · 角色设置深链（D2）', () => {
     try {
       await page.goto(base)
       await expect(page.getByText('性格特质')).toBeVisible()
-      await page.getByRole('button', { name: '时间线' }).click()
-      await expect(page).toHaveURL((url) => url.pathname === `${base}/timeline`)
+      // v1.65 P9：时间线 tab 删除（并入剧情线页），SUB_TABS 5→4——
+      // 深链写入语义改用现存的「语音」tab 验证。
+      await page.getByRole('button', { name: '语音' }).click()
+      await expect(page).toHaveURL((url) => url.pathname === `${base}/voice`)
     } finally {
       await role.cleanup?.()
     }
@@ -209,19 +211,26 @@ test.describe.serial('W11 · 角色设置深链（D2）', () => {
 // ── D4：主动面板作用域（角色页禁全局广播） ───────────────
 
 test.describe.serial('W11 · 主动面板作用域（D4）', () => {
-  test('viewer：消息 tab 显示个人主动配置（用户主权），无 admin 全局控制面与全局广播按钮', async ({ page, request }) => {
+  test('viewer：消息 tab 是「我 × 角色」面板且未绑微信时 409 诚实门（不猜键），无 admin 全局控制面', async ({ page, request }) => {
     await uiLogin(page, VIEWER)
     // 真实创建并归属到 viewer（角色资源按归属校验，别人的卡对 viewer 不可见）
     const { id: roleId, token } = await createRoleAs(request, VIEWER, `W11-E2E-viewer-${Date.now()}`)
     try {
       await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
 
-      // v1.62 用户主权批：消息 tab 对全体用户开放——viewer 看到自己的
-      // 「我的主动消息」区（个人覆盖/继承全局徽章 + 节奏滑条 + 暂停），
-      // 不再是旧的「仅全局调度说明」只读挡板。
-      await expect(page.getByText('我的主动消息')).toBeVisible()
-      await expect(page.getByTestId('user-proactive-scope')).toBeVisible()
-      // 仍未暴露 admin 全局控制面与广播按钮
+      // v1.65 P5：消息 tab 改渲染 CharacterSettingsPanel（我 × 这个角色，
+      // 全走 my-settings 端点）——主动节奏属其中第②组；旧「我的主动消息」
+      // 独立区与 user-proactive-scope 徽章随 P5 退役。
+      // E2E viewer 未绑微信：my-settings 按 P1 语义 409（不猜会话键），
+      // 面板显示透传的中文引导 + 重试，绝不渲染五组假表单（UXV-6 同契约）。
+      await expect(page.getByRole('heading', { name: '本角色设置' })).toBeVisible()
+      // 面板错误体在 main 区（顶部另有绑定提示横幅同文案 → 直接 getByText 会 strict 冲突）
+      await expect(
+        page.getByRole('main').getByText(/尚未绑定微信，无法确定你的会话键/),
+      ).toBeVisible()
+      await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
+      await expect(page.getByText('② 主动消息（这个角色什么时候来找我）')).toHaveCount(0)
+      // 仍未暴露 admin 全局控制面（已迁 /settings/proactive 运维页）与广播按钮
       await expect(page.getByText('LLM 主动决策（人设·画像·控制台）')).toHaveCount(0)
       await expect(page.getByText('保存频率配置')).toHaveCount(0)
       await expect(page.getByText('立即发送一条主动消息')).toHaveCount(0)
@@ -230,45 +239,54 @@ test.describe.serial('W11 · 主动面板作用域（D4）', () => {
     }
   })
 
-  test('admin：全局作用域横幅 + 表单可见，但无全局广播发送按钮', async ({ page, request }) => {
+  test('admin：全局运维面在 /settings/proactive（表单可见），角色页消息 tab 无全局控制面', async ({ page, request }) => {
     await uiLogin(page, ADMIN)
     const role = await anyRoleId(request)
     const roleId = role.id
     try {
-    await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
+      // v1.65 P5：原消息 tab 管理面（全局频率/LLM 决策/骰子闸/账本回放）
+      // 整体迁管理员运维页 /settings/proactive（ProactiveOpsTab）。
+      await page.goto('/settings/proactive')
 
-    // 批5 V2-3 渐进式披露：高级运维区（含 LLM 决策/频率保存）收紧为
-    // <details> 折叠，管理员需先展开——本用例的断言面在该折叠区内。
-    await page
-      .getByText('高级运维：LLM 决策参数 / 骰子闸 / 状态账本回放（管理员，日常无需展开）')
-      .click()
+      // 批5 V2-3 渐进式披露：高级运维区收紧为 <details> 折叠，管理员需先展开。
+      await page
+        .getByText('高级运维：LLM 决策参数 / 骰子闸 / 状态账本回放（管理员，日常无需展开）')
+        .click()
 
-    await expect(page.getByText('LLM 主动决策（人设·画像·控制台）')).toBeVisible()
-    // 批6 NEW-24 加了「改动需点击下方『保存频率配置』生效」指引 → 纯文本定位会命中
-    // 按钮+指引两处（strict mode 冲突）；按按钮角色定位。
-    await expect(page.getByRole('button', { name: '保存频率配置' })).toBeVisible()
-    // 作用域声明：参数是全局的，不是本角色专属
-    await expect(page.getByText(/全局配置：以下参数作用于全部角色的主动消息调度/)).toBeVisible()
-      // 角色页禁止全局广播
+      await expect(page.getByText('LLM 主动决策（人设·画像·控制台）')).toBeVisible()
+      // 批6 NEW-24 加了「改动需点击下方『保存频率配置』生效」指引 → 纯文本定位会命中
+      // 按钮+指引两处（strict mode 冲突）；按按钮角色定位。
+      await expect(page.getByRole('button', { name: '保存频率配置' })).toBeVisible()
+      // 作用域声明：参数是全局的，不是本角色专属
+      await expect(page.getByText(/全局配置：以下参数作用于全部角色的主动消息调度/)).toBeVisible()
+      // 全局广播按钮保持不存在（W11-D4：手动发送已移除，运维面只读记录）
       await expect(page.getByText('立即发送一条主动消息')).toHaveCount(0)
+
+      // 角色页消息 tab 对 admin 也只渲染「我 × 角色」面板（未绑微信=同一 409 门），
+      // 不再承载全局运维
+      await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
+      await expect(page.getByRole('heading', { name: '本角色设置' })).toBeVisible()
+      await expect(page.getByText('保存频率配置')).toHaveCount(0)
     } finally {
       await role.cleanup?.()
     }
   })
 
-  test('admin：主动引擎不可用（503）时显式报错 + 重试，不渲染默认假表单', async ({ page, request }) => {
+  test('admin：我 × 角色设置加载失败（503）时显式报错 + 重试，不渲染默认假表单', async ({ page, request }) => {
     await uiLogin(page, ADMIN)
     const role = await anyRoleId(request)
     const roleId = role.id
     try {
-      await page.route('**/api/proactive/config*', (route) =>
-        route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'unavailable' }) }),
+      // v1.65 P5：消息 tab 数据源从 /api/proactive/config 换为 my-settings——
+      // 诚实错误态契约随数据源走。mock 不带 detail → 走通用兜底文案。
+      await page.route('**/api/characters/*/my-settings*', (route) =>
+        route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({}) }),
       )
       await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
 
-      await expect(page.getByText(/主动消息引擎未初始化/)).toBeVisible()
+      await expect(page.getByText('角色设置加载失败，当前显示的不是你的真实设置')).toBeVisible()
       await expect(page.getByRole('button', { name: '重试' })).toBeVisible()
-      await expect(page.getByText('保存频率配置')).toHaveCount(0)
+      await expect(page.getByText('② 主动消息（这个角色什么时候来找我）')).toHaveCount(0)
     } finally {
       await role.cleanup?.()
     }

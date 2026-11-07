@@ -48,8 +48,8 @@ test.describe('SP-12 冒烟', () => {
       // 2 秒内未弹回登录页 → 已稳定停留在 /roles
     }
     await expect(page.getByRole('heading', { name: '角色配置' })).toBeVisible({ timeout: 15_000 })
-    // 本地角色库 53 张，网格应有内容；至少「创建角色」入口存在
-    await expect(page.getByText('创建角色').first()).toBeVisible()
+    // v1.64 P3：新建入口前置为页头主按钮「新建角色」（不再藏在列表末尾「创建角色」）
+    await expect(page.getByText('新建角色').first()).toBeVisible()
   })
 
   test('设置页：LLM 供应商清单真实加载（API 集成冒烟）', async ({ page }) => {

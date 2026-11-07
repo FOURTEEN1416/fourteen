@@ -190,69 +190,18 @@ test.describe.serial('W17 · 自服务面（账号与数据）', () => {
   })
 })
 
-// ── 模板面：/templates ────────────────────────────────────
+// ── 模板面（v1.64 P2 已整页删除，深链守卫） ────────────────
 
-test.describe.serial('W17 · 模板面（角色模板）', () => {
-  test('侧栏入口可达，清单与后端权威总数一致（CI 无卡时显示诚实空态）', async ({ page, request }) => {
-    await uiLogin(page, VIEWER)
-    const token = await apiToken(request, VIEWER)
-    const apiRes = await request.get(`${API}/api/character-templates`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(apiRes.ok()).toBeTruthy()
-    const body = await apiRes.json()
-    const total: number = body.total ?? 0
-    const names: string[] = (body.templates ?? []).map((t: { name: string }) => t.name)
-
-    await page.getByRole('link', { name: '角色模板' }).click()
-    await page.waitForURL('**/templates')
-    await expect(page.getByRole('heading', { name: '角色模板' })).toBeVisible()
-
-    if (total === 0) {
-      // 无卡/开关关闭：空态而非错误，且不得渲染任何克隆按钮
-      await expect(page.getByText(/暂无可用模板/)).toBeVisible()
-      await expect(page.getByText('无法加载角色模板')).toHaveCount(0)
-      await expect(page.getByRole('button', { name: /使用此角色/ })).toHaveCount(0)
-      return
-    }
-    for (const name of names.slice(0, 3)) {
-      await expect(page.getByText(name, { exact: true })).toBeVisible()
-    }
-    await expect(page.getByRole('button', { name: /使用此角色/ })).toHaveCount(total)
-  })
-
-  test('使用此角色 → 克隆归属本人并出现在我的角色列表（随后清理）', async ({ page, request }) => {
-    const token = await apiToken(request, VIEWER)
-    const listRes = await request.get(`${API}/api/character-templates`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    const body = await listRes.json()
-    const first = (body.templates ?? [])[0]
-    // CI 无卡守卫：模板库为空时这条旅程无从走起（无卡可克隆是事实，不是放宽断言）
-    test.skip(!first, '模板清单为空（worktree/CI 未投递 gitignored 角色卡）')
-
+test.describe.serial('W17 · 模板面（已删除，深链守卫）', () => {
+  // v1.64 P2：/templates 页面删除（DELETION_LOG 已登记），旧深链重定向回角色页。
+  // 旧「侧栏入口 + 清单一致 + 克隆旅程」两用例随功能退役；此处保留深链不 404 的守卫。
+  test('旧深链 /templates 重定向回 /roles（不再 404、不再渲染模板面）', async ({ page, request }) => {
     await uiLogin(page, VIEWER)
     await page.goto('/templates')
-    await page.getByRole('button', { name: /使用此角色/ }).first().click()
-
-    await page.waitForURL('**/roles', { timeout: 20_000 })
-    await expect(page.getByText(/暂无角色/)).toHaveCount(0)
-
-    // 后端实况：克隆件已归属 viewer（GET /api/characters 按归属过滤）
-    const mine = await request.get(`${API}/api/characters`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(mine.ok()).toBeTruthy()
-    const mineBody = await mine.json()
-    const list = Array.isArray(mineBody) ? mineBody : (mineBody.characters ?? [])
-    const cloned = list.find((c: { name: string }) => c.name === first.name)
-    expect(cloned, '克隆出的角色应出现在本人角色列表').toBeDefined()
-
-    // 清理：删除刚克隆的副本，避免污染仓库权威角色库（config/characters）
-    const del = await request.delete(`${API}/api/characters/${encodeURIComponent(cloned.id)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    expect(del.ok(), '清理克隆副本应成功').toBeTruthy()
+    await page.waitForURL('**/roles', { timeout: 15_000 })
+    await expect(page.getByRole('heading', { name: '角色配置' })).toBeVisible({ timeout: 15_000 })
+    // 模板面残留物不得再渲染
+    await expect(page.getByRole('button', { name: /使用此角色/ })).toHaveCount(0)
   })
 })
 

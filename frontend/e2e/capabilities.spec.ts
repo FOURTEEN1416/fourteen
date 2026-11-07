@@ -86,13 +86,16 @@ test.describe('W4 新能力冒烟', () => {
     expect(Array.isArray(body.entries)).toBeTruthy()
 
     // UI：登录 → 状态中心渲染，无日记时页面完整可用（DiaryCard 按设计空态隐藏）
+    // v1.65.2 内置默认卡：列表首项恒为 default（builtin）——状态中心对内置卡
+    // 恒可达（UXV-10 根治语义），页名由面包屑末段承担（2026-09-19 审美批次删除
+    // 重复 h2，旧 `heading 状态中心` 断言自该批起即为死断言，由内容卡兜底）。
     await uiLogin(page)
     const characterId = await firstCharacterId(request)
     await gotoProtected(page, `/roles/${encodeURIComponent(characterId)}/status`)
-    await expect(page.getByRole('heading', { name: '状态中心' })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('当前情绪', { exact: true })).toBeVisible()
+    await expect(page.getByText('当前情绪', { exact: true })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText('亲密等级', { exact: true })).toBeVisible()
-    await expect(page.getByText('记忆体系', { exact: true })).toBeVisible()
+    // 「记忆体系 三层管线」为带后缀的 h3，exact 短语不匹配 → 用正则
+    await expect(page.getByText(/记忆体系/)).toBeVisible()
   })
 
   test('重要日期：设置页 Basic tab 区块渲染 + 添加一行 + 保存成功（测试后还原共享文件）', async ({
@@ -185,16 +188,22 @@ test.describe('第二批新能力冒烟（2026-09-01：成就 / 知识库 / 语�
     request,
   }) => {
     // 该端点校验角色存在（404），与 achievements 不同 → 契约断言也需真实角色 id
+    // v1.65.2 内置默认卡（builtin，无卡文件）恒前置：knowledge/stats 对 default
+    // 404 属产品语义（知识库是卡级概念），契约断言必须取非内置卡。
     const charRes = await request.get('/api/characters')
-    const list: Array<{ id: string }> = (await charRes.json()).characters ?? []
-    test.skip(list.length === 0, 'E2E 库无角色，跳过契约与 DATA tab UI 断言')
-    const res = await request.get(`/api/characters/${encodeURIComponent(list[0].id)}/knowledge/stats`)
+    const list: Array<{ id: string; builtin?: boolean }> =
+      (await charRes.json()).characters ?? []
+    const realCard = list.find((c) => !c.builtin)
+    test.skip(!realCard, 'E2E 库无非内置角色（干净环境），跳过契约与 DATA tab UI 断言')
+    const res = await request.get(
+      `/api/characters/${encodeURIComponent(realCard!.id)}/knowledge/stats`,
+    )
     expect(res.ok()).toBeTruthy()
     const body = await res.json()
     expect(typeof body.indexed).toBe('boolean')
     expect(typeof body.total_chunks).toBe('number')
     expect(typeof body.retriever_type).toBe('string')
-    await gotoProtected(page, `/roles/${encodeURIComponent(list[0].id)}/settings/data`)
+    await gotoProtected(page, `/roles/${encodeURIComponent(realCard!.id)}/settings/data`)
     await page.getByRole('button', { name: '数据', exact: true }).click()
     await expect(page.getByText('知识库引擎 (RAG)', { exact: true })).toBeVisible()
     await expect(page.getByText('知识库', { exact: true }).first()).toBeVisible()
