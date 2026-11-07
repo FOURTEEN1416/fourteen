@@ -377,7 +377,7 @@ def test_llm_proactive_deliver_failure_backoff(sched, hub_tmp, monkeypatch):
     }
     _proactive_sched(monkeypatch, [], decide, {})
     sched._resolve_proactive_llm = lambda eng=None: object()
-    sched._deliver = lambda msg, session_key=None, character_id=None: False
+    sched._deliver = lambda msg, session_key=None, character_id=None, **kwargs: False
     key = "4:peer@im.wechat"
     sched._llm_proactive_one_user(hub_tmp, key)
     assert key in sched._llm_proactive_next_ok, "P1-22：投递失败必须退避，不许 5 分钟后再烧 LLM"
@@ -386,7 +386,7 @@ def test_llm_proactive_deliver_failure_backoff(sched, hub_tmp, monkeypatch):
     assert sched._llm_proactive_next_ok[key] == first
     assert sched._deliver_fail_counts[key] == 1
     # 成功送达 → 计数清零
-    sched._deliver = lambda msg, session_key=None, character_id=None: True
+    sched._deliver = lambda msg, session_key=None, character_id=None, **kwargs: True
     sched._llm_proactive_next_ok.pop(key)
     sched._llm_proactive_one_user(hub_tmp, key)
     assert key not in sched._deliver_fail_counts

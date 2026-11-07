@@ -1000,13 +1000,13 @@ def test_scheduler_rejects_non_hub_ase_injection():
 def test_scheduler_quiet_hours_skips_before_generation(monkeypatch, tmp_path):
     """静默时段必须在 **LLM 决策/生成之前** 短路：不决策、不记账、不扣配额。"""
     import proactive.llm_proactive as lp
-    from proactive.ase_engine import _local_now
 
     sched, hub, key = _hub_sched(monkeypatch, tmp_path)
     decide_calls: list[int] = []
     monkeypatch.setattr(lp, "decide_proactive", lambda llm, ctx: decide_calls.append(1) or {})
-    h = _local_now().hour
-    sched._quiet_hours = (h, (h + 1) % 24)
+    # 2026-11-07：静默窗口按「用户×角色」快照判定；本用例只钉「静默必须在
+    # 生成前短路」，直接把判定钉为真，不重复测窗口数学。
+    sched._is_quiet_hours_for = lambda cfg: True
 
     sched._check_ase()
 
@@ -1058,7 +1058,7 @@ def test_scheduler_commits_after_successful_delivery(monkeypatch, tmp_path):
     sched._quiet_hours = ((h + 2) % 24, (h + 3) % 24)
     sent: list[str] = []
 
-    def _deliver(message, session_key=None, character_id=None):
+    def _deliver(message, session_key=None, character_id=None, **kwargs):
         sent.append(message)
         return True
 

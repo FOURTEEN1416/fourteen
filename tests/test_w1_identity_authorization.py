@@ -501,11 +501,18 @@ async def test_unowned_legacy_card_not_auto_claimed(w1_app):
     r = await client.get("/api/characters/legacy01", headers=bob_auth)
     assert r.status_code == 200, f"公共池卡必须可读，实得 {r.status_code}"
 
-    # 写侧仍收口：普通用户不得改/删公共卡（与「不存在」同文案 404，防状态码枚举）
+    # 2026-11-07 用户裁决：公开卡默认属于每个人，**不必克隆**——普通用户可改，
+    # 但只写自己的私人覆盖；共享卡文件与归属不得被改动。
     r = await client.put("/api/characters/legacy01", json={"name": "x"}, headers=bob_auth)
-    assert r.status_code == 404, f"公共卡对普通用户只读：PUT 必须 404，实得 {r.status_code}"
+    assert r.status_code == 200, f"公开卡应可直接自定义，实得 {r.status_code}"
+    assert r.json().get("scope") == "personal", "普通用户改公开卡必须落私人覆盖"
     r = await client.delete("/api/characters/legacy01", headers=bob_auth)
-    assert r.status_code == 404, f"公共卡对普通用户只读：DELETE 必须 404，实得 {r.status_code}"
+    assert r.status_code == 404, f"公开卡不得被普通用户删除：DELETE 必须 404，实得 {r.status_code}"
+
+    # 共享卡文件零改动：不认领、不改名
+    shared = json.loads((chars_dir / "legacy01.json").read_text(encoding="utf-8"))
+    assert shared["name"] == "存量卡", "私人修改不得写进共享卡文件"
+    assert shared["user_id"] == "default", "访问不得自动把存量卡归属给首个访问者"
 
     # 激活是个人选择：只写 user_active_characters，不改卡文件（D2 per-user 语义）
     r = await client.post("/api/characters/legacy01/activate", headers=bob_auth)

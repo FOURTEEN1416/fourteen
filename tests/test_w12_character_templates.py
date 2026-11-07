@@ -269,16 +269,34 @@ async def test_clone_preserves_template_bytes(w12_app):
 # ═══════════════════════════════════════════════════════════
 
 
-async def test_template_card_not_mutable_by_user(w12_app):
+async def test_template_card_personalized_not_shared(w12_app):
+    """2026-11-07 用户裁决：公开模板默认属于每个人，不必克隆。
+
+    - 普通用户 PUT 模板卡 → 200 且 `scope=personal`（只改自己那份）；
+    - 共享卡文件零改动；另一个用户仍看到原样；
+    - DELETE 仍 404（公开卡不允许被普通用户删掉）。
+    """
     ns = w12_app
     alice = _bearer(await _login(ns.client, "alice"))
+    bob = _bearer(await _login(ns.client, "bob"))
 
+    before = json.loads((ns.chars_dir / f"{_TPL_ALPHA}.json").read_text(encoding="utf-8"))
     r = await ns.client.put(
         f"/api/characters/{_TPL_ALPHA}", headers=alice, json={"name": "改名"}
     )
-    assert r.status_code == 404, f"模板卡 PUT 应 404，实得 {r.status_code}"
+    assert r.status_code == 200, f"公开模板应可直接自定义，实得 {r.status_code}"
+    assert r.json().get("scope") == "personal"
+
+    after = json.loads((ns.chars_dir / f"{_TPL_ALPHA}.json").read_text(encoding="utf-8"))
+    assert after["name"] == before["name"], "私人修改不得写进共享卡文件"
+
+    mine = await ns.client.get(f"/api/characters/{_TPL_ALPHA}", headers=alice)
+    assert mine.json()["name"] == "改名"
+    other = await ns.client.get(f"/api/characters/{_TPL_ALPHA}", headers=bob)
+    assert other.json()["name"] == before["name"], "另一个用户不得看到别人的私人修改"
+
     r2 = await ns.client.delete(f"/api/characters/{_TPL_ALPHA}", headers=alice)
-    assert r2.status_code == 404, f"模板卡 DELETE 应 404，实得 {r2.status_code}"
+    assert r2.status_code == 404, f"公开模板不得被普通用户删除，实得 {r2.status_code}"
 
 
 # ═══════════════════════════════════════════════════════════

@@ -530,7 +530,7 @@ async def list_characters(
             if search_lower in c.get("name", "").lower()
             or search_lower in c.get("description", "").lower()
         ]
-    if principal is not None:
+    if isinstance(principal, AuthPrincipal):
         active_id = await _personal_active_character_id(db, principal.user_id)
         characters = _overlay_personal_activation(characters, active_id)
         # 2026-11-07：公开卡默认属于每个人——列表里直接呈现该用户自己的私人修改
@@ -595,7 +595,7 @@ async def get_character(
         _save_character(character_id, data)
 
     # 2026-11-07：公开卡的私人修改（每人一份，互不影响）
-    if principal is not None:
+    if isinstance(principal, AuthPrincipal):
         from utils import character_overrides
 
         data = character_overrides.apply(principal.user_id, character_id, data) or data
@@ -659,7 +659,7 @@ async def update_character(
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
-    if principal is not None and not card_write_allowed(data, principal):
+    if isinstance(principal, AuthPrincipal) and not card_write_allowed(data, principal):
         # 公共池卡：只落该用户自己的覆盖，不碰共享文件
         from utils import character_overrides
 
@@ -1042,7 +1042,7 @@ async def get_character_persona(
     data = _owned or _load_character(character_id)
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
-    if principal is not None:
+    if isinstance(principal, AuthPrincipal):
         from utils import character_overrides
 
         data = character_overrides.apply(principal.user_id, character_id, data) or data
@@ -1084,7 +1084,7 @@ async def update_character_persona(
     if data is None:
         raise HTTPException(status_code=404, detail=f"角色不存在: {character_id}")
 
-    if principal is not None and not card_write_allowed(data, principal):
+    if isinstance(principal, AuthPrincipal) and not card_write_allowed(data, principal):
         from utils import character_overrides
 
         patch: dict[str, Any] = {}

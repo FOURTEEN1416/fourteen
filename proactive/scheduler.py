@@ -1640,14 +1640,14 @@ class ProactiveScheduler:
         # `utils.character_settings` / `utils.proactive_config` 内逐字段回落，
         # **绝不抛异常炸主链**。
         user_cfg = proactive_config_mod.effective(str(user_key), character_id=character_id)
-        # 该会话生效的静默时段（覆盖哪一端用哪一端）——决策闸、上下文、judge
-        # 与投递必须**同一份**窗口，否则「用户把静默窗改窄」会在决策层放行、
-        # 又被投递层的全局静默拦回（设置看起来保存成功却永不生效）。
-        # 未覆盖 → None，后续一律走既有全局路径（零行为变更，替身兼容）。
-        _quiet_overridden = bool(
-            user_cfg.overridden_keys & set(proactive_config_mod.QUIET_KEYS)
-        )
-        _quiet_window = self._quiet_hours_for(user_cfg) if _quiet_overridden else None
+        # 该会话生效的静默时段——决策闸、上下文、judge 与投递必须**同一份**窗口。
+        # 2026-11-07：全量快照下每个用户都有自己的一份窗口（首次物化自出厂默认），
+        # 因此不能再按「覆盖键是否存在」判断要不要下发；改为**值比较**——与调度器
+        # 内存里的全局窗口一致时不下发（走既有全局路径，老替身/调用方零改动），
+        # 只有真的不同才下发 `quiet_hours=`。
+        _user_window = self._quiet_hours_for(user_cfg)
+        _global_window = tuple(getattr(self, "_quiet_hours", (23, 7)))
+        _quiet_window = None if tuple(_user_window) == _global_window else _user_window
 
         def _gate(key: str, global_value: Any) -> Any:
             """闸位取值：角色快照优先，但**全局急停/总开关是运维覆盖层**。

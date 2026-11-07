@@ -51,13 +51,16 @@ def _make_scheduler(monkeypatch, *, quiet: bool = False, enabled: bool = True):
     sched._quiet_event_day = {}
     sched._important_dates_sent = set()
     sched._is_quiet_hours = lambda: quiet
+    # 2026-11-07：静默窗口改为按「用户×角色」快照判定；本文件测账本去重，
+    # 直接钉住判定结果，不重复测窗口数学。
+    sched._is_quiet_hours_for = lambda cfg: quiet
     sched.get_quiet_hours = lambda: None
     sched._vital_tick_for_user = lambda *a, **k: None
     sched._resolve_character_id = lambda k: "测试角色"
     sched._resolve_memory = lambda: None
     sched._session_llm_resolver = None
     sched._resolve_proactive_llm = lambda eng: None
-    sched._deliver = lambda message, session_key, character_id="": True
+    sched._deliver = lambda message, session_key, character_id="", **kwargs: True
     persists: list[bool] = []
     sched._persist_throttle_ledger = lambda: persists.append(True)
 
