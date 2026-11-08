@@ -349,3 +349,17 @@ deploy/
 ├── .env.production                   # 生产环境变量模板
 └── README.deploy.md                  # 本文件
 ```
+
+## 语音链路系统依赖（2026-11-08 补）
+
+语音合成/发送不只靠 Python 包，宿主必须装：
+
+```bash
+# OpenCloudOS 9 / RHEL9 系（生产实测）
+dnf install -y ffmpeg vulkan-loader      # ffmpeg 7 依赖 libvulkan.so.1
+.venv-cpu/bin/pip install "pilk>=0.2.4"  # mp3→wav→silk（微信 tencent 变体）
+```
+
+缺 `ffmpeg` → `ffmpeg未找到`；缺 `vulkan-loader` → `libvulkan.so.1` 加载失败；
+缺 `pilk` → 只能退 `amr`（多数 ffmpeg 构建不带 amr 编码器）→ 语音条发不出。
+验证：`.venv-cpu/bin/python -c "from voice.audio_converter import AudioFormatConverter; print(AudioFormatConverter().health_check())"`。

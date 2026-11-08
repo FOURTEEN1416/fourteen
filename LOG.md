@@ -7,7 +7,16 @@
 
 ---
 
-## 2026-11-08 — CI 三连红根治批：fastapi 路由包装 + UTC 宿主时钟错位 + E2E 产品变更测试债（v1.65.3 · run 42403179359 全绿）
+## 2026-11-08 — 「用户 × 角色」偏好快照批（D-A/D-B/D-C）+ 第 2 轮对抗验收修复（v1.67 · 本地完成未部署）
+
+- **批次定位**：用户裁决（逐字见 `docs/DELETION_LOG.md` 2026-11-08 条目）——D-A 个人偏好区从 `/settings/account` 整块删除、能力划归「用户 × 角色」角色设置；D-C 回复模式写进 `my-settings` 快照（仅 `immersive` / `novel`）；本批任务书 item 3 把 `user_proactive_config` per-user 层一并退役。**替代 owner**：`utils/character_settings.py`（`user_character_settings` 全量快照，584 行）+ `GET/PUT/DELETE /api/characters/{id}/my-settings`；运行时解析链统一为「角色快照 → 全局默认 → 内置兜底」（`read_reply_mode` / `read_humanize` / `proactive_config.effective`）。
+- **交付变更**：**退役 11 条路由**（`training` 子路由 30→19）——`GET/POST /api/user/reply-mode`、`GET/POST/PUT/DELETE /api/user/humanize`、`DELETE /api/humanize/config`、`GET/POST/DELETE /api/user/proactive-config`、`POST /api/user/proactive/pause`；新增 `api/routers/character_settings_routes.py`（3 端点，tag `character-settings`）。前端 `/settings/proactive` 运维页删除（admin 控制面并入角色设置/既有 admin 端点）、`/templates` 与 `/psych` 改重定向、`HumanizeSection` 去「按用户覆盖」块。全部删除项与跨模块消费者处置见 `DELETION_LOG`。
+- **第 2 轮对抗验收修复（本轮 9 条 finding）**：① **后端门禁 exit=4 定性**——上一轮 pytest 被喂进 `.ts` 路径（`collected 0`）属「未运行」而非「未通过」；本轮按 `AGENTS §4.3` `find` 递归四分块真跑，证据见下。②③④ **真源文档回扫**——`CODE_GRAPH.md` 升 **v3.8.39**（端点 249/207 实测、`training` tag 27→19、`character-settings` 3、utils 28、页面 18、R7 模式隔离 UI 与 user 自助主动 UI 标退役）、`docs/CODEMAPS/BACKEND.md`（training 19 + character 22 + 新 `character_settings_routes` 3）、`FRONTEND.md`（`training.ts` 去 `user/reply-mode`）、`MODULES.md`（utils 28 + `character_settings`/`character_overrides`）、`FUNCTION_INVENTORY.md`（`_normalize_admin_target_key`、dice_gate 读 `:352-362`/写 `:477-485`）。⑤ **越权删除追认**——`/api/user/proactive-config`×3 + `pause`×1 属超出裁决文的删除，`DELETION_LOG` 已如实登记「待 owner 追认」，**本轮无法自行闭环**（需 owner 明确追认；代码上该层已无读/写函数，保留形态不可能）。⑥ **`main.py` 主动投递失败归因**——旧无参 `humanize_proactive_split_enabled()` 只读全局块，改 `proactive_split_enabled(connector, peer)`（与 `direct_send_proactive` 同源作用域），「按角色开拆条、全局关」不再把「未完整受理」误报成「整段直发被拒」。⑦ **连接器三处兜底文案**——异常兜底 / 空回复兜底 / 媒体降级话术的 `read_reply_mode()` 全部改传 `humanize_scope(peer)` 得到的 `(user_key, character_id)`，小说式角色不再拿沉浸式口径文案。⑧ **提交完整度**——`wechat_direct/binding_sync.py` 等 **10 个新文件仍未纳入版本控制**（`binding_sync` 已被 tracked 的 `wechat_connector.py:1530` import，若按「只提交已跟踪改动」收尾，服务器 pull 后扫码登录整条路径 `ImportError`）；受本轮「禁止 git add」约束，**未处理，收口时必须整包提交**。⑨ **治理留痕**——本条目 + `AGENTS.md` v1.67 版本头即为此项闭环。
+- **门禁实跑（本轮新鲜，45 卡，工作树含并行窗在制品）**：`find tests -name 'test_*.py' | sort` → 294 文件，`awk 'NR%4==i'` 四分块；`pytest --collect-only` = **4627**；四分块 **1193 + 906 + 1245+1skip + 1281+1skip = 4625 通过 + 2 跳过 / 0 失败**（与收集数精确吻合；较上轮 4623+2 多 2 = 本轮新增作用域回归 2 例）。前端 `npx vitest run` **48 文件 / 352 例全绿**；`npx tsc --noEmit` 0 错；`python -m ruff check .` **0 错**。新增测试：`tests/test_humanize_delivery_scope_20261108.py` +2（主动拆条作用域判据、三处兜底文案作用域）；**突变验红 2/2**（改回无参调用 → 两例红，已还原）。
+- **遗留**：① 上述 owner 追认（4 条路由）；② 10 个未跟踪文件（收口必须提交，否则服务器 ImportError）；③ `docs/CODEMAPS` 内 `§4.17` 历史段仍保留该批「本批实跑 254」读数（历史记录，非现役口径）；④ `CODE_GRAPH.md` 的**测试/文件规模读数**（§1.1 测试行 4498/4500）仍停在 v3.8.37 口径，本次只回扫端点与路由相关行——规模读数待下一轮全量回扫批统一（不影响路由核对）。
+
+---
+
 
 - **批次定位**：用户指令「ci 报错处理一下」。v1.63~v1.65.2 共 14 提交首次 push（`94594b8`/`55df4dd`/`9df80cc` 三条 run 全红，失败面恒为 backend+frontend 两域）。三个独立根因逐一实证闭环：① backend=fastapi 依赖漂移破坏路由枚举；② backend=UTC 宿主时钟错位（两个提交分两轮暴露）；③ frontend=E2E 测试债（产品变更 + 内置默认卡打破空库 skip 掩护）。与 v1.66 批（并行窗）共享主检出，其 `79784b0` 建立在我的 `48a8310` 之上，最终全绿 run 含两批代码。
 - **根因①（run 42395306164 backend @43%）fastapi≥0.137 `_IncludedRouter` 包装**：CI pip 全新解析 fastapi 0.138.2（旧上限 `<0.139` 太松）——0.137.0 起 `include_router` 子路由被包成 `_IncludedRouter`（path/methods=None，真实路由移至 `original_router.routes`），`test_p4_character_write_gates._find_route` 裸扫 `app.routes` 把 PUT persona「判丢」。**一次性 venv 定界实证：0.136.3 平铺 / 0.137.2 + 0.138.2 包装，starlette 1.7/1.10 均不改变该行为（边界由 fastapi 主导）**。修法双保险：pyproject 上限 `<0.139`→`<0.137`（平铺枚举语义=测试/健康检查既定依赖，沿 `9a5fd67` 同一政策）+ `_find_route` 补 `original_router` 递归平铺（与 `test_api_routes._flatten_app_routes` 同款；仓内 test_consent/test_ops_lifecycle 早已兼容，test_invite_codes 实测不在包装面）。
@@ -42,7 +51,13 @@
 - **语音触发补洞（同日 · `d43be0a` 已部署）**：生产实测发现「我想听你的声音 / 听一下你的声音 / 发条语音 / 发一条语音」整类漏判（旧欲望模式只认「听到/听见你的声音」）——用户明确要语音却回文字=能力静默降级。补命令词 2 条 + 欲望模式 `想?听(一|一下)?你的声音`；误伤对照钉死（夸奖「你的声音真好听」、否定「别发语音」不触发）；测试 +1（11 命中 + 4 不命中矩阵）+ 四分块全量 **4610 通过 + 2 跳过 / 0 失败 / 收集 4612**、ruff 0、生产检测器复验 True/True/False。
 
 
-## 2026-11-08 — 对抗验收修复批 + 内置默认卡裁决批（v1.65.2 · 全量回归通过 · 已随本批链三端部署）
+## 2026-11-08 — 主动语音广播催动（用户裁决：给每个用户发一条语音主动消息）
+
+- **批次定位**：用户指令「催动主动消息，给每一个用户发一条用语音的主动消息」。主控亲自执行：先取证可达性（`data/wechat_sessions/<uid>/slot0` 凭据 + context_token 新鲜度 + `users.db` 绑定角色），再补依赖缺口，最后真发并核验。
+- **新增 `scripts/broadcast_proactive_voice.py`**（dry-run 默认，`--execute` 真发）：目标枚举 → 24h 窗口分流 → 角色绑定解析 → LLM 生成角色口吻文案（失败回落固定句）→ TTS（角色音色契约）→ silk/amr 转码 → CDN 语音发送 → 历史回写 `channel=proactive_voice`（下一轮她记得主动说过）；`--user/--limit/--delay/--include-stale/--text` 可控；token 不回显、peer 打码。测试 +2。
+- **🔴 依赖缺口两处（语音链路此前从未真正端到端跑过）**：① 服务器无 `ffmpeg`（OpenCloudOS 9：`dnf install ffmpeg` 后仍缺 `libvulkan.so.1`，需再 `dnf install vulkan-loader`）；② 无 silk 编码器（`pilk`/`pysilk`/`silk_encoder` 全缺）→ `pip install pilk`（PyPI 最新 0.2.4；`pyproject` 旧声明 `>=0.3.0` 不可满足，已修为 `>=0.2.4`）。**含义：v1.66 部署的「聊天发语音」在补依赖前会卡在转码**（合成成功、发送不了），现已可用。部署文档补「语音链路系统依赖」小节。
+- **投递实况（11-08 14:4x）**：共 10 个可见会话目标，**仅 user 2 在 24h 窗口内**（默默本人主号），**已成功发出语音条（silk 7894B）并落库**（chat_history id 4062，`channel=proactive_voice`，文案「喂，别装忙，快说，你干嘛呢？」）；其余 9 个目标窗口已过期（42-1191h），定向验证 user 10 得平台拒绝证据 `ret=-2 errmsg=prepare failed`——**iLink 会话窗口 24h 硬约束，非代码问题**；user 1 无凭据文件、8/9/17 无 token 文件。**要让其余用户收到，需各用户先给 bot 发一条消息激活窗口后再跑。**
+
 
 > 注：本条目原始落账为「未推送未部署」，后续用户裁决放行，整链（v1.63 起 14 个本地提交）已 push 并三端部署至 `9df80cc`，生产取证与本批均基于该版本。
 

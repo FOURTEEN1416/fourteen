@@ -80,8 +80,12 @@ win-tts-fallback = [
     "pywin32>=306; sys_platform == 'win32'",
 ]
 # 微信语音 silk 编解码（标准 ffmpeg 不带 silk decoder，入站语音转文字必须靠它）
+# ⚠️ 2026-11-08 修正：PyPI 只有 0.2.4，旧声明 `>=0.3.0` 会让按 pyproject 安装直接失败；
+#    生产实测 0.2.4 可完成 mp3→wav→silk（wechat tencent 变体）全链。
+#    系统依赖（不在 pip 内）：ffmpeg（音频转码；OpenCloudOS 9 需
+#    `dnf install ffmpeg vulkan-loader`——后者是 ffmpeg 7 的共享库依赖）。
 voice-silk = [
-    "pilk>=0.3.0",
+    "pilk>=0.2.4",
 ]
 # 网络人设增强的 Crawl4AI 源（`persona_extractor/web_enricher.py`）。
 # ⚠️ 2026-09-19 补齐声明：该源于 08-27（e1a4cec）就从 Firecrawl 换成了 Crawl4AI，
