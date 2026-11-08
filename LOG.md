@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-11-08 — 待办清零批（v1.69.1 · 零代码变更）
+
+- **用户指令「消除待办」**（引用两条：4 条路由 owner 追认、CODE_GRAPH 规模读数）。核实：① 追认**早已完成**——`docs/DELETION_LOG.md` 2026-11-08 条目已标 `✅ 已追认`（owner 原话「没有用就可以删除」，当面追认 4 条 `user/proactive-config`×3 + `user/proactive/pause`），本次只清除 AGENTS v1.67/v1.69 行与 HANDOFF 中的陈旧「待追认」引用；② CODE_GRAPH 升级 **v3.8.40** 全量回扫（端点仍 249/207；Python tracked 633 文件 / 177,041 行；测试 295 文件 / 4646+2 / 收集 4648 / 0 失败；前端 283/42 + tsc 0；徽章 4930；卡 45 / 公式 2×45+13=103；utils 30 / wechat_direct 6 / api 52 / frontend/src 147；页面 18 / API 模块 18 / store 4；sqlite 42 表 / users 14 表；orchestrator 5,667 行 / main.py 578 行）。
+- **基线补正（诚实记录）**：上一批的「全量 4631+2 / 收集 4633」少了 **v1.68 新增的 `tests/test_voice_delivery_as_file_20261108.py`**（15 例）——该文件在分块清单生成（19:19）之后由并行窗提交（20:11），`--collect-only` 当时实测 4633 是同步时点口径；本批补跑 15 例全绿 ⇒ 当前全量口径 **4646 通过 + 2 跳过 / 收集 4648 / 295 文件**，与 `--collect-only`（4648）精确吻合。
+- **证据**：`npx vitest run` = `Test Files 42 passed (42)` / `Tests 283 passed (283)`；`npx tsc --noEmit` exit 0；`README.md:11` 徽章 `Tests-4508 → Tests-4930`。
+- **零代码变更**（仅 docs：AGENTS / CODE_GRAPH / HANDOFF / README / LOG）；工作树 @ `32f706d`、代码三端部署 @ `b30987c`。
+
+---
+
 ## 2026-11-08 — 三端部署收口：v1.67 + 死组件退役 + v1.68 + v1.69 连续上线 @ `b30987c`
 
 - 用户指令「全仓整理，然后准备推送和部署」→ 依 A 档纪律执行：`git push origin main`（`ae2eb2a..b30987c`，4 提交）→ 生产冷停 → 四库 `.backup` + `integrity_check` 全 ok（`backups/pre-deploy-b30987c-20261108-2035`）→ `git pull --ff-only` 快进（`ed09bb0` → `b30987c`，新文件含 `wechat_direct/binding_sync.py` 等）→ `deploy/remote_deploy.sh` exit 0（pip install -e `.venv-cpu` / npm ci / 前端 701ms 构建 / 服务重启 / nginx reload）。
