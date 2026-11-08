@@ -1308,19 +1308,23 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             )
         return evicted
 
-    def _resolve_turn_reply_mode(self, session_id: str) -> str:
-        """本轮回复模式（**一轮一次解析**，R7 2026-10-21）。
+    def _resolve_turn_reply_mode(self, session_id: str, character_id: str = "") -> str:
+        """本轮回复模式（**一轮一次解析**，R7 2026-10-21 / D-C 2026-11-08）。
 
         读取优先级由 `utils.reply_mode.read_reply_mode` 单一 owner 决定：
-        该用户覆盖行 → 全局默认 → 内置默认（沉浸式）。``session_id`` 即完整会话键
-        （v1.28 形态 `N:wxid`），天然是多用户隔离维度；空会话（后台任务）回落全局。
+        「我 × 这个角色」快照的 ``reply_mode`` → 全局默认 → 内置默认（沉浸式）。
+        ``session_id`` 即完整会话键（v1.28 形态 `N:wxid`）、``character_id`` 即
+        当轮卡片 id，两者共同构成快照主键（多用户 × 多角色隔离）；空会话
+        （后台任务）回落全局。
 
         异常一律回落默认：模式只是渲染口径，不得因为它炸掉整轮对话。
         """
         try:
             from utils.reply_mode import read_reply_mode
 
-            return read_reply_mode(str(session_id or "") or None)
+            return read_reply_mode(
+                str(session_id or "") or None, str(character_id or "") or None,
+            )
         except Exception as e:  # noqa: BLE001
             logger.debug("解析本轮回复模式失败（回落默认）: %s", e)
             from utils.reply_mode import DEFAULT_REPLY_MODE
@@ -1366,14 +1370,14 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
 
         effective_user_id = profile_scope(character_id, session_id)
 
-        # ── 回复模式：一轮内**单次解析**（2026-10-21 R7）──
+        # ── 回复模式：一轮内**单次解析**（2026-10-21 R7 / D-C 2026-11-08）──
         # 旧实现本函数内三处、终裁/兜底/流式各一处独立热读 `read_reply_mode()`，
         # 同轮若控制端切换就会出现「注入剥了括号、出站按另一模式判」的半轮混排。
-        # 现在锁后解析一次并全程透传；user_key 取完整会话键（按用户覆盖优先）。
+        # 现在锁后解析一次并全程透传；键取「会话键 × 角色 id」（快照真源）。
         turn_reply_mode = (
             reply_mode
             if reply_mode in ("immersive", "novel")
-            else self._resolve_turn_reply_mode(session_id)
+            else self._resolve_turn_reply_mode(session_id, character_id)
         )
 
         # 并行执行独立任务（recent 传 session_id：会话隔离，防跨用户串扰）
@@ -2306,14 +2310,17 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         `utils.address_terms` 单一真源里确定性剥除，不依赖模型配合。
         `session_id` 默认空串：缺省时仍按角色名派生词剥除（读不到画像昵称）。
 
-        ``reply_mode``（2026-10-21 R7）：本轮已解析的模式。缺省时回落到热读
-        真源 —— 后台线/单测直接调本函数的旧行为不变。
+        ``reply_mode``（2026-10-21 R7 / D-C 2026-11-08）：本轮已解析的模式。
+        缺省时回落到热读真源（会话键 × 角色 id 的快照）—— 后台线/单测直接调
+        本函数时仍按全局默认（旧行为）。
         """
         from utils.prompt_sanitize import sanitize_reply_text, terminal_reply_guard
         from utils.reply_mode import read_reply_mode
 
         effective_mode = (
-            reply_mode if reply_mode in ("immersive", "novel") else read_reply_mode(session_id or None)
+            reply_mode
+            if reply_mode in ("immersive", "novel")
+            else read_reply_mode(session_id or None, character_id or None)
         )
 
         if character_card is None:

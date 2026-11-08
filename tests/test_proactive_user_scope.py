@@ -1,25 +1,23 @@
-"""主动调度 per-user 覆盖（D20，2026-10-30）—— 行为契约测试。
+"""主动调度设置（D20 / 2026-11-08 快照化）—— 行为契约测试。
 
 被测面（**行为**断言，不是「表写进去了」）：
 
-1. ``utils/proactive_config`` 三级读取：用户覆盖 > 全局（``config/system.yaml``
-   的 ``proactive`` 块 + ``data/scheduler_config.json``）> 静态默认；脏行 /
-   库不可用 → 逐字段回落全局，**绝不抛异常**；全局默认值必须等于**生产装配**
-   的真值（threshold=2.0 / daily=8 / interval=30 / cooldown=15），不是自洽的
-   硬编码。
-2. 4 个自助端点（``/api/user/proactive-config`` GET/POST/DELETE +
-   ``/api/user/proactive/pause``）：A 的覆盖不影响 B；请求体里自报的
-   ``user_key`` 一律忽略；四条未绑定微信全部 400；admin 的
-   ``/api/proactive/config`` 全局值不受任何用户覆盖影响（真实 ASEHub 首引擎
-   污染路径）+ admin 五条写/读面闸原样保留。
-3. scheduler 决策级 + 投递级：per-user ``paused`` / ``enabled`` / 静默时段只让
-   **该用户**在该闸 return（账本 reason 逐条断言），另一用户照常走到 LLM 决策；
-   引擎级覆盖直调该用户引擎且 ``_replay["runtime_config"]`` 保持为空；
-   **清除覆盖后引擎回滚到全局**（墓碑行 → 下一拍还原 → 删行）。
-4. 删号 purge：``structured_memory.purge_owner_data`` 必须清掉本表行（隐私红线）。
+1. ``utils/proactive_config`` 的**全局**读取：``config/system.yaml`` 的
+   ``proactive`` 块 + ``data/scheduler_config.json`` + 静态默认；脏值/非有限数
+   逐字段回落，**绝不抛异常**；全局默认值必须等于**生产装配**的真值
+   （threshold=2.0 / daily=8 / interval=30 / cooldown=15），不是自洽的硬编码。
+2. scheduler 决策级 / 投递级：静默窗口、引擎级频率参数按「用户 × 角色」快照
+   生效（`utils.character_settings` 唯一真源），A 的设置不影响 B，引擎值直调
+   该用户引擎且 ``_replay["runtime_config"]`` 保持为空；清除设置（DELETE 快照）
+   后引擎按重新物化的出厂默认自动回滚。
+3. 全局急停/总开关是**运维覆盖层**，不得被逐对快照架空。
 
-数据全部合成：``tests/conftest.py`` 已把 ``_OVERRIDE_DB_PATH`` /
-``_CONFIG_PATH`` 重定向到 per-test 沙箱（否则会写开发机真实
+2026-11-08 用户裁决：`user_proactive_config` per-user 覆盖层与墓碑回滚机制
+整体退役 —— 本文件里对应的存储/事务/端点用例已随之删除；管理端 admin 全局
+端点用例保留（`/api/proactive/*` 仍是全局默认的唯一写面）。
+
+数据全部合成：``tests/conftest.py`` 已把 ``_CONFIG_PATH`` /
+``character_settings._DB_PATH`` 重定向到 per-test 沙箱（否则会写开发机真实
 ``data/sqlite.db`` / ``data/scheduler_config.json`` —— 与 2026-09-22 块E
 自伤事故同型，git 看不见）。``config/system.yaml`` 是 **tracked 部署件**，
 只读、不重定向（要测的就是「生产真值」）。
@@ -84,25 +82,13 @@ def _seed_global_config(data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _write_override_row(user_key: str, raw: dict) -> None:
-    """绕过写侧校验直接落一行（模拟「手改坏了的库」）。"""
-    from utils import proactive_config
-
-    with contextlib.closing(proactive_config._override_conn()) as conn, conn:
-        conn.execute(
-            f"INSERT INTO {proactive_config.OVERRIDE_TABLE} (user_key, config, updated_at) "
-            f"VALUES (?, ?, '') ON CONFLICT(user_key) DO UPDATE SET config = excluded.config",
-            (user_key, json.dumps(raw, ensure_ascii=False)),
-        )
-
-
 @pytest.fixture
 def clean_store():
-    """每个用例从空覆盖表起步（``_OVERRIDE_DB_PATH`` 已由 conftest 沙箱化）。"""
-    from utils import proactive_config
+    """每个用例从空的「用户 × 角色」快照库起步（``_DB_PATH`` 已由 conftest 沙箱化）。"""
+    from utils import character_settings
 
-    with contextlib.closing(proactive_config._override_conn()) as conn, conn:
-        conn.execute(f"DELETE FROM {proactive_config.OVERRIDE_TABLE}")
+    with contextlib.closing(character_settings._conn()) as conn, conn:
+        conn.execute(f"DROP TABLE IF EXISTS {character_settings.TABLE}")
     yield
 
 
@@ -217,8 +203,8 @@ def test_global_engine_values_persisted_file_beats_stale_replay(clean_store):
 
     复核缺陷（2026-10-30 二轮）：admin 后一次保存只更新接到 POST 的 worker 的
     ``_replay``；其余 worker 的 replay 是上一次的值。旧实现 replay 优先 → 文件
-    6.25/5 + 旧 replay 5.5/6 会返回 5.5/6，admin GET / 用户 global_default /
-    墓碑回滚全部读旧值。
+    6.25/5 + 旧 replay 5.5/6 会返回 5.5/6，admin GET / 角色快照的全局默认 /
+    引擎对齐全部读旧值。
     """
     import json
 
@@ -427,275 +413,6 @@ def test_effective_missing_global_file_uses_static_defaults(clean_store):
     assert cfg.as_dict() == _DEFAULTS
 
 
-def test_user_override_wins_over_global(clean_store):
-    """覆盖行命中 → 逐键覆盖全局；未覆盖的键仍跟随全局（键缺失 = 继承）。"""
-    from utils import proactive_config
-
-    _seed_global_config({
-        "llm_proactive": {"enabled": True},
-        "quiet_hours": {"start": 22, "end": 8},
-    })
-    proactive_config.write_proactive_config(
-        user_key=_KEYS_A, paused=True, min_interval_minutes=90,
-    )
-
-    cfg = proactive_config.effective(_KEYS_A)
-
-    assert cfg["paused"] is True                    # 用户覆盖
-    assert cfg["min_interval_minutes"] == 90        # 用户覆盖
-    assert cfg["enabled"] is True                   # 未覆盖 → 全局
-    assert cfg["quiet_hours_start"] == 22           # 未覆盖 → 全局
-    assert cfg["max_daily_messages"] == 8           # 未覆盖 → 部署默认
-    assert cfg.overridden_keys == frozenset({"paused", "min_interval_minutes"})
-    # 覆盖是**该用户**的：另一个键仍是全局视图
-    assert proactive_config.effective(_KEYS_B).overridden_keys == frozenset()
-
-
-def test_dirty_override_row_falls_back_per_field(clean_store):
-    """库内脏值/未知键/越界 → 逐字段回落全局与默认，且绝不抛异常。"""
-    from utils import proactive_config
-
-    _seed_global_config({"proactive": {"paused": True}, "quiet_hours": {"start": 1, "end": 6}})
-    _write_override_row(_KEYS_A, {
-        "paused": "yes",             # 类型不符 → 丢弃（回落全局 True）
-        "threshold": 999,            # 越界 → 丢弃（回落部署默认 2.0）
-        "quiet_hours_end": 30,       # 越界小时 → 丢弃（回落全局 6）
-        "max_daily_messages": 3,     # 合法 → 生效
-        "bogus_key": 1,              # 未知 → 丢弃
-    })
-
-    cfg = proactive_config.effective(_KEYS_A)
-
-    assert cfg["paused"] is True
-    assert cfg["threshold"] == 2.0
-    assert cfg["quiet_hours_end"] == 6
-    assert cfg["max_daily_messages"] == 3
-    assert "bogus_key" not in cfg.values
-    assert cfg.overridden_keys == frozenset({"max_daily_messages"})
-
-
-def test_override_db_unavailable_falls_back_to_global(clean_store, monkeypatch):
-    """覆盖库不可用（损坏/权限）→ 回落全局，**绝不抛异常炸主链**。"""
-    import sqlite3
-
-    from utils import proactive_config
-
-    _seed_global_config({"proactive": {"paused": False}, "llm_proactive": {"enabled": False}})
-
-    def _boom():
-        raise sqlite3.OperationalError("database is locked / unreadable")
-
-    monkeypatch.setattr(proactive_config, "_override_conn", _boom)
-
-    cfg = proactive_config.effective(_KEYS_A)
-    assert cfg["enabled"] is False
-    assert cfg.overridden_keys == frozenset()
-    assert proactive_config.read_override(_KEYS_A) == {}
-    assert proactive_config.has_override(_KEYS_A) is False
-    assert proactive_config.pending_revert_keys(_KEYS_A) == []
-
-
-def test_clear_override_surfaces_db_failure(clean_store, monkeypatch):
-    """清除失败必须**上抛**（旧实现吞异常返回 False → DELETE 回 noop 假成功）。"""
-    import sqlite3
-
-    from utils import proactive_config
-
-    def _boom():
-        raise sqlite3.OperationalError("disk I/O error")
-
-    monkeypatch.setattr(proactive_config, "_override_conn", _boom)
-    with pytest.raises(sqlite3.Error):
-        proactive_config.clear_override(_KEYS_A)
-
-
-def test_write_rejects_unknown_out_of_range_and_empty_key(clean_store):
-    """写侧严格：未知键 / 类型不符 / 越界 / 空 user_key → ``ValueError`` 且不落行。"""
-    from utils import proactive_config
-
-    with pytest.raises(ValueError):
-        proactive_config.write_proactive_config(user_key=_KEYS_A, nope=1)
-    with pytest.raises(ValueError):
-        proactive_config.write_proactive_config(user_key=_KEYS_A, paused="yes")
-    with pytest.raises(ValueError):
-        proactive_config.write_proactive_config(user_key=_KEYS_A, quiet_hours_start=24)
-    with pytest.raises(ValueError):
-        proactive_config.write_proactive_config(user_key=_KEYS_A, max_daily_messages=0)
-    with pytest.raises(ValueError):
-        # 本模块没有全局写路径（全局面唯一 owner = /api/proactive/config）
-        proactive_config.write_proactive_config(user_key="", paused=True)
-
-    assert proactive_config.read_override(_KEYS_A) == {}
-
-
-def test_override_read_modify_write_is_one_immediate_transaction(clean_store, monkeypatch):
-    """「读—合并—写」必须在同一 ``BEGIN IMMEDIATE`` 事务里（跨进程串行化）。
-
-    复核缺陷（2026-10-30 二轮 low）：旧实现读、写各开一个连接，4 worker 下
-    DELETE 与 POST 并发会用陈旧快照互相覆盖（丢新覆盖 / 墓碑被写回）。
-    """
-    from utils import proactive_config
-
-    executed: list[str] = []
-    real_conn = proactive_config._override_conn
-
-    class _Recorder:
-        def __init__(self, conn):
-            self._conn = conn
-
-        def __getattr__(self, name):
-            return getattr(self._conn, name)
-
-        def execute(self, sql, *args, **kwargs):
-            executed.append(str(sql).strip().split()[0].upper() if str(sql).strip() else "")
-            return self._conn.execute(sql, *args, **kwargs)
-
-    monkeypatch.setattr(
-        proactive_config, "_override_conn", lambda: _Recorder(real_conn()), raising=False,
-    )
-
-    proactive_config.write_proactive_config(user_key=_KEYS_A, paused=True)
-    assert "BEGIN" in executed, "读改写没有开显式写事务"
-    assert executed.index("BEGIN") < executed.index("INSERT")
-    assert proactive_config.read_override(_KEYS_A) == {"paused": True}
-
-
-def test_override_write_failure_rolls_back_whole_transaction(clean_store, monkeypatch):
-    """事务内写失败必须整体回滚（不留半份覆盖行）。"""
-    import sqlite3
-
-    from utils import proactive_config
-
-    real_write = proactive_config._write_override_conn
-
-    def _write_then_fail(conn, user_key, data):
-        real_write(conn, user_key, data)
-        raise sqlite3.OperationalError("disk I/O error")
-
-    monkeypatch.setattr(
-        proactive_config, "_write_override_conn", _write_then_fail, raising=False,
-    )
-    with pytest.raises(sqlite3.OperationalError):
-        proactive_config.write_proactive_config(user_key=_KEYS_A, paused=True)
-
-    # 只还原本用例打的补丁（不能用 monkeypatch.undo()：会连带撤销 conftest 的
-    # 运行时文件沙箱，后续读会打到宿主真实 data/sqlite.db）。
-    monkeypatch.setattr(proactive_config, "_write_override_conn", real_write, raising=False)
-    assert proactive_config.read_override(_KEYS_A) == {}, "事务未回滚（写了半份）"
-
-
-def test_write_partial_merge_and_clear(clean_store):
-    """partial merge 只改传入键；非引擎键清覆盖 = 直接删行（幂等 noop）。"""
-    from utils import proactive_config
-
-    proactive_config.write_proactive_config(user_key=_KEYS_A, paused=True)
-    proactive_config.write_proactive_config(user_key=_KEYS_A, enabled=False)
-
-    raw = proactive_config.read_override(_KEYS_A)
-    assert raw == {"paused": True, "enabled": False}
-
-    assert proactive_config.clear_override(_KEYS_A) is True
-    assert proactive_config.clear_override(_KEYS_A) is False
-    assert proactive_config.read_override(_KEYS_A) == {}
-    assert proactive_config.has_override(_KEYS_A) is False
-
-
-def test_clear_override_with_dirty_engine_row_still_arms_tombstone(clean_store):
-    """引擎键值已损坏（sanitize 会丢弃）时，clear 仍必须留墓碑。
-
-    复核缺陷（2026-10-30 low）：旧实现按 ``_sanitize_override`` 的结果算引擎键，
-    坏值被丢弃 → 直接删行、不写墓碑 → DELETE 回 noop，而引擎此前确按旧的有效
-    值写过个人值，永远不回落到全局。
-    """
-    from utils import proactive_config
-
-    _write_override_row(_KEYS_A, {"threshold": 999})  # 越界 → sanitize 丢弃
-    assert proactive_config.read_override(_KEYS_A) == {}
-
-    assert proactive_config.clear_override(_KEYS_A) is True
-    assert proactive_config.pending_revert_keys(_KEYS_A) == ["threshold"]
-
-
-def test_clear_revert_marker_keeps_new_overrides_and_concurrent_tombstones(clean_store):
-    """摘墓碑只摘「本次已回滚」的键：新写入的覆盖与并发新墓碑都保留。"""
-    from utils import proactive_config
-
-    proactive_config.write_proactive_config(user_key=_KEYS_A, threshold=9.0)
-    proactive_config.clear_override(_KEYS_A)
-    proactive_config.write_proactive_config(user_key=_KEYS_A, paused=True)
-
-    assert proactive_config.clear_revert_marker(_KEYS_A, {"threshold"}) is True
-    assert proactive_config.read_override(_KEYS_A) == {"paused": True}
-    assert proactive_config.pending_revert_keys(_KEYS_A) == []
-
-    # 并发场景：又冒出一条新墓碑（min_interval），用旧的 expected 集不该吞掉它
-    proactive_config.write_proactive_config(user_key=_KEYS_A, min_interval_minutes=5)
-    proactive_config.clear_override(_KEYS_A)
-    assert proactive_config.pending_revert_keys(_KEYS_A) == ["min_interval_minutes"]
-    assert proactive_config.clear_revert_marker(_KEYS_A, {"threshold"}) is True
-    # 旧 expected 集（threshold）不得吞掉新墓碑（min_interval）
-    assert proactive_config.pending_revert_keys(_KEYS_A) == ["min_interval_minutes"]
-    # clear_override 的语义是「清掉全部覆盖」：paused 也随之上一条清空
-    assert proactive_config.read_override(_KEYS_A) == {}
-
-
-def test_clear_engine_override_leaves_revert_tombstone(clean_store):
-    """引擎级覆盖被清 → 墓碑行（含待回滚键），读面已回全局。
-
-    墓碑是「引擎还按个人值跑」的唯一跨重启证据：scheduler 靠它把引擎还原成
-    全局值后再删行（见 ``test_clear_override_reverts_engine_to_global``）。
-    """
-    from utils import proactive_config
-
-    proactive_config.write_proactive_config(
-        user_key=_KEYS_A, threshold=9.0, min_interval_minutes=90,
-    )
-    assert proactive_config.clear_override(_KEYS_A) is True
-
-    # 读面：已经是全局值（墓碑不算「有覆盖」）
-    assert proactive_config.read_override(_KEYS_A) == {}
-    assert proactive_config.has_override(_KEYS_A) is False
-    assert proactive_config.effective(_KEYS_A)["threshold"] == 2.0
-    # 引擎回滚清单仍在
-    assert sorted(proactive_config.pending_revert_keys(_KEYS_A)) == [
-        "min_interval_minutes", "threshold",
-    ]
-    # 墓碑未清前再点一次 DELETE 仍算「有待办」（不是空 noop）
-    assert proactive_config.clear_override(_KEYS_A) is True
-    assert proactive_config.purge_override_row(_KEYS_A) is True
-    assert proactive_config.pending_revert_keys(_KEYS_A) == []
-    assert proactive_config.clear_override(_KEYS_A) is False
-
-
-def test_revert_marker_keeps_overrides_written_after_delete(clean_store):
-    """DELETE 后立刻重新设置：回滚只摘墓碑，不得删掉新覆盖（复核 high）。
-
-    旧实现回滚完成即 ``purge`` 整行 → 「先取消、再把 paused 打开」的设置被
-    一起抹掉，UI 行消失。此处钉住：墓碑与 active 覆盖共存，摘标记后覆盖仍在。
-    """
-    from utils import proactive_config
-
-    proactive_config.write_proactive_config(user_key=_KEYS_A, threshold=9.0)
-    assert proactive_config.clear_override(_KEYS_A) is True        # → 墓碑
-    proactive_config.write_proactive_config(user_key=_KEYS_A, paused=True)
-
-    # 两个东西同时存在：待回滚的引擎键 + 刚写入的 paused
-    assert proactive_config.read_override(_KEYS_A) == {"paused": True}
-    assert proactive_config.pending_revert_keys(_KEYS_A) == ["threshold"]
-    assert proactive_config.has_override(_KEYS_A) is True
-
-    assert proactive_config.clear_revert_marker(_KEYS_A) is True
-    assert proactive_config.read_override(_KEYS_A) == {"paused": True}, "新覆盖被回滚抹掉了"
-    assert proactive_config.pending_revert_keys(_KEYS_A) == []
-    # 再摘一次 → noop
-    assert proactive_config.clear_revert_marker(_KEYS_A) is False
-
-
-# ═══════════════════════════════════════════════════════════
-# 2. 端点隔离（真实 app + 真实 JWT 门）
-# ═══════════════════════════════════════════════════════════
-
-
 def _build_app(tmp_path):
     db_path = str(tmp_path / "proactive_scope.db")
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
@@ -756,227 +473,6 @@ def api(tmp_path, clean_store):
     asyncio.run(client.aclose())
     asyncio.run(engine.dispose())
     configure_auth(False, "")
-
-
-async def test_get_returns_effective_global_and_flags(api):
-    client, _engine, _app = api
-    r = await client.get("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["status"] == "ok"
-    assert body["effective"] == _DEFAULTS
-    assert body["global_default"] == _DEFAULTS
-    assert body["overridden_keys"] == []
-    assert body["scope"] == "global"
-    assert body["user_key_present"] is True
-
-
-async def test_post_user_override_does_not_leak_to_other_user(api):
-    """A 写覆盖后：A 生效、B 完全不变（隔离的核心断言）。"""
-    client, _engine, _app = api
-    r = await client.post(
-        "/api/user/proactive-config",
-        headers=_bearer(_USER_A),
-        json={"paused": True, "min_interval_minutes": 45},
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["scope"] == "user"
-    assert sorted(body["overridden_keys"]) == ["min_interval_minutes", "paused"]
-    assert body["effective"]["paused"] is True
-    assert body["effective"]["min_interval_minutes"] == 45
-    assert body["global_default"]["paused"] is False
-
-    other = await client.get("/api/user/proactive-config", headers=_bearer(_USER_B))
-    assert other.status_code == 200, other.text
-    assert other.json()["effective"]["paused"] is False
-    assert other.json()["effective"]["min_interval_minutes"] == 30
-    assert other.json()["overridden_keys"] == []
-    assert other.json()["scope"] == "global"
-
-
-async def test_post_ignores_client_reported_user_key(api):
-    """请求体自报 ``user_key`` 一律忽略：只能改自己，改不到别人。"""
-    from utils import proactive_config
-
-    client, _engine, _app = api
-    r = await client.post(
-        "/api/user/proactive-config",
-        headers=_bearer(_USER_A),
-        json={"paused": True, "user_key": _KEYS_B},
-    )
-    assert r.status_code == 200, r.text
-
-    assert proactive_config.read_override(_KEYS_B) == {}, "自报归属生效了（跨用户写入）"
-    assert proactive_config.read_override(_KEYS_A) == {"paused": True}
-
-
-async def test_pause_endpoint_only_touches_paused(api):
-    from utils import proactive_config
-
-    client, _engine, _app = api
-    await client.post(
-        "/api/user/proactive-config",
-        headers=_bearer(_USER_A),
-        json={"min_interval_minutes": 15},
-    )
-    r = await client.post(
-        "/api/user/proactive/pause", headers=_bearer(_USER_A), json={"paused": True},
-    )
-    assert r.status_code == 200, r.text
-    assert r.json()["paused"] is True
-    assert proactive_config.read_override(_KEYS_A) == {
-        "min_interval_minutes": 15, "paused": True,
-    }
-
-    r2 = await client.post(
-        "/api/user/proactive/pause", headers=_bearer(_USER_A), json={"paused": False},
-    )
-    assert r2.status_code == 200, r2.text
-    assert r2.json()["effective"]["paused"] is False
-    assert proactive_config.read_override(_KEYS_A)["min_interval_minutes"] == 15
-
-
-async def test_delete_clears_only_own_override_and_is_idempotent(api):
-    client, _engine, _app = api
-    await client.post(
-        "/api/user/proactive-config", headers=_bearer(_USER_A), json={"paused": True},
-    )
-    await client.post(
-        "/api/user/proactive-config", headers=_bearer(_USER_B), json={"enabled": False},
-    )
-
-    r = await client.delete("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert r.status_code == 200, r.text
-    assert r.json()["status"] == "ok"
-    assert r.json()["scope"] == "global"
-
-    again = await client.delete("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert again.json()["status"] == "noop"
-
-    b = await client.get("/api/user/proactive-config", headers=_bearer(_USER_B))
-    assert b.json()["effective"]["enabled"] is False, "B 的覆盖被人删掉了（越权清除）"
-
-
-async def test_delete_response_reports_bound_user_key(api):
-    """R1-5：DELETE 回执必须带**实际** user_key（已绑定用户不得显示未绑定）。
-
-    旧实现 ``_proactive_config_payload(None)`` → ``user_key_present=False``，
-    前端把「恢复继承全局」后的正常回执误判成「账号未绑定微信」（假横幅，
-    一次往返后才自愈）。
-    """
-    client, _engine, _app = api
-    await client.post(
-        "/api/user/proactive-config", headers=_bearer(_USER_A),
-        json={"max_daily_messages": 3},
-    )
-
-    r = await client.delete("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["status"] == "ok"
-    assert body["user_key_present"] is True, "DELETE 回执把已绑定用户报成未绑定"
-    assert body["user_key"] == _KEYS_A
-    assert body["scope"] == "global"
-
-    # 一次往返后 GET 仍为 true（自愈不是修复的替代品）
-    got = await client.get("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert got.json()["user_key_present"] is True
-
-    # 幂等 noop 路径（非引擎级覆盖：无墓碑，清完第二次即 noop）同样不得
-    # 把已绑定用户报成未绑定。
-    await client.post(
-        "/api/user/proactive-config", headers=_bearer(_USER_B),
-        json={"paused": True},
-    )
-    await client.delete("/api/user/proactive-config", headers=_bearer(_USER_B))
-    again = await client.delete("/api/user/proactive-config", headers=_bearer(_USER_B))
-    assert again.json()["status"] == "noop"
-    assert again.json()["user_key_present"] is True
-
-
-async def test_delete_triggers_engine_reconcile_when_scheduler_present(api, monkeypatch):
-    """DELETE 清引擎级覆盖后必须触发即时回滚（无调度器时由下一拍墓碑兜住）。"""
-    from api.deps import deps
-
-    class _Sched:
-        def __init__(self):
-            self.calls: list[str] = []
-
-        def reconcile_user_engine(self, key: str) -> bool:
-            self.calls.append(key)
-            return True
-
-    class _Orch:
-        def __init__(self, sched):
-            self._ase = None
-            self.components = {"scheduler": sched}
-
-    client, _engine, _app = api
-    await client.post(
-        "/api/user/proactive-config",
-        headers=_bearer(_USER_A),
-        json={"threshold": 9.0},
-    )
-    sched = _Sched()
-    monkeypatch.setattr(deps, "orch", _Orch(sched), raising=False)
-
-    r = await client.delete("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert r.status_code == 200, r.text
-    assert sched.calls == [_KEYS_A], "清引擎级覆盖后没有触发回滚"
-
-    # A 的覆盖已清、B 不受影响
-    a = await client.get("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert a.json()["effective"]["threshold"] == 2.0
-    assert a.json()["overridden_keys"] == []
-
-
-async def test_delete_surfaces_db_failure_as_500(api, monkeypatch):
-    """覆盖库不可用时 DELETE 必须 500（不得回 noop 冒充成功）。"""
-    import sqlite3
-
-    from utils import proactive_config
-
-    def _boom():
-        raise sqlite3.OperationalError("disk I/O error")
-
-    client, _engine, _app = api
-    monkeypatch.setattr(proactive_config, "_override_conn", _boom)
-    r = await client.delete("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert r.status_code == 500, r.text
-
-
-async def test_unbound_user_all_endpoints_are_400(api):
-    """未绑定微信 → 四条自助端点一律 400「不猜键」（域规格原文）。"""
-    client, _engine, _app = api
-
-    read = await client.get("/api/user/proactive-config", headers=_bearer(_USER_UNBOUND))
-    assert read.status_code == 400, read.text
-
-    post = await client.post(
-        "/api/user/proactive-config", headers=_bearer(_USER_UNBOUND), json={"paused": True},
-    )
-    assert post.status_code == 400, post.text
-    pause = await client.post(
-        "/api/user/proactive/pause", headers=_bearer(_USER_UNBOUND), json={"paused": True},
-    )
-    assert pause.status_code == 400, pause.text
-    delete = await client.delete(
-        "/api/user/proactive-config", headers=_bearer(_USER_UNBOUND),
-    )
-    assert delete.status_code == 400, delete.text
-
-
-async def test_endpoints_require_auth(api):
-    client, _engine, _app = api
-    for call in (
-        client.get("/api/user/proactive-config"),
-        client.post("/api/user/proactive-config", json={"paused": True}),
-        client.post("/api/user/proactive/pause", json={"paused": True}),
-        client.delete("/api/user/proactive-config"),
-    ):
-        r = await call
-        assert r.status_code == 401, f"{r.request.method} {r.request.url} -> {r.status_code}"
 
 
 class _FakeEngine:
@@ -1069,9 +565,6 @@ async def test_admin_global_config_not_polluted_by_per_user_engine(api, monkeypa
     assert body["min_interval_minutes"] == 30
     assert body["cooldown_after_reply_minutes"] == 15
 
-    # 用户侧的覆盖不受影响（两条分支各自独立）
-    mine = await client.get("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert mine.json()["effective"]["threshold"] == 2.0  # 端点里没写覆盖，只测读面
     assert eng_a.get_runtime_config()["threshold"] == 12.5
 
 
@@ -1098,38 +591,6 @@ def _missing_system_yaml():
     from pathlib import Path
 
     return Path("__missing_system_config__.yaml")
-
-
-async def test_user_get_global_default_reflects_admin_saved_hub_values(api, monkeypatch):
-    """用户 GET 的 global_default/effective 必须含 admin 已保存的全局引擎值。
-
-    复核 medium：旧实现只走 ``effective()``（部署默认 2.0/8），admin 已经保存
-    的 5.5/6 看不见 —— 用户据此以为「跟随全局」会回到 2.0。
-    """
-    from api.deps import deps
-    from proactive.ase_hub import ASEHub
-
-    client, _engine, _app = api
-    hub = ASEHub(_FakeEngine)
-    hub.apply_runtime_config(threshold=5.5, max_daily_messages=6)
-    monkeypatch.setattr(deps, "orch", _FakeOrchForAdmin(hub), raising=False)
-
-    r = await client.get("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["global_default"]["threshold"] == 5.5
-    assert body["global_default"]["max_daily_messages"] == 6
-    assert body["effective"]["threshold"] == 5.5
-    assert body["effective"]["max_daily_messages"] == 6
-
-    # 用户覆盖某键后：effective 用用户值，global_default 仍是 hub 全局值
-    await client.post(
-        "/api/user/proactive-config", headers=_bearer(_USER_A), json={"threshold": 9.0},
-    )
-    after = (await client.get("/api/user/proactive-config", headers=_bearer(_USER_A))).json()
-    assert after["effective"]["threshold"] == 9.0
-    assert after["global_default"]["threshold"] == 5.5
-    assert after["effective"]["cooldown_after_reply_minutes"] == 15  # 未覆盖 → 部署默认
 
 
 async def test_stale_replay_does_not_override_admin_saved_file(api, monkeypatch):
@@ -1164,9 +625,6 @@ async def test_stale_replay_does_not_override_admin_saved_file(api, monkeypatch)
     assert body["threshold"] == 6.25, "admin 读到了本进程旧 replay（会让下一次保存广播旧值）"
     assert body["max_daily_messages"] == 5
 
-    mine = await client.get("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert mine.json()["global_default"]["threshold"] == 6.25
-    assert mine.json()["global_default"]["max_daily_messages"] == 5
 
 
 async def test_admin_engine_params_keep_legacy_bounds(api, monkeypatch):
@@ -1209,8 +667,7 @@ async def test_admin_saved_engine_globals_persist_for_other_workers(api, monkeyp
     """admin 保存的引擎级全局值必须落 ``scheduler_config.json``（跨 worker）。
 
     复核缺陷（2026-10-30 medium）：只写本进程 ``ASEHub._replay`` 时，其余 3 个
-    worker 的用户 ``global_default`` / 墓碑回滚值会回落部署默认 —— 同一次 admin
-    保存出现两种读数。
+    worker 的引擎对齐值会回落部署默认 —— 同一次 admin 保存出现两种读数。
     """
     from api.deps import deps
     from proactive.ase_hub import ASEHub
@@ -1237,11 +694,6 @@ async def test_admin_saved_engine_globals_persist_for_other_workers(api, monkeyp
     assert sched._global_engine_values(other_worker_hub)["threshold"] == 6.25
     assert sched._global_engine_values(other_worker_hub)["max_daily_messages"] == 5
 
-    # 用户 GET 的 global_default 也必须是同一次保存的值（非部署默认 2.0/8）
-    mine = await client.get("/api/user/proactive-config", headers=_bearer(_USER_A))
-    assert mine.status_code == 200, mine.text
-    assert mine.json()["global_default"]["threshold"] == 6.25
-    assert mine.json()["global_default"]["max_daily_messages"] == 5
     # 持久块只碰该块，不破坏其他 owner 的键
     raw = json.loads(proactive_config._CONFIG_PATH.read_text(encoding="utf-8"))
     assert raw["proactive_runtime"] == {
@@ -1376,10 +828,10 @@ def scope_sched(monkeypatch, tmp_path):
 
 def test_per_user_paused_only_blocks_that_user(scope_sched):
     """per-user ``paused=true``：该用户账本落 paused 并 return；另一用户照常决策。"""
-    from utils import proactive_config
+    from utils import character_settings
 
     sched, hub, keys, events, spy = scope_sched
-    proactive_config.write_proactive_config(user_key=keys[0], paused=True)
+    character_settings.write(keys[0], "card-1", {"paused": True})
 
     _tick(sched)
 
@@ -1393,10 +845,10 @@ def test_per_user_paused_only_blocks_that_user(scope_sched):
 
 
 def test_per_user_disabled_only_blocks_that_user(scope_sched):
-    from utils import proactive_config
+    from utils import character_settings
 
     sched, _hub, keys, events, spy = scope_sched
-    proactive_config.write_proactive_config(user_key=keys[0], enabled=False)
+    character_settings.write(keys[0], "card-1", {"enabled": False})
 
     _tick(sched)
 
@@ -1569,13 +1021,11 @@ def test_delivery_tolerates_harness_without_quiet_hours_field():
 
 
 def test_engine_level_override_applies_only_to_that_user_without_fanout(scope_sched):
-    """引擎级覆盖直调该用户引擎；``_replay`` 为空（未经 hub 扇出）；B 不受影响。"""
-    from utils import proactive_config
+    """角色快照里的引擎级值直调该用户引擎；``_replay`` 为空（未经 hub 扇出）；B 不受影响。"""
+    from utils import character_settings
 
     sched, hub, keys, _events, _spy = scope_sched
-    proactive_config.write_proactive_config(
-        user_key=keys[0], threshold=9.0, max_daily_messages=3,
-    )
+    character_settings.write(keys[0], "card-1", {"threshold": 9.0, "max_daily_messages": 3})
 
     _tick(sched)
 
@@ -1598,10 +1048,10 @@ def test_engine_level_override_applies_only_to_that_user_without_fanout(scope_sc
 
 def test_engine_level_override_is_idempotent(scope_sched):
     """值一致即不再下发：``apply_runtime_config`` 会重建频率控制器（日配额归零）。"""
-    from utils import proactive_config
+    from utils import character_settings
 
     sched, hub, keys, _events, _spy = scope_sched
-    proactive_config.write_proactive_config(user_key=keys[0], threshold=9.0)
+    character_settings.write(keys[0], "card-1", {"threshold": 9.0})
 
     _tick(sched)
     first = len(hub.get(keys[0]).apply_calls)
@@ -1611,77 +1061,76 @@ def test_engine_level_override_is_idempotent(scope_sched):
     assert len(hub.get(keys[0]).apply_calls) == 1, "每 tick 重复下发会把该用户的日配额永远清零"
 
 
-def test_clear_override_reverts_engine_to_global(scope_sched):
-    """清除覆盖后，已加载引擎必须回落到**全局**值（复核 high 缺陷的回归）。"""
-    from utils import proactive_config
+def test_reset_snapshot_reverts_engine_to_global(scope_sched):
+    """清除设置（DELETE my-settings）后，已加载引擎必须回落到**全局**值。
+
+    2026-11-08：墓碑机制随 per-user 层退役。快照语义下 `character_settings.reset`
+    删行 → 下一次读取按当前出厂默认整份物化 → scheduler 的值比较把引擎拉回全局。
+    """
+    from utils import character_settings
 
     sched, hub, keys, _events, _spy = scope_sched
-    proactive_config.write_proactive_config(
-        user_key=keys[0], threshold=9.0, min_interval_minutes=90,
+    character_settings.write(
+        keys[0], "card-1", {"threshold": 9.0, "min_interval_minutes": 90},
     )
     _tick(sched)
     eng = hub.get(keys[0])
     assert (eng._urgency_threshold, eng._min_interval_minutes) == (9.0, 90)
 
-    assert proactive_config.clear_override(keys[0]) is True
-    # 墓碑在：读面已回全局，但引擎值还没动（等下一拍）
+    assert character_settings.reset(keys[0], "card-1") is True
+    # 删行只删了设置，引擎值还没动（等下一拍的值比较）
     assert eng._urgency_threshold == 9.0
-    assert sorted(proactive_config.pending_revert_keys(keys[0])) == [
-        "min_interval_minutes", "threshold",
-    ]
 
     _tick(sched)
 
     assert (eng._urgency_threshold, eng._min_interval_minutes) == (2.0, 30), (
-        "清除覆盖后引擎仍按个人值调度（DELETE 回执假成功）"
+        "清除设置后引擎仍按旧值调度（回执假成功）"
     )
-    # 回滚完成 → 墓碑清除、行彻底消失
-    assert proactive_config.pending_revert_keys(keys[0]) == []
-    assert proactive_config.read_override(keys[0]) == {}
-    with contextlib.closing(proactive_config._override_conn()) as conn:
-        row = conn.execute(
-            f"SELECT 1 FROM {proactive_config.OVERRIDE_TABLE} WHERE user_key = ?",
-            (keys[0],),
-        ).fetchone()
-    assert row is None, "回滚已完成但墓碑行没删（脏行）"
 
 
-def test_delete_then_repause_reverts_engine_and_keeps_override(scope_sched):
-    """DELETE → 重新 paused=True：引擎回滚到全局，paused 覆盖必须存活。
+def test_delete_then_repause_reverts_engine_and_keeps_new_setting(scope_sched):
+    """DELETE → 重新设 paused：新设置必须存活，恢复后引擎回滚到全局。
 
-    复核 high：回滚若按整行 purge，会把刚写的 paused 删掉 —— 用户看到
-    「已暂停」却不再生效（设置行消失），且引擎可能停在旧个人值。
+    旧实现（墓碑 + 整行 purge）会把刚写的 paused 一起删掉 —— 用户看到
+    「已暂停」却不再生效。快照语义下 DELETE 只删行、之后的写入是新行，天然不丢。
+
+    回滚时机：paused 闸在引擎对齐**之前**短路（暂停期间本来不发消息），
+    因此断言分两拍 —— 暂停拍只验「设置存活 + 账本落 paused、不投递」，
+    用户恢复（paused=False）后的那一拍才把引擎从旧个人值拉回全局。
     """
-    from utils import proactive_config
+    from utils import character_settings
 
-    sched, hub, keys, _events, _spy = scope_sched
-    proactive_config.write_proactive_config(
-        user_key=keys[0], threshold=9.0, max_daily_messages=3,
+    sched, hub, keys, events, _spy = scope_sched
+    character_settings.write(
+        keys[0], "card-1", {"threshold": 9.0, "max_daily_messages": 3},
     )
     _tick(sched)
     eng = hub.get(keys[0])
     assert (eng._urgency_threshold, eng._max_daily_messages) == (9.0, 3)
 
-    proactive_config.clear_override(keys[0])          # → 墓碑
-    proactive_config.write_proactive_config(user_key=keys[0], paused=True)  # 新覆盖
+    character_settings.reset(keys[0], "card-1")
+    character_settings.write(keys[0], "card-1", {"paused": True})
+    _tick(sched)
+
+    assert [e["session_key"] for e in events if e.get("reason") == "paused"] == [keys[0]]
+    assert character_settings.read(keys[0], "card-1")["paused"] is True, (
+        "回滚把 DELETE 后新写的 paused 一起删了"
+    )
+
+    character_settings.write(keys[0], "card-1", {"paused": False})
     _tick(sched)
 
     assert (eng._urgency_threshold, eng._max_daily_messages) == (2.0, 8), "引擎没回滚"
-    assert proactive_config.read_override(keys[0]) == {"paused": True}, (
-        "回滚把 DELETE 后新写的 paused 一起删了"
-    )
-    assert proactive_config.has_override(keys[0]) is True
-    assert proactive_config.pending_revert_keys(keys[0]) == []
 
 
-def test_clear_override_revert_is_idempotent(scope_sched):
+def test_reset_snapshot_revert_is_idempotent(scope_sched):
     """回滚后再跑一拍不得重复下发（重复下发 = 重建控制器、日配额归零）。"""
-    from utils import proactive_config
+    from utils import character_settings
 
     sched, hub, keys, _events, _spy = scope_sched
-    proactive_config.write_proactive_config(user_key=keys[0], threshold=9.0)
+    character_settings.write(keys[0], "card-1", {"threshold": 9.0})
     _tick(sched)
-    proactive_config.clear_override(keys[0])
+    character_settings.reset(keys[0], "card-1")
     _tick(sched)
     calls = len(hub.get(keys[0]).apply_calls)
     _tick(sched)
@@ -1776,47 +1225,6 @@ def test_dirty_engine_override_row_reverts_engine_to_global(scope_sched):
     assert hub.get(keys[1])._urgency_threshold == 2.0
 
 
-def test_tombstone_race_stale_user_cfg_still_reverts(scope_sched):
-    """DELETE 落在「读 user_cfg」与「下发」之间时，引擎仍须回滚到全局。
-
-    复核缺陷（2026-10-30 medium）：旧实现 target 只看 ``user_cfg.overridden_keys``，
-    陈旧的 user_cfg 会用旧个人值当目标 → payload 为空 → 还摘掉墓碑 = 墓碑没了、
-    引擎停在旧值。修法：pending 遮蔽同名的 overridden 键。
-    """
-    from utils import proactive_config
-
-    sched, hub, keys, _events, _spy = scope_sched
-    proactive_config.write_proactive_config(user_key=keys[0], threshold=9.0)
-    _tick(sched)
-    eng = hub.get(keys[0])
-    assert eng._urgency_threshold == 9.0
-
-    stale_cfg = proactive_config.effective(keys[0])   # 决策链开头读到的旧快照
-    assert "threshold" in stale_cfg.overridden_keys
-    proactive_config.clear_override(keys[0])          # 竞态：DELETE 在两步之间落地
-
-    # 用陈旧快照直接下发（模拟竞态窗口）——必须按墓碑回滚，而不是重放旧值
-    sched._apply_user_engine_config(hub, eng, keys[0], stale_cfg)
-
-    assert eng._urgency_threshold == 2.0, "陈旧 user_cfg 把旧个人值又写回去了"
-    assert proactive_config.pending_revert_keys(keys[0]) == []
-
-
-def test_reconcile_user_engine_is_immediate(scope_sched):
-    """DELETE 端点的即时回滚入口（本 worker 持有引擎时不必等下一拍）。"""
-    from utils import proactive_config
-
-    sched, hub, keys, _events, _spy = scope_sched
-    proactive_config.write_proactive_config(user_key=keys[0], threshold=9.0)
-    _tick(sched)
-    eng = hub.get(keys[0])
-    proactive_config.clear_override(keys[0])
-
-    assert sched.reconcile_user_engine(keys[0]) is True
-    assert eng._urgency_threshold == 2.0
-    assert proactive_config.pending_revert_keys(keys[0]) == []
-
-
 def test_no_override_means_zero_engine_writes(scope_sched):
     """没有任何覆盖 → 引擎一次都不写（既有全局行为逐字节不变）。"""
     sched, hub, keys, _events, spy = scope_sched
@@ -1880,13 +1288,13 @@ def test_real_adaptive_engine_user_max_daily_caps_low_and_minimal(
     adapter._current_level = "minimal"
     assert adapter.get_max_daily() == 1
 
-    proactive_config.write_proactive_config(
-        user_key=_KEYS_A, max_daily_messages=1,
-    )
+    from utils import character_settings as _cs_adaptive
+
+    _cs_adaptive.write(_KEYS_A, "card-1", {"max_daily_messages": 1})
     sched = ProactiveScheduler.__new__(ProactiveScheduler)
     globals_ = proactive_config.global_engine_values()
     sched._apply_user_engine_config(
-        None, eng, _KEYS_A, proactive_config.effective(_KEYS_A),
+        None, eng, _KEYS_A, proactive_config.effective(_KEYS_A, "card-1"),
         engine_globals=globals_,
     )
 
@@ -1910,7 +1318,7 @@ def test_real_adaptive_engine_user_max_daily_caps_low_and_minimal(
 
     eng.apply_runtime_config = _spy  # type: ignore[method-assign]
     sched._apply_user_engine_config(
-        None, eng, _KEYS_A, proactive_config.effective(_KEYS_A),
+        None, eng, _KEYS_A, proactive_config.effective(_KEYS_A, "card-1"),
         engine_globals=globals_,
     )
     assert calls == [], "adaptive 稳态仍每拍下发（会重建适配器/清零日配额风险）"
@@ -1949,34 +1357,6 @@ def test_real_adaptive_engine_without_override_keeps_tier_and_is_idempotent(
     assert eng._freq_adapter.get_max_daily() == 3, "无覆盖时 low 档原值被改"
     eng._freq_adapter._current_level = "minimal"
     assert eng._freq_adapter.get_max_daily() == 1, "无覆盖时 minimal 档原值被改"
-
-
-# ═══════════════════════════════════════════════════════════
-# 4. 删号 purge（隐私红线）
-# ═══════════════════════════════════════════════════════════
-
-
-def test_purge_owner_data_removes_proactive_override(tmp_path, monkeypatch):
-    """``structured_memory.purge_owner_data`` 必须清掉本表行（删号不留个人调度）。"""
-    from shisi.memory.legacy.structured_memory import StructuredMemory
-    from utils import proactive_config
-
-    db_path = tmp_path / "purge.db"
-    monkeypatch.setattr(proactive_config, "_OVERRIDE_DB_PATH", db_path, raising=False)
-    memory = StructuredMemory(str(db_path))
-    try:
-        proactive_config.write_proactive_config(user_key="4:peer_a", paused=True)
-        assert proactive_config.read_override("4:peer_a") == {"paused": True}
-
-        counts = memory.purge_owner_data(4, session_keys=["4:peer_a"])
-        assert counts.get("user_proactive_config") == 1, counts
-        assert proactive_config.read_override("4:peer_a") == {}
-        # count 面同口径（verify 依赖它）
-        assert memory.count_owner_rows(4, session_keys=["4:peer_a"]).get(
-            "user_proactive_config", 0
-        ) == 0
-    finally:
-        memory.close()
 
 
 def test_global_pause_and_switch_override_character_snapshots(scope_sched):

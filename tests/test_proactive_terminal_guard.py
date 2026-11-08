@@ -190,7 +190,7 @@ def test_reminder_delivery_compose_passes_reply_mode(monkeypatch):
             return _BRACKETED
 
     monkeypatch.setattr(
-        rd_mod, "read_reply_mode", lambda: "immersive", raising=False,
+        rd_mod, "read_reply_mode", lambda *a, **k: "immersive", raising=False,
     )
     task = rd_mod.ReminderDeliveryTask(
         structured_memory=None, llm=_LLM(), character_id_resolver=lambda sk: "",
@@ -210,7 +210,7 @@ def test_reminder_delivery_compose_keeps_brackets_in_novel(monkeypatch):
             return _BRACKETED
 
     monkeypatch.setattr(
-        rd_mod, "read_reply_mode", lambda: "novel", raising=False,
+        rd_mod, "read_reply_mode", lambda *a, **k: "novel", raising=False,
     )
     task = rd_mod.ReminderDeliveryTask(
         structured_memory=None, llm=_LLM(), character_id_resolver=lambda sk: "",

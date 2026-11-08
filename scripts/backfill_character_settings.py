@@ -1,8 +1,16 @@
 """存量「用户 × 角色」设置物化脚本（2026-11-07 痛点批 P1）。
 
-用户裁决「每人每角色一份」：本脚本给**已存在**的组合各建一行全量快照，
-并继承旧的 per-user 覆盖值（`user_humanize` / `user_proactive_config`），
-不让用户已有调参丢失。
+用户裁决「每人每角色一份」：本脚本给**已存在**的组合各建一行全量快照。
+
+2026-11-08 变更：旧的 per-user 覆盖层（`user_humanize` /
+`user_proactive_config` / `user_reply_mode`）已退役，物化初值只取**当前出厂
+默认**；那些覆盖行里的存量用户设置由
+`scripts/migrate_per_user_prefs_to_my_settings.py` 负责迁入（先跑迁移，再跑
+本脚本补齐剩余组合）。
+
+⚠️ **dry-run 口径不同**：迁移脚本 `migrate_per_user_prefs_to_my_settings.py`
+与 `backfill_wechat_bindings.py` **默认 dry-run**（加 `--apply` 才真写）；
+**本脚本默认真写库**，必须显式加 `--dry-run` 才只看计划。
 
 组合来源（逐条去重）：
 1. `wechat_bindings`：每个绑定 `(user_id, wxid)` → `user_key = f"{user_id}:{wxid}"`，

@@ -20,7 +20,6 @@ from wechat_direct import wechat_connector as wc
 @pytest.fixture
 def hm_cfg(tmp_path, monkeypatch):
     monkeypatch.setattr(hc, "_CONFIG_PATH", tmp_path / "scheduler_config.json")
-    monkeypatch.setattr(hc, "_OVERRIDE_DB_PATH", tmp_path / "humanize_override.db")
     return tmp_path
 
 
@@ -29,7 +28,7 @@ def _mk_connector(tmp_path, monkeypatch) -> wc.WeChatConnector:
     c = wc.WeChatConnector(SimpleNamespace(), owner_user_id=42)
     c.token = "test-token"
     monkeypatch.setattr(c, "_merge_session_state", lambda updates: {})
-    monkeypatch.setattr(wc, "_segment_delay", lambda text: 0)
+    monkeypatch.setattr(wc, "_segment_delay", lambda text, **kwargs: 0)
     return c
 
 

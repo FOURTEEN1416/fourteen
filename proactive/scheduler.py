@@ -1453,17 +1453,16 @@ class ProactiveScheduler:
     ) -> None:
         """把该用户**当前应有的**引擎级参数对齐到该用户自己的引擎上（2026-10-30 D20）。
 
-        「应有的值」= 每个引擎键：用户覆盖了就用用户值，否则用**全局值**
+        「应有的值」= 每个引擎键：角色快照里有就用快照值，否则用**全局值**
         （持久文件 > hub 记账 > 部署默认，见 :meth:`_global_engine_values`）。
         因此本方法同时承担三件事（2026-10-30 二轮复核补齐后两件）：
 
-        1. **per-user 下发**：覆盖值直调 ``eng.apply_runtime_config(...)``；
+        1. **快照下发**：快照值直调 ``eng.apply_runtime_config(...)``；
         2. **跨 worker 全局对齐**：admin 保存只落到接到 POST 的那个 worker
            （``hub._replay`` + 本机引擎），其余 worker 的引擎仍是构造时的部署
            默认 —— 每拍按持久化全局值补齐，否则「API 报 6.25、实际按 2.0 调度」；
-        3. **脏覆盖行自愈**：覆盖行被手改成非法值（或外部删掉）时读侧回落全局，
-           但引擎里旧个人值还在 —— 这里的目标值同样变成全局 → 自动还原，
-           不必等墓碑（墓碑只在用户主动 DELETE 时生成）。
+        3. **脏行自愈**：快照行被手改成非法值（或用户 DELETE 后重新物化出厂默认）
+           时读侧回落全局，引擎里的旧个人值由这里的目标值比对自动还原。
 
         🔴 绝不经 ``ASEHub.apply_runtime_config``：那条路径会写
         ``_replay["runtime_config"]`` 并扇出到**全部**已加载引擎
@@ -1472,16 +1471,15 @@ class ProactiveScheduler:
         正好相反。此处只用 ``hub.get(user_key)`` 拿到的那一个引擎直调
         ``eng.apply_runtime_config(...)``（``ase_engine.py:1737``）。
 
-        **回滚也要走这里**：``DELETE`` 端点清覆盖时若删掉了引擎级键，会在覆盖表
-        留一条墓碑行 ``{"__revert__": [...]}``；本方法读到墓碑就把这些键还原成
-        **全局值**，成功后再删墓碑。否则「清掉了覆盖」只是删了表行，引擎（及其
-        ``save_state`` 持久化的频率字段，``ase_engine.py:1827-1830/1936-1939``）
-        仍按旧个人值调度。
+        2026-11-08：旧的 per-user 覆盖层与**墓碑回滚**机制已退役（用户裁决
+        「user_proactive_config per-user 层同样退役」）。快照语义下清除设置 =
+        `DELETE /api/characters/{id}/my-settings`，下一次读取按当前出厂默认整份
+        重新物化 → 本方法的目标值变回全局 → 值比较自动下发还原。无需墓碑行。
 
         幂等纪律：只在「目标值与引擎现值不一致」时下发。``apply_runtime_config``
         一旦收到频率三参之一就会**重建** ``FrequencyController``（``_daily_count``
         归零）——每 tick 无条件下发等于把该用户的日配额永远清零、主动消息
-        无上限。值一致即跳过，因此稳态每用户零写入（等价于原「无覆盖零写入」）。
+        无上限。值一致即跳过，因此稳态每用户零写入。
 
         频率三参必须**同批**下发：``apply_runtime_config`` 在只收到
         ``min_interval_minutes`` 时会把 ``max_daily`` 回落到默认 8（既有实现
@@ -1489,20 +1487,14 @@ class ProactiveScheduler:
 
         Args:
             engine_globals: 本拍已算好的全局引擎值（``_check_ase_per_user``
-                每拍算一次传下来）；``None`` → 自行读取（单用户路径/回滚快路径）。
+                每拍算一次传下来）；``None`` → 自行读取（单用户路径快路径）。
 
-        失败一律降级（WARNING 后返回；墓碑保留，下一拍重试）。
+        失败一律降级（WARNING 后返回，下一拍重试）。
         """
         if eng is None or not hasattr(eng, "apply_runtime_config"):
             return
         uk = str(user_key or "").strip()
-        # 🔴 先读墓碑、再用它**遮蔽** user_cfg 里的同名键（2026-10-30 复核）：
-        # 决策链的 user_cfg 在函数开头读、这里晚得多；若 DELETE 恰好落在两步
-        # 之间，user_cfg 仍含旧引擎键 → desired 会用旧个人值 → payload 为空
-        # → 再摘墓碑 = 「墓碑被摘、引擎停在旧值」。墓碑是更新的意图（用户刚
-        # 清过），必须以它为准把该键的目标改回全局。
-        pending = set(proactive_config_mod.pending_revert_keys(uk))
-        overridden = set(getattr(user_cfg, "overridden_keys", frozenset())) - pending
+        overridden = set(getattr(user_cfg, "overridden_keys", frozenset()))
         globals_ = engine_globals if engine_globals is not None else self._global_engine_values(hub)
         desired: dict[str, Any] = {
             key: (user_cfg.get(key) if key in overridden else globals_[key])
@@ -1542,46 +1534,15 @@ class ProactiveScheduler:
             missing = proactive_config_mod.FREQUENCY_KEYS - set(payload)
             if missing:
                 logger.warning(
-                    "proactive per-user 频率覆盖缺目标值，按引擎默认下发 user=%s missing=%s",
+                    "proactive 角色级频率设置缺目标值，按引擎默认下发 user=%s missing=%s",
                     uk, sorted(missing),
                 )
         try:
             if payload:
                 eng.apply_runtime_config(**payload)
-                logger.info("proactive per-user engine config applied user=%s %s", uk, payload)
+                logger.info("proactive 角色级 engine config applied user=%s %s", uk, payload)
         except Exception as e:  # noqa: BLE001
-            logger.warning("proactive per-user engine config 下发失败 user=%s: %s", uk, e)
-            return
-        if pending:
-            # 引擎已对齐全局 → 墓碑使命完成。**只摘本次真的回滚掉的键**，保留
-            # 期间新写入的覆盖与并发新加的墓碑（直接删整行会把「DELETE 后马上
-            # 重设 paused」的设置一起抹掉；整段摘会把并发 DELETE 的新墓碑吞掉）。
-            try:
-                proactive_config_mod.clear_revert_marker(uk, pending)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("清除主动调度墓碑标记失败 user=%s: %s", uk, e)
-
-    def reconcile_user_engine(self, user_key: str) -> bool:
-        """把该用户的引擎对齐到当前生效配置（DELETE 清覆盖后的即时回滚入口）。
-
-        返回是否真的碰到引擎（无 hub/引擎 → False）。跨 worker 的最终一致性
-        由调度器下一拍读墓碑行保证；本方法是「清完立刻生效」的快路径。
-        """
-        key = str(user_key or "").strip()
-        if not key:
-            return False
-        hub = self.ase
-        if hub is None or not hasattr(hub, "get"):
-            return False
-        try:
-            eng = hub.get(key)
-        except Exception as e:  # noqa: BLE001
-            logger.debug("reconcile_user_engine 取引擎失败 user=%s: %s", key, e)
-            return False
-        if eng is None:
-            return False
-        self._apply_user_engine_config(hub, eng, key, proactive_config_mod.effective(key))
-        return True
+            logger.warning("proactive 角色级 engine config 下发失败 user=%s: %s", uk, e)
 
     def _llm_proactive_one_user(
         self, hub: Any, user_key: str,
@@ -1668,20 +1629,11 @@ class ProactiveScheduler:
             if key in user_cfg.overridden_keys:
                 return user_value
             return global_value
-        # 🔴 墓碑回滚必须排在所有「此刻不开口」闸**之前**（2026-10-30 复核 high）：
-        # paused / enabled=false 的用户根本走不到下面的引擎下发点，墓碑会永远
-        # 悬着 —— 引擎停在旧个人值，而用户以为已回到全局。回滚只是改配置，
-        # 不是发消息，不该被「暂停」拦住。
-        if proactive_config_mod.pending_revert_keys(str(user_key)):
-            try:
-                _eng_for_revert = hub.get(user_key) if hasattr(hub, "get") else None
-            except Exception as _eng_err:  # noqa: BLE001
-                logger.debug("墓碑回滚取引擎失败（下一拍重试）user=%s: %s", user_key, _eng_err)
-                _eng_for_revert = None
-            self._apply_user_engine_config(
-                hub, _eng_for_revert, str(user_key), user_cfg,
-                engine_globals=engine_globals,
-            )
+        # 2026-11-08：墓碑回滚机制随 per-user 覆盖层退役（见
+        # `_apply_user_engine_config` 的注释）。清除角色设置 =
+        # `DELETE /api/characters/{id}/my-settings`，快照重新物化后**下一次能走到
+        # 决策点的拍**（未被 paused/enabled/静默 拦住）会按值比较把引擎还原成
+        # 全局；被闸拦住期间本来就不发消息，引擎里的旧值无害。
         # D12-L：同拍演算生理读数。放在所有决策闸**之前** —— 暂停/等待窗只是
         # 「此刻不开口」，不是心跳停了；放在闸后会让她在 LLM 自判的长等待窗里
         # 读数整段冻结（tick 是唯一的回稳与噪声来源）。
@@ -1970,11 +1922,13 @@ class ProactiveScheduler:
                     scrub_history_rows,
                 )
 
-                # 2026-10-21 R7：按**该会话**的模式净化（per-user 覆盖优先）。
-                # user_key 在此函数内已有（即会话键），空时回落全局默认。
+                # 2026-10-21 R7 / D-C 2026-11-08：按**该会话 × 角色**的模式净化
+                # （快照优先，未设置回落全局）。char_id 已在本函数内解析。
                 scrubbed_recent = scrub_history_rows(
                     sanitize_llm_history(recent),
-                    _reply_mode.read_reply_mode(str(user_key or "") or None)
+                    _reply_mode.read_reply_mode(
+                        str(user_key or "") or None, str(char_id or "") or None,
+                    )
                     == _reply_mode.REPLY_MODE_IMMERSIVE,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -2174,10 +2128,13 @@ class ProactiveScheduler:
         # 2026-10-21 FIX-1：补 reply_mode —— 缺省空串使沉浸式括号动作不剥。
         from utils.prompt_sanitize import terminal_reply_guard
 
-        # 2026-10-21 R7：守卫的 reply_mode 跟随该会话（per-user 覆盖）
+        # 2026-10-21 R7 / D-C 2026-11-08：守卫的 reply_mode 跟随「会话 × 角色」
+        # 快照（未设置回落全局）。
         message = terminal_reply_guard(
             message, user_msg="", character_name="",
-            reply_mode=read_reply_mode(str(user_key or "") or None),
+            reply_mode=read_reply_mode(
+                str(user_key or "") or None, str(char_id or "") or None,
+            ),
         )
         if not message:
             append_proactive_event(
@@ -2394,15 +2351,17 @@ class ProactiveScheduler:
         # （session_key/character_id 均可能为 None，按守卫契约归一为空串）。
         # 2026-10-21 FIX-1：补 reply_mode —— 本入口是手动/祝福线的唯一兜底，
         # 不传则沉浸式括号动作（含上游已剥一次的决策线之外的路径）原样出站。
-        # 2026-10-21 R7：模式跟随该会话（per-user 覆盖）；session_key 为空
-        # （广播/手动线）→ 回落全局默认，与旧行为一致。
+        # 2026-10-21 R7 / D-C 2026-11-08：模式跟随「会话 × 角色」快照；
+        # session_key 为空（广播/手动线）→ 回落全局默认，与旧行为一致。
         guarded = terminal_reply_guard(
             message,
             user_msg="",
             character_name="",
             session_key=str(session_key or ""),
             character_id=str(character_id or ""),
-            reply_mode=read_reply_mode(str(session_key or "") or None),
+            reply_mode=read_reply_mode(
+                str(session_key or "") or None, str(character_id or "") or None,
+            ),
         )
         if not guarded:
             logger.warning("[主动消息] 终审守卫拦截（哨兵/退化回复），不投递")

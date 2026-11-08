@@ -56,11 +56,8 @@ export function updateProactiveConfig(cfg: {
   cooldown_after_reply_minutes?: number
   quiet_hours_start?: number
   quiet_hours_end?: number
+  /** 2026-11-08：只写**全局默认**（用户级模式走角色设置 my-settings） */
   reply_mode?: 'immersive' | 'novel'
-  /** 2026-10-21 R7：作用域。global=全站默认（旧行为）；user=仅目标 user_key */
-  reply_mode_scope?: 'global' | 'user'
-  /** scope=user 时的目标会话键（完整形态 `N:wxid`） */
-  user_key?: string
   llm_proactive_enabled?: boolean
   llm_proactive_style_hint?: string
   llm_proactive_intensity?: 'low' | 'normal' | 'high'
@@ -100,91 +97,19 @@ export interface DiceGateConfigWrite {
   idle_long_factor?: number
 }
 
-// ── 用户自助主动消息（D21：消息 tab 对全体用户开放） ──
-// 为什么不复用 /proactive/config：那是 admin 门 + `orch._ase` 503 门，且参数作用于
-// **全部会话**。普通用户只能改自己的节奏，故走 user 端点；作用域键由服务端从 token
-// 派生（客户端自报归属一律忽略）。
-//
-// 🔴 回执形状以**交付树后端实现为准**（api/routers/training_routes.py::_proactive_config_payload）：
-//   { status, effective: {enabled, paused, quiet_hours_start, quiet_hours_end,
-//                          threshold, max_daily_messages, min_interval_minutes,
-//                          cooldown_after_reply_minutes},
-//     global_default: {同 8 键}, overridden_keys[], scope:'user'|'global',
-//     user_key_present: bool }
-//   · `effective` 是「用户覆盖 > 全局 > 默认」三级合并后的**平铺**生效值（含 paused）；
-//     前端直接渲染，绝不做二次合并、也不自算「值等于全局值即未覆盖」。
-//   · `global_default` 是继承基线（未覆盖字段的旁注），`overridden_keys` 是徽章真源
-//     （对齐 utils/humanize_config.py::has_user_override 的「覆盖行存在与否」语义）。
-//   · 暂停态在 GET 回执里就是 `effective.paused`；仅 POST /user/proactive/pause 额外回顶层 `paused`。
-// 契约快照：.zcode/workflow-drafts/proactive-user-config-contract.md
+// ── 用户自助主动消息（D21）已于 2026-11-08 退役 ──
+// 用户裁决（D-A/D-B）：主动消息的节奏参数是「用户 × 角色」的体验参数，不是账号级
+// 偏好。后端 `GET/POST/DELETE /api/user/proactive-config` 与
+// `POST /api/user/proactive/pause` 四条自助路由随 per-user 覆盖层一并删除
+// （DELETION_LOG 2026-11-08 条目），设置改由 my-settings 快照承载
+// （`api/characterSettings.ts`）；admin 全局控制面仍走 `/api/proactive/*`。
+// 因此本文件不再导出对应的 client 函数与回执类型（旧面留着就是打 404 的死代码）。
 
-/** 用户可自助覆盖的键（与 utils/proactive_config.py::FIELDS 同名同边界；不含 LLM/骰子闸） */
-export interface UserProactiveEffective {
-  enabled: boolean
-  paused: boolean
-  quiet_hours_start: number
-  quiet_hours_end: number
-  threshold: number
-  max_daily_messages: number
-  min_interval_minutes: number
-  cooldown_after_reply_minutes: number
-}
-
-/** 可写子集（partial merge：只传本次改动的键） */
-export interface UserProactiveConfigWrite {
-  enabled?: boolean
-  paused?: boolean
-  quiet_hours_start?: number
-  quiet_hours_end?: number
-  threshold?: number
-  max_daily_messages?: number
-  min_interval_minutes?: number
-  cooldown_after_reply_minutes?: number
-}
-
-export interface UserProactiveConfigResponse {
-  status?: string
-  /** 三级合并后的生效值（平铺；含 paused / enabled） */
-  effective?: Partial<UserProactiveEffective>
-  /** 继承基线：全局默认值（未覆盖字段的来源） */
-  global_default?: Partial<UserProactiveEffective>
-  /** 本人覆盖表中显式存在的键（徽章与逐字段标记真源） */
-  overridden_keys?: string[]
-  /** `user` = 存在本人覆盖行；`global` = 继承全局 */
-  scope?: 'user' | 'global'
-  /** 服务端是否解析出本人会话键（false = 未绑定微信，只有全局视图） */
-  user_key_present?: boolean
-  user_key?: string
-  /** 仅 POST /user/proactive/pause 携带 */
-  paused?: boolean
-}
-
-export function userProactiveGetConfig() { return client.get('/user/proactive-config') }
-/** 部分覆盖：body 只含本次改动的键（未传键=继承，不写默认值） */
-export function updateUserProactiveConfig(cfg: UserProactiveConfigWrite) {
-  return client.post('/user/proactive-config', cfg)
-}
-/** 清除本人全部覆盖，恢复继承全局（幂等） */
-export function clearUserProactiveConfig() { return client.delete('/user/proactive-config') }
-/** 个人暂停态（只改暂停，不动 config） */
-export function userProactivePause(paused: boolean) {
-  return client.post('/user/proactive/pause', { paused })
-}
-
-// ── 用户自助回复模式（2026-10-21 R7） ──
-// 为什么不复用 /proactive/config：那是 admin 门 + `orch._ase` 503 门；
-// 普通用户既无 admin 角色，也不该被「主动引擎是否初始化」耦合。
-// 后端从 JWT 派生 user_key（绝不接受客户端传 user_key）。
-export function getMyReplyMode() { return client.get('/user/reply-mode') }
-
-// NEW-34（2026-10-29）：用户自助拟人节奏（复用 user_humanize 按用户作用域机制；
-// 作用域键服务端从 token 派生，未绑定微信 400）
-export function getMyHumanize() { return client.get('/user/humanize') }
-export function saveMyHumanize(cfg: Record<string, unknown>) { return client.post('/user/humanize', cfg) }
-export function clearMyHumanize() { return client.delete('/user/humanize') }
-export function setMyReplyMode(replyMode: 'immersive' | 'novel') {
-  return client.post('/user/reply-mode', { reply_mode: replyMode })
-}
+// ── 用户自助回复模式 / 拟人节奏（2026-10-21 R7 / NEW-34）已退役 ──
+// 2026-11-08 D-A 用户裁决：这两项是「用户 × 角色」的体验参数，不是账号级偏好——
+// 前端自助入口（账号页个人偏好区）与对应后端端点 GET/POST /api/user/reply-mode、
+// GET/POST/DELETE /api/user/humanize 一并退役；前端改由「我 × 角色」设置面板的
+// my-settings 快照承载（reply_mode 进快照，拟人节奏走既有人格/节奏字段）。
 
 // ── Humanize（拟人度：段间延时 / 主动拆条） ──
 // 真源 = data/scheduler_config.json 的 `humanize` 块（与 reply_mode / quiet_hours /
@@ -199,19 +124,15 @@ export function setMyReplyMode(replyMode: 'immersive' | 'novel') {
 export type { HumanizeDelayMode, HumanizeConfigPayload } from '../store/humanizeStore'
 import type { HumanizeConfigPayload } from '../store/humanizeStore'
 
-export function humanizeGetConfig(userKey?: string) {
-  return userKey
-    ? client.get('/humanize/config', { params: { user_key: userKey } })
-    : client.get('/humanize/config')
+/** 读**全局默认**拟人度配置（2026-11-08：per-user 覆盖视图已随读层退役） */
+export function humanizeGetConfig() {
+  return client.get('/humanize/config')
 }
-/** partial merge：只传要改的键（后端在 json_state 锁内 merge，未传键保持原值）；
- *  userKey 非空 → 只写该用户的 user_humanize 覆盖行（admin 作用域） */
-export function updateHumanizeConfig(cfg: HumanizeConfigPayload, userKey?: string) {
-  return client.post('/humanize/config', userKey ? { ...cfg, user_key: userKey } : cfg)
-}
-/** 清除该用户的拟人度覆盖（回落全局默认） */
-export function clearHumanizeUserOverride(userKey: string) {
-  return client.delete('/humanize/config', { params: { user_key: userKey } })
+/** partial merge：只传要改的键（后端在 json_state 锁内 merge，未传键保持原值）。
+ *  2026-11-08：只剩全局默认一个作用域；用户侧拟人节奏写
+ *  `PUT /api/characters/{id}/my-settings`（角色设置面板）。 */
+export function updateHumanizeConfig(cfg: HumanizeConfigPayload) {
+  return client.post('/humanize/config', cfg)
 }
 
 // ── 话题状态机（管理端只读快照 + 配置热读写） ──

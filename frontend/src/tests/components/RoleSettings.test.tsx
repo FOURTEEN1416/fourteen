@@ -11,7 +11,7 @@ import { DEFAULT_HUMANIZE_CONFIG, useHumanizeStore } from '../../store/humanizeS
 //  vi.hoisted() — 所有 mock fn 和常量必须在 vi.mock 工厂之前定义
 // ════════════════════════════════════════════════════════════════
 
-const { mockUseUnifiedCharacter, mockUseVoiceStatus, mockUseDeleteCharacter, mockUseUserProactiveConfig, FAKE_CHARACTER } = vi.hoisted(() => {
+const { mockUseUnifiedCharacter, mockUseVoiceStatus, mockUseDeleteCharacter, FAKE_CHARACTER } = vi.hoisted(() => {
   const FAKE_CHARACTER = {
     id: 'c1',
     name: '小雅',
@@ -50,7 +50,6 @@ const { mockUseUnifiedCharacter, mockUseVoiceStatus, mockUseDeleteCharacter, moc
     mockUseUnifiedCharacter: vi.fn(),
     mockUseVoiceStatus: vi.fn(),
     mockUseDeleteCharacter: vi.fn(),
-    mockUseUserProactiveConfig: vi.fn(),
     FAKE_CHARACTER,
   }
 })
@@ -59,7 +58,6 @@ const {
   mockGetMyCharacterSettings, mockSaveMyCharacterSettings, mockResetMyCharacterSettings,
   mockProactiveGetConfig, mockProactiveHistory, mockProactiveSend,
   mockProactivePause, mockUpdateProactiveConfig,
-  mockUpdateUserProactiveConfig, mockClearUserProactiveConfig, mockUserProactivePause,
   mockEnrichCharacter, mockKnowledgeCollectConfig, mockUpdateKnowledgeCollectConfig,
   mockAgentPlaneReplay, mockAgentPlaneCurate,
   mockHumanizeGetConfig, mockHumanizeUpdate,
@@ -69,17 +67,13 @@ const {
   mockProactiveSend: vi.fn(),
   mockProactivePause: vi.fn(),
   mockUpdateProactiveConfig: vi.fn(),
-  // D21：用户自助主动消息（/api/user/proactive-config）三件
-  mockUpdateUserProactiveConfig: vi.fn(),
-  mockClearUserProactiveConfig: vi.fn(),
-  mockUserProactivePause: vi.fn(),
   mockEnrichCharacter: vi.fn(),
   mockKnowledgeCollectConfig: vi.fn(),
   mockUpdateKnowledgeCollectConfig: vi.fn(),
   mockAgentPlaneReplay: vi.fn(),
   mockAgentPlaneCurate: vi.fn(),
-  // 拟人度区块（2026-10-16 新增）已挂进 MessageTab：不 mock 会让真实 axios 客户端
-  // 在 jsdom 里发请求（测试不再 hermetic）。
+  // 拟人度区块曾挂在 MessageTab；2026-11-08 D-B 后该区块随运维页删除、角色页不再渲染，
+  // 桩保留是为了「万一被重新挂上也不打真实 axios」（保持 hermetic）。
   mockHumanizeGetConfig: vi.fn(),
   mockHumanizeUpdate: vi.fn(),
   // P5：角色级设置面板（/api/characters/{id}/my-settings）
@@ -99,8 +93,6 @@ vi.mock('../../hooks/useQueries', async (importOriginal) => {
     useUnifiedCharacter: (...args: unknown[]) => mockUseUnifiedCharacter(...args),
     useVoiceStatus: (...args: unknown[]) => mockUseVoiceStatus(...args),
     useDeleteCharacter: (...args: unknown[]) => mockUseDeleteCharacter(...args),
-    // D21：默认返回「继承全局」视图；admin 用例断言它收到 enabled=false
-    useUserProactiveConfig: (...args: unknown[]) => mockUseUserProactiveConfig(...args),
   }
 })
 
@@ -117,9 +109,6 @@ vi.mock('../../api/system', async (importOriginal) => {
     proactiveSend: (...args: unknown[]) => mockProactiveSend(...args),
     proactivePause: (...args: unknown[]) => mockProactivePause(...args),
     updateProactiveConfig: (...args: unknown[]) => mockUpdateProactiveConfig(...args),
-    updateUserProactiveConfig: (...args: unknown[]) => mockUpdateUserProactiveConfig(...args),
-    clearUserProactiveConfig: (...args: unknown[]) => mockClearUserProactiveConfig(...args),
-    userProactivePause: (...args: unknown[]) => mockUserProactivePause(...args),
     knowledgeCollectConfig: (...args: unknown[]) => mockKnowledgeCollectConfig(...args),
     updateKnowledgeCollectConfig: (...args: unknown[]) => mockUpdateKnowledgeCollectConfig(...args),
     agentPlaneReplay: (...args: unknown[]) => mockAgentPlaneReplay(...args),
@@ -193,36 +182,7 @@ const PROACTIVE_CONFIG = {
   llm_proactive: { enabled: true, style_hint: '', intensity: 'normal', respect_quiet_hours: true, character_hint: '' },
 }
 
-// D21：用户自助端点回执 = **交付树真实形状**（api/routers/training_routes.py::
-// _proactive_config_payload）：effective / global_default / overridden_keys / scope /
-// user_key_present。GET 的暂停态在 `effective.paused`（无顶层 paused；仅 pause 端点回顶层 paused）。
-const USER_EFFECTIVE = {
-  enabled: true,
-  paused: false,
-  quiet_hours_start: 23,
-  quiet_hours_end: 7,
-  threshold: 4.0,
-  max_daily_messages: 8,
-  min_interval_minutes: 30,
-  cooldown_after_reply_minutes: 10,
-}
-
-const USER_GLOBAL_DEFAULT = { ...USER_EFFECTIVE }
-
-const USER_PROACTIVE_GLOBAL = {
-  status: 'ok',
-  effective: { ...USER_EFFECTIVE },
-  global_default: { ...USER_GLOBAL_DEFAULT },
-  overridden_keys: [] as string[],
-  scope: 'global',
-  user_key_present: true,
-}
-
 /** 读真实 store 的 toast 消息（toast 容器不在测试 DOM，直接查状态） */
-
-function userProactiveQueryResult(data: unknown) {
-  return { data, isLoading: false, isError: false, refetch: vi.fn() }
-}
 
 // ════════════════════════════════════════════════════════════════
 //  Test Suite
@@ -254,10 +214,8 @@ describe('RoleSettings', () => {
     })
     mockSaveMyCharacterSettings.mockResolvedValue({ status: 'ok', character_id: 'c1', scope: 'user_character', config: {} })
     mockResetMyCharacterSettings.mockResolvedValue({ status: 'ok', reset: true })
-    // D21：个人生效视图默认「继承全局」
-    mockUseUserProactiveConfig.mockReturnValue(userProactiveQueryResult(USER_PROACTIVE_GLOBAL))
     mockKnowledgeCollectConfig.mockResolvedValue({ data: { enabled: false, interval_minutes: 60, available: true } })
-    // 拟人度区块：稳定回执 + 复位 store（store 是模块级单例，跨用例会残留 dirty 态）
+    // 拟人度区块（当前已无挂载点）：稳定回执 + 复位 store，防未来重挂时污染其他用例
     mockHumanizeGetConfig.mockResolvedValue({
       data: { status: 'ok', config: { ...DEFAULT_HUMANIZE_CONFIG, delay_mode_label: '逐字(按字数)' } },
     })
@@ -342,20 +300,22 @@ describe('RoleSettings', () => {
     // 默认「基础」tab：应该有角色名称输入
     expect(screen.getByDisplayValue('小雅')).toBeDefined()
 
-    // P5（2026-11-07）：消息 tab = 「我 × 这个角色」设置面板（五组归位，
-    // 无全局横幅、无管理员代设、无 admin 专属块）
+    // P5（2026-11-07）+ D-C（2026-11-08）：消息 tab = 「我 × 这个角色」设置面板
+    // （六组：回复模式/说话节奏/主动消息/LLM 决策/骰子闸/话题引擎），
+    // 无全局横幅、无管理员代设、无 admin 专属块——全局运维页已于 D-B 整机删除
     fireEvent.click(screen.getByText('消息'))
     expect(await screen.findByTestId('character-settings-panel')).toBeDefined()
-    expect(screen.getByText('① 说话节奏')).toBeDefined()
-    expect(screen.getByText('② 主动消息（这个角色什么时候来找我）')).toBeDefined()
-    expect(screen.getByText('③ LLM 决策（开口时机与风格）')).toBeDefined()
-    expect(screen.getByText('④ 骰子闸（要不要开口的零 token 概率闸）')).toBeDefined()
-    expect(screen.getByText('⑤ 话题引擎')).toBeDefined()
+    expect(screen.getByText('① 回复模式（这个角色怎么回你）')).toBeDefined()
+    expect(screen.getByText('② 说话节奏')).toBeDefined()
+    expect(screen.getByText('③ 主动消息（这个角色什么时候来找我）')).toBeDefined()
+    expect(screen.getByText('④ LLM 决策（开口时机与风格）')).toBeDefined()
+    expect(screen.getByText('⑤ 骰子闸（要不要开口的零 token 概率闸）')).toBeDefined()
+    expect(screen.getByText('⑥ 话题引擎')).toBeDefined()
     expect(screen.getByText('保存本角色设置')).toBeDefined()
-    // 取数走「我 × 角色」端点，不打 admin 全局端点、不打旧 user 端点
+    // 取数走「我 × 角色」端点，不打 admin 全局端点
+    // （旧 user 自助端点与其 client 函数已整体删除，静态守卫见 tests/api/system.test.ts）
     expect(mockGetMyCharacterSettings).toHaveBeenCalledWith('c1')
     expect(mockProactiveGetConfig).not.toHaveBeenCalled()
-    expect(mockUseUserProactiveConfig).not.toHaveBeenCalled()
     // 不可见任何 admin-only 表单
     expect(screen.queryByText('LLM 主动决策（人设·画像·控制台）')).toBeNull()
     expect(screen.queryByText('拟人度')).toBeNull()

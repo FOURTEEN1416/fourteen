@@ -19,6 +19,18 @@ import { useErrorStore } from '../../store/errorStore'
 
 type SettingsMap = Record<string, unknown>
 
+/**
+ * 回复模式（D-C 契约 2026-11-08）：快照字段 `reply_mode`（字段组键 `reply`），
+ * 取值 `immersive` / `novel` / `''`。**空串 = 未设置 = 跟随全局默认**（服务端
+ * `character_settings.SETTING_FIELDS` 的默认值就是空串）；所以「跟随全局默认」
+ * 这一档写的是空串，而不是把字段从前端删掉——PUT 是局部合并，缺键会保留旧值。
+ */
+const REPLY_MODE_OPTIONS: Array<{ key: '' | 'immersive' | 'novel'; label: string; hint: string }> = [
+  { key: '', label: '跟随全局默认', hint: '本角色不单独设置' },
+  { key: 'immersive', label: '沉浸式', hint: '纯对白，像微信真人' },
+  { key: 'novel', label: '小说式', hint: '带括号动作与神态' },
+]
+
 const DELAY_MODES: Array<{ key: string; label: string; hint: string }> = [
   { key: 'dynamic', label: '逐字', hint: '按字数估停顿' },
   { key: 'fixed', label: '固定', hint: '每段固定等待' },
@@ -90,7 +102,13 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
   const addToast = useErrorStore((s) => s.addToast)
   const [cfg, setCfg] = useState<SettingsMap>({})
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  /**
+   * 加载失败归因：卡片主文案只说**能指导用户的那一种**原因。
+   * - `unbound`：服务端 409「尚未绑定微信 → 定不出会话键（不猜键）」，用户可自行去扫码绑定；
+   * - `other`：网络 / 500 / 其他 4xx —— 不能冒充成「绑定同步中」（会把用户指向错误原因）。
+   * 原始 detail 由 client.ts 拦截器 toast 呈现，这里不做二次复述。
+   */
+  const [loadFailure, setLoadFailure] = useState<'' | 'unbound' | 'other'>('')
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState('')
   const [reloadToken, setReloadToken] = useState(0)
@@ -98,18 +116,19 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    setError(null)
+    setLoadFailure('')
     getMyCharacterSettings(characterId)
       .then((res) => {
         if (!cancelled) setCfg((res.config ?? {}) as SettingsMap)
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(
-            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-            || '角色设置加载失败，当前显示的不是你的真实设置',
-          )
-        }
+        // 失败原因不落到卡片正文：后端 detail 常带内部话术（「未绑定微信…不猜键」式），
+        // 但**必须区分 409（绑定缺失，用户可自助解决）与其他失败**，
+        // 否则 500/网络错误也被归因为「绑定同步中」，把用户指向错误原因。
+        // 原始 detail 仍由 client.ts 拦截器的 toast 分支呈现（client.ts:223）。
+        if (cancelled) return
+        const status = (err as { response?: { status?: number } })?.response?.status
+        setLoadFailure(status === 409 ? 'unbound' : 'other')
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -124,11 +143,22 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
   const num = (k: string, fallback: number) => (typeof cfg[k] === 'number' ? (cfg[k] as number) : fallback)
   const bool = (k: string, fallback = false) => (typeof cfg[k] === 'boolean' ? (cfg[k] as boolean) : fallback)
   const str = (k: string, fallback = '') => (typeof cfg[k] === 'string' ? (cfg[k] as string) : fallback)
+  /** 回复模式三态：'immersive' | 'novel' | ''（'' = 快照未设置 = 跟随全局默认） */
+  const replyMode: '' | 'immersive' | 'novel' = str('reply_mode') === 'immersive'
+    ? 'immersive'
+    : str('reply_mode') === 'novel' ? 'novel' : ''
 
   const handleSave = async () => {
     setSaving(true)
     try {
-      const res = await saveMyCharacterSettings(characterId, cfg)
+      // 契约守卫：reply_mode 只允许 immersive/novel；其余一律归一为空串。
+      // 不能「删键」表达未设置——服务端 PUT 是局部合并（`character_settings.write`
+      // 做 {**current, **patch}），缺键=保留旧值，会让「跟随全局默认」点不动。
+      const payload: SettingsMap = { ...cfg }
+      if (payload['reply_mode'] !== 'immersive' && payload['reply_mode'] !== 'novel') {
+        payload['reply_mode'] = ''
+      }
+      const res = await saveMyCharacterSettings(characterId, payload)
       setCfg((res.config ?? {}) as SettingsMap)
       setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
       addToast({ type: 'success', message: '角色设置已保存（只影响你对这个角色的体验）' })
@@ -167,11 +197,18 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
     )
   }
 
-  if (error) {
+  if (loadFailure) {
     return (
       <Section title="本角色设置">
-        <div className="rounded-xl border border-red-200/40 bg-red-50/40 p-5 text-center space-y-3">
-          <p className="text-sm text-red-600">{error}</p>
+        <div
+          className="rounded-xl border border-red-200/40 bg-red-50/40 p-5 text-center space-y-3"
+          data-testid="character-settings-error"
+        >
+          <p className="text-sm text-red-600">
+            {loadFailure === 'unbound'
+              ? '尚未绑定微信通道，绑好后这里才能保存你的设置（微信页扫码绑定即可）'
+              : '设置加载失败，请重试；持续失败请联系管理员'}
+          </p>
           <button
             type="button"
             onClick={() => setReloadToken((t) => t + 1)}
@@ -191,8 +228,41 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
         其他角色各自一份，互不影响。改动后点「保存」生效。
       </p>
 
-      {/* ── ① 说话节奏 ── */}
-      <Section title="① 说话节奏">
+      {/* ── ① 回复模式（D-C 契约：快照字段 reply_mode / 组键 reply） ── */}
+      <Section title="① 回复模式（这个角色怎么回你）">
+        <div className="space-y-3">
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            沉浸式＝只说话，像微信里的真人；小说式＝带括号动作与神态描写。
+            选「跟随全局默认」即清空这个角色的回复模式（空=未设置），按全局默认解析。
+          </p>
+          <div className="flex gap-1 p-1 bg-gray-100/60 rounded-xl" role="group" aria-label="回复模式">
+            {REPLY_MODE_OPTIONS.map((m) => (
+              <button
+                key={m.key || 'inherit'}
+                type="button"
+                aria-pressed={replyMode === m.key}
+                onClick={() => patch('reply_mode', m.key)}
+                className={`flex-1 rounded-lg px-2 py-1.5 text-xs transition-all ${
+                  replyMode === m.key
+                    ? 'bg-white text-gray-800 font-medium shadow-sm ring-1 ring-black/5'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <div>{m.label}</div>
+                <div className="text-[10px] opacity-70">{m.hint}</div>
+              </button>
+            ))}
+          </div>
+          {replyMode === '' && (
+            <p data-testid="reply-mode-inherit-hint" className="text-[11px] text-gray-400">
+              当前：跟随全局默认（本角色未单独设置回复模式）
+            </p>
+          )}
+        </div>
+      </Section>
+
+      {/* ── ② 说话节奏 ── */}
+      <Section title="② 说话节奏">
         <div className="space-y-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">段间延时档位</div>
@@ -270,8 +340,8 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
         </div>
       </Section>
 
-      {/* ── ② 主动消息 ── */}
-      <Section title="② 主动消息（这个角色什么时候来找我）">
+      {/* ── ③ 主动消息 ── */}
+      <Section title="③ 主动消息（这个角色什么时候来找我）">
         <div className="space-y-3">
           <ToggleRow label="主动消息总开关" desc="关闭后这个角色不会主动发消息给你" checked={bool('enabled', true)} onChange={(v) => patch('enabled', v)} />
           <ToggleRow label="暂停" desc="暂停期间不自动发，不影响其他设置" checked={bool('paused')} onChange={(v) => patch('paused', v)} />
@@ -284,8 +354,8 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
         </div>
       </Section>
 
-      {/* ── ③ LLM 决策 ── */}
-      <Section title="③ LLM 决策（开口时机与风格）">
+      {/* ── ④ LLM 决策 ── */}
+      <Section title="④ LLM 决策（开口时机与风格）">
         <div className="space-y-3">
           <ToggleRow label="启用 LLM 主动决策" checked={bool('llm_enabled', true)} onChange={(v) => patch('llm_enabled', v)} />
           <ToggleRow label="免打扰时段写入提示词" desc="由 LLM 遵守你的免打扰设置" checked={bool('respect_quiet_hours', true)} onChange={(v) => patch('respect_quiet_hours', v)} />
@@ -325,8 +395,8 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
         </div>
       </Section>
 
-      {/* ── ④ 骰子闸 ── */}
-      <Section title="④ 骰子闸（要不要开口的零 token 概率闸）">
+      {/* ── ⑤ 骰子闸 ── */}
+      <Section title="⑤ 骰子闸（要不要开口的零 token 概率闸）">
         <div className="space-y-3">
           <ToggleRow label="启用骰子闸" checked={bool('dice_enabled')} onChange={(v) => patch('dice_enabled', v)} />
           <ToggleRow label="干跑（只记账不拦截）" checked={bool('dice_dry_run', true)} onChange={(v) => patch('dice_dry_run', v)} />
@@ -342,8 +412,8 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
         </div>
       </Section>
 
-      {/* ── ⑤ 话题与记忆 ── */}
-      <Section title="⑤ 话题引擎">
+      {/* ── ⑥ 话题与记忆 ── */}
+      <Section title="⑥ 话题引擎">
         <div className="space-y-3">
           <ToggleRow label="话题状态机" desc="让对话有话题延续与翻篇意识" checked={bool('topic_enabled', true)} onChange={(v) => patch('topic_enabled', v)} />
           <ToggleRow label="稀疏 LLM 判定" desc="每 4 轮用一次 LLM 校准话题状态" checked={bool('llm_judge_enabled', true)} onChange={(v) => patch('llm_judge_enabled', v)} />

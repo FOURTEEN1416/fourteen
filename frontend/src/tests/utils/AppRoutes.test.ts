@@ -41,4 +41,13 @@ describe('App.tsx 路由声明守卫', () => {
       expect(reachable, `navGroups 引用的 /${p} 在 App.tsx 无对应 Route`).toBe(true)
     }
   })
+
+  // 2026-11-08 D-B 用户裁决：/settings/proactive 整机删除——
+  // 路由、懒加载页面、侧栏入口三者同时清零，防止旧入口被「顺手加回来」。
+  it('D-B：/settings/proactive 路由与导航入口均已删除', () => {
+    expect(appSrc).not.toContain('path="proactive"')
+    expect(appSrc).not.toContain('SettingsProactivePage')
+    expect(navSrc).not.toContain("to: '/settings/proactive'")
+    expect(navSrc).not.toContain('主动消息引擎')
+  })
 })

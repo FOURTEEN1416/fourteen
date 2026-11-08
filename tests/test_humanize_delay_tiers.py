@@ -67,14 +67,21 @@ def test_conftest_sandboxes_humanize_config_path():
 
 def test_signature_keeps_single_positional_param():
     """既有契约以 ``lambda text: 0`` monkeypatch 本函数（单参位置调用）——
-    ``mode`` 只能是 keyword-only，不得成为第二个位置参数。"""
+    ``mode`` / ``humanize`` 只能是 keyword-only，不得成为位置参数。
+
+    2026-11-08 D-A 追加 ``humanize``（已解析的「用户 × 角色」快照由投递链
+    传入，见 ``WeChatConnector._humanize_for``）；位置契约不变。
+    """
     params = list(inspect.signature(_segment_delay).parameters.values())
-    assert len(params) == 2
+    assert len(params) == 3
     assert params[0].name == "prev"
     assert params[0].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
     assert params[1].name == "mode"
     assert params[1].kind is inspect.Parameter.KEYWORD_ONLY
     assert params[1].default is None
+    assert params[2].name == "humanize"
+    assert params[2].kind is inspect.Parameter.KEYWORD_ONLY
+    assert params[2].default is None
 
 
 @pytest.mark.parametrize("n", [0, 1, 5, 9, 20, 40, 100, 200])
@@ -249,7 +256,7 @@ def test_public_send_reply_segments_returns_only_accepted_prefix(tmp_path, monke
     c.token = "test-token"
     monkeypatch.setattr(c, "_merge_session_state", lambda updates: {})
     monkeypatch.setattr(c, "_save_context_tokens", lambda: None)
-    monkeypatch.setattr(wc, "_segment_delay", lambda text: 0)
+    monkeypatch.setattr(wc, "_segment_delay", lambda text, **kwargs: 0)
     calls: list[str] = []
 
     def send(**kwargs):

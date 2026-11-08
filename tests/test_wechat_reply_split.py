@@ -88,7 +88,7 @@ def test_partial_reply_records_only_api_accepted_segments(tmp_path, monkeypatch)
     c.token = "test-token"
     monkeypatch.setattr(c, "_merge_session_state", lambda updates: {})
     monkeypatch.setattr(c, "_save_context_tokens", lambda: None)
-    monkeypatch.setattr(wc, "_segment_delay", lambda text: 0)
+    monkeypatch.setattr(wc, "_segment_delay", lambda text, **kwargs: 0)
     accepted = []
     transport_calls = []
 
@@ -127,7 +127,7 @@ def test_same_peer_holds_turn_lock_through_generation_and_sending(tmp_path, monk
     c = wc.WeChatConnector(SimpleNamespace(), owner_user_id=42)
     c.token = "test-token"
     monkeypatch.setattr(c, "_merge_session_state", lambda updates: {})
-    monkeypatch.setattr(wc, "_segment_delay", lambda text: 0)
+    monkeypatch.setattr(wc, "_segment_delay", lambda text, **kwargs: 0)
     calls = []
 
     def manager(

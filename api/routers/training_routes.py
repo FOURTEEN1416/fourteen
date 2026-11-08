@@ -12,6 +12,13 @@
 注意：LoRA 微调端点已移除（项目使用外接 API + RAG + 提示词注入）。
 保留：数据清洗 / 测试 / 应用（克隆到 ToneMimic）+ 主动搭话配置。
 
+2026-11-08（D-A/D-C 用户裁决）：per-user 偏好层退役 —— `/api/user/reply-mode`、
+`/api/user/humanize`、`/api/user/proactive-config`、`/api/user/proactive/pause`
+四条自助面已删除（用户侧设置改走 `/api/characters/{id}/my-settings`）；
+`/api/humanize/config` 只剩**全局默认**读写；`/api/proactive/config` 的
+`reply_mode` 也只剩全局默认作用域。保留 `GET /api/user/proactive/history`
+（状态页「最近主动消息」卡在用）。
+
 依赖：
 - deps.orch（_ase 主动搭话引擎）
 - deps.training_mgr（风格提取状态管理器）
@@ -41,30 +48,6 @@ from utils.humanize_config import DELAY_MODE_PATTERN
 logger = logging.getLogger("api.routers.training_routes")
 
 router = APIRouter(tags=["training"])
-
-
-class ProactiveConfigRequestScoped(ProactiveConfigRequest):
-    """`ProactiveConfigRequest` + 回复模式**作用域**（2026-10-21 R7）。
-
-    为什么不直接改 `api/main_routes.ProactiveConfigRequest`：该文件不在本批
-    允许清单内。用子类扩展既保持原模型（与 `api.__init__` 的再导出）不变，
-    又让本端点接受新字段；`tests/test_ax_p2_bundle.py` 的字段存在性断言仍成立。
-
-    语义：
-      - ``reply_mode_scope="global"``（默认）→ 写全局默认，全站生效（旧行为）；
-      - ``reply_mode_scope="user"`` + ``user_key`` → 只写该用户的覆盖行。
-    """
-
-    reply_mode_scope: str | None = Field(
-        default="global",
-        pattern="^(global|user)$",
-        description="回复模式作用域：global=全站默认（旧行为）；user=仅该 user_key",
-    )
-    user_key: str | None = Field(
-        default=None,
-        max_length=200,
-        description="作用域=user 时的目标会话键（完整形态 `N:wxid`）",
-    )
 
 
 # ═══════════════════════════════════════════════════════
@@ -292,6 +275,30 @@ def _file_vault_config() -> dict:
     }
 
 
+def _hub_global_engine_values() -> dict:
+    """四个引擎级键的**全局**真值：持久文件 > hub 记账 > 部署默认。
+
+    ⚠️ 不用 ``ASEHub.get_runtime_config()``：那是首引擎视图，会被某个用户的
+    个人值污染（见 ``get_proactive_config`` 的注释）。
+
+    ⚠️ 也不用「replay 优先」：4 worker 下只有接到 admin POST 的那个 worker
+    有最新 ``_replay``，其余 worker 的 replay 是**旧值**；持久文件
+    （``scheduler_config.json`` 的 ``proactive_runtime``）才是跨 worker 真源，
+    由 ``utils.proactive_config.global_engine_values`` 逐键压过 replay
+    （2026-10-30 二轮复核：文件 6.25 + 旧 replay 5.5 必须读 6.25）。
+    """
+    from utils.proactive_config import global_engine_values
+
+    replay = None
+    try:
+        ase = getattr(deps.orch, "_ase", None) if deps.orch else None
+        replay = (getattr(ase, "_replay", None) or {}).get("runtime_config")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("读取 hub 全局运行时记账失败（用部署默认）: %s", exc)
+        replay = None
+    return global_engine_values(replay)
+
+
 @router.get("/api/proactive/config")
 async def get_proactive_config(
     _auth: bool = Security(verify_api_key_dep),
@@ -356,50 +363,11 @@ async def get_proactive_config(
     return config
 
 
-async def _resolve_admin_target_key(raw: str, db) -> str:
-    """admin「指定用户」的目标 → 完整会话键（2026-10-22 P0 复核修复）。
-
-    为什么需要：per-user 覆盖表的键形态是 v1.28 隔离域 `N:wxid@im.wechat`
-    （`user_key_from_session` 明确「返回完整会话键，禁止剥掉 owner」），运行时
-    `_resolve_turn_reply_mode(session_id)` 也按它读。而 admin UI 的下拉给的是
-    `/api/admin/users` 的**数字 id**（`RoleSettingsTabs.tsx` 的
-    `String(replyModeTargetUser)`）；旧实现原样入库 → 写 `3`、读
-    `3:o9cq80@im.wechat` → **覆盖永远读不到，却回执 `status=ok`**（独立复核
-    2026-10-22 端到端实测：`runtime read '3:o9cq80@im.wechat' -> immersive`）。
-
-    解析口径（确定性、绝不猜测，D15）：
-      - 含 ``:``  → 视为完整会话键，**原样**返回（脚本/API 直呼契约不变）；
-      - 纯数字    → 视为注册用户 id，经 `wechat_bindings` 还原成 `N:wxid`；
-      - 其他形态 / 该用户无绑定 → 400（宁拒绝不写坏键）。
-
-    Raises:
-        HTTPException: 400 —— 空键、形态非法、或该 user_id 无微信绑定。
-    """
-    target = str(raw or "").strip()
-    if not target:
-        raise HTTPException(400, "reply_mode_scope=user 时必须提供 user_key")
-    if ":" in target:
-        return target
-    if target.isdigit():
-        resolved = await _user_session_key_for(int(target), db)
-        if not resolved:
-            raise HTTPException(
-                400,
-                f"user_id={target} 未绑定微信通道，无法确定会话键（不猜键）",
-            )
-        return resolved
-    raise HTTPException(
-        400,
-        f"user_key 形态非法: {target!r}（应为数字 user_id 或完整会话键 N:wxid）",
-    )
-
-
 @router.post("/api/proactive/config")
 async def update_proactive_config(
-    req: ProactiveConfigRequestScoped,
+    req: ProactiveConfigRequest,
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
-    db=Depends(get_db),
 ):
     """更新主动消息运行时参数——2026-08-28 修复：旧版只写展示字典不生效。"""
     orch = deps.orch
@@ -458,37 +426,22 @@ async def update_proactive_config(
     # 回复模式（沉浸式真人 / 小说式）：编排器每次组装提示词时读该文件，
     # 写入即对所有 worker 生效，无需重启。
     #
-    # 2026-10-21 R7 作用域：
-    #   - `global`（默认）/ 未传 → 写全局默认（旧行为，全站生效）；
-    #   - `user` + `user_key` → 只写该用户的覆盖行（多用户隔离）；admin 门禁不变。
+    # 2026-11-08 D-C 用户裁决：**用户级作用域退役**——回复模式属于
+    # 「用户 × 这个角色」，写入走 `PUT /api/characters/{id}/my-settings`；
+    # 本端点只剩**全局默认**这一个作用域（快照未设置时的回落值）。
     # 写失败**上抛 500**（`write_reply_mode` 已改为不吞异常）——旧实现吞掉后
     # 仍记「已切换」，前端据此显示成功 = 假成功。
     reply_mode_written: dict[str, object] = {}
     if req.reply_mode is not None:
         from utils.reply_mode import write_reply_mode
 
-        scope = str(req.reply_mode_scope or "global")
-        # admin 侧目标可能是数字 user_id（前端下拉）或完整会话键（脚本直呼）；
-        # 统一解析成覆盖表/运行时都认的 `N:wxid` 形态再写（2026-10-22 P0 修复）。
-        target_key = (
-            await _resolve_admin_target_key(str(req.user_key or ""), db)
-            if scope == "user"
-            else None
-        )
         try:
-            write_reply_mode(req.reply_mode, user_key=target_key)
+            write_reply_mode(req.reply_mode)
         except (ValueError, OSError) as exc:
             logger.warning("回复模式写入失败: %s", exc)
             raise HTTPException(500, f"reply_mode 写入失败: {exc}") from exc
-        reply_mode_written = {
-            "reply_mode": req.reply_mode,
-            "reply_mode_scope": scope,
-            "user_key": target_key or "",
-        }
-        logger.info(
-            "回复模式已切换: %s scope=%s user=%s",
-            req.reply_mode, scope, target_key or "-",
-        )
+        reply_mode_written = {"reply_mode": req.reply_mode, "reply_mode_scope": "global"}
+        logger.info("全局默认回复模式已切换: %s", req.reply_mode)
 
     # LLM 主动决策参数（web 可调；注入 prompt，非硬编码日程表）
     if any(
@@ -544,29 +497,9 @@ async def update_proactive_config(
     # 原样透传以绕开 DI 重复解析（直调时 Depends 缺省不会生效）
     payload = {"status": "ok", "config": await get_proactive_config(_auth=True, _admin=_admin)}
     if reply_mode_written:
-        # 回执显式带上作用域：前端据此确认「写的是 global 还是某个用户」
+        # 回执显式带上作用域（恒为 global）：前端据此确认「写的是全局默认」
         payload.update(reply_mode_written)
     return payload
-
-
-# ═══════════════════════════════════════════════════════
-# 用户自助：回复模式（2026-10-21 R7）
-# ═══════════════════════════════════════════════════════
-#
-# 为什么需要独立端点（独立复核 2026-10-21 的「非 admin 用户没有入口」条目）：
-#   - `/api/proactive/config` 是 `require_role("admin")` **且** 前置
-#     `orch._ase` 503 门；普通用户既没有 admin 角色，也不该被「主动引擎是否
-#     初始化」耦合（模式真源是文件，与调度器无关，对齐
-#     `/api/humanize/config` 的「刻意不同 503 语义」既定做法）。
-#   - 因此本端点：JWT 认证 + **服务端从 token 派生 user_key**
-#     （绝不接受客户端传 user_key —— 那等于允许改别人的模式）。
-
-
-class UserReplyModeRequest(BaseModel):
-    reply_mode: str = Field(
-        pattern="^(immersive|novel)$",
-        description="immersive=沉浸式真人聊天；novel=小说式",
-    )
 
 
 async def _user_session_key_for(user_id: int, db) -> str:
@@ -575,71 +508,114 @@ async def _user_session_key_for(user_id: int, db) -> str:
     隔离维度 = 完整会话键 `owner:peer`（v1.28，`StructuredMemory.user_key_from_session`
     原样返回整串）。普通用户通常只有一个绑定 wxid（D16「一人一 bot」）；
     无绑定时返回空串 —— 调用方回落全局默认，**不猜键、不拼假键**（D15 原则）。
+
+    这是「数值 user_id → 会话键」的**唯一**还原器：角色设置（my-settings）、
+    画像、话题快照、个人主动历史都复用本函数，避免各处各写一套键形态。
+
+    读侧兜底（2026-11-08 D-D）：`wechat_bindings` 直查为空时（「先网页激活 →
+    后扫码登录」的存量用户没有绑定行），沿身份组单一真源
+    `StructuredMemory.identity_keys_by_prefix` 解析——前缀找到本人在
+    `user_identity_map` 里的键，展成组后**逐个看组成员有没有绑定行**（跨通道的
+    绑定即证据）：命中就返回**那个组内会话键**，都不命中仍返回空串。
+    两组都带绑定时取键序最小者，保证同一输入稳定同一输出。
     """
     from sqlalchemy import select
 
+    uid = int(user_id)
     if db is None:
         return ""
     try:
         result = await db.execute(
             select(WechatBinding.wxid)
-            .where(WechatBinding.user_id == int(user_id))
+            .where(WechatBinding.user_id == uid)
             .order_by(WechatBinding.bound_at.desc())
         )
         wxid = str(result.scalars().first() or "").strip()
     except Exception as exc:  # noqa: BLE001
         logger.debug("查询用户微信绑定失败 user=%s: %s", user_id, exc)
         return ""
-    return f"{int(user_id)}:{wxid}" if wxid else ""
+    if wxid:
+        return f"{uid}:{wxid}"
 
-
-@router.get("/api/user/reply-mode")
-async def get_my_reply_mode(
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-    db=Depends(get_db),
-):
-    """读取**本人**生效的回复模式 + 全局默认（供前端展示「继承/覆盖」）。"""
-    from utils.reply_mode import read_reply_mode, reply_mode_label
-
-    user_key = await _user_session_key_for(int(user_id), db)
-    effective = read_reply_mode(user_key or None)
-    global_default = read_reply_mode(None)
-    return {
-        "status": "ok",
-        "reply_mode": effective,
-        "reply_mode_label": reply_mode_label(effective),
-        "global_default": global_default,
-        "source": "user" if (user_key and effective != global_default) else "global",
-        "user_key_present": bool(user_key),
-    }
-
-
-@router.post("/api/user/reply-mode")
-async def set_my_reply_mode(
-    req: UserReplyModeRequest,
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-    db=Depends(get_db),
-):
-    """写入**本人**的回复模式覆盖；无绑定 wxid 时 400（不猜键）。"""
-    from utils.reply_mode import write_reply_mode
-
-    user_key = await _user_session_key_for(int(user_id), db)
-    if not user_key:
-        raise HTTPException(400, "当前账号尚未绑定微信通道，无法设置个人回复模式")
+    # ── 身份组兜底：不在组里 → []（不猜键），组里也无绑定行 → ""（同上）──
     try:
-        write_reply_mode(req.reply_mode, user_key=user_key)
-    except (ValueError, OSError) as exc:
-        logger.warning("个人回复模式写入失败 user=%s: %s", user_id, exc)
-        raise HTTPException(500, f"reply_mode 写入失败: {exc}") from exc
-    return {"status": "ok", "reply_mode": req.reply_mode, "scope": "user"}
+        from shisi.memory.legacy.structured_memory import StructuredMemory
+        from utils.session_key import parse as parse_session_key
+
+        memory = StructuredMemory()
+        try:
+            candidates = memory.identity_keys_by_prefix(f"{uid}:")
+        finally:
+            memory.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("身份组兜底解析失败 user=%s: %s", user_id, exc)
+        return ""
+    if not candidates:
+        return ""
+    owners = {
+        parsed.owner
+        for parsed in (parse_session_key(key) for key in candidates)
+        if parsed.owner is not None
+    }
+    if not owners:
+        return ""
+    try:
+        result = await db.execute(
+            select(WechatBinding.user_id, WechatBinding.wxid).where(
+                WechatBinding.user_id.in_(owners)
+            )
+        )
+        bound = {(int(u), str(w).strip()) for u, w in result.all()}
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("身份组兜底查绑定失败 user=%s: %s", user_id, exc)
+        return ""
+    for key in sorted(candidates):
+        parsed = parse_session_key(key)
+        if parsed.owner is not None and (parsed.owner, parsed.peer) in bound:
+            return key
+    return ""
+
+
+async def _normalize_admin_target_key(raw: str, db) -> str:
+    """admin 直呼的会话目标 → 完整会话键（数字 id 经绑定表确定性还原）。
+
+    解析口径（确定性、绝不猜测，D15）：
+      - 含 ``:``   → 视为完整会话键（含 web/WS 多段形态），**原样**返回；
+      - 纯数字     → 视为注册用户 id，经 ``_user_session_key_for`` 还原成 `N:wxid`；
+      - 其他形态 / 该用户无绑定 → 400（宁拒绝不写坏键）。
+
+    消费者：``GET /api/topic-state/{session_key}`` 的 admin 分支（普通用户分支
+    不解析、只做白名单比对）。**2026-11-08 验收修复**：D-A/D-C 批删除 per-user
+    覆盖层时把它当成「只剩退役层消费者」一并删了，但话题状态只读面一直在用，
+    于是该端点 import 失败即 500（tests/api/test_topic_state_api.py 14 例红）。
+    现按存活消费者的需要复名（不叫旧名 `_resolve_admin_target_key`：它已随
+    reply-mode 作用域一起退役，重名会让人误以为旧写面还在）。
+
+    Raises:
+        HTTPException: 400 —— 空键、形态非法、或该 user_id 无微信绑定。
+    """
+    target = str(raw or "").strip()
+    if not target:
+        raise HTTPException(400, "会话键不能为空")
+    if ":" in target:
+        return target
+    if target.isdigit():
+        resolved = await _user_session_key_for(int(target), db)
+        if not resolved:
+            raise HTTPException(
+                400,
+                f"user_id={target} 未绑定微信通道，无法确定会话键（不猜键）",
+            )
+        return resolved
+    raise HTTPException(
+        400,
+        f"会话键形态非法: {target!r}（应为数字 user_id 或完整会话键 N:wxid）",
+    )
 
 
 # ═══════════════════════════════════════════════════════
 # Humanize（拟人度：段间延时 / 主动拆条）
 # ═══════════════════════════════════════════════════════
-
 
 class HumanizeConfigRequest(BaseModel):
     """拟人度配置的 partial merge 入参（只改传入键，未传保持原值）。
@@ -678,12 +654,6 @@ class HumanizeConfigRequest(BaseModel):
         default=None, ge=0, le=100,
         description="沉浸式可选口误概率（百分比，0=关闭；仅 immersive 生效）",
     )
-    user_key: str | None = Field(
-        default=None,
-        max_length=200,
-        description="按用户覆盖的作用域键（v1.28 完整会话键 N:wxid）；留空=写全局默认",
-    )
-
     @model_validator(mode="after")
     def _check_cross_field(self) -> HumanizeConfigRequest:
         if (
@@ -704,53 +674,34 @@ class HumanizeConfigRequest(BaseModel):
 class HumanizeConfigResponse(BaseModel):
     status: str
     config: dict
-    # 2026-10-27 G-2：``user_key`` 非空时 config 是「用户覆盖 → 全局 → 默认」
-    # 的**合并生效视图**；scope 标明本次读写的层级，便于前端提示。
+    # 2026-11-08：per-user 覆盖层退役后本端点只剩**全局默认**一个作用域
+    # （用户级拟人节奏走 `PUT /api/characters/{id}/my-settings`）。
     scope: str = "global"
-    user_key: str = ""
 
 
-def _humanize_payload(user_key: str | None = None) -> dict:
-    """响应体 ``config`` —— 真源**热读** + 展示标签（标签不落真源文件）。
-
-    ``user_key`` 非空 → 返回该用户合并后的生效视图（覆盖优先，无覆盖回落全局）。
-    """
+def _humanize_payload() -> dict:
+    """响应体 ``config`` —— 全局真源**热读** + 展示标签（标签不落真源文件）。"""
     from utils.humanize_config import delay_mode_label, read_humanize
 
-    cfg = read_humanize(user_key)
+    cfg = read_humanize()
     return {**cfg.as_dict(), "delay_mode_label": delay_mode_label(cfg.delay_mode)}
 
 
 @router.get("/api/humanize/config", response_model=HumanizeConfigResponse)
 async def get_humanize_config(
-    user_key: str | None = Query(
-        default=None,
-        max_length=200,
-        description="可选：按用户读取合并生效视图（数字 user_id 或完整会话键；覆盖优先，无覆盖回落全局）",
-    ),
     _auth: bool = Security(verify_api_key_dep),
     # SEC-P0 同门：拟人度是控制面，与 /api/proactive/config 同级
     _admin: tuple[int, User] = Depends(require_role("admin")),
-    db: AsyncSession = Depends(get_db),
 ):
-    """读取拟人度配置（**纯文件/覆盖库热读**，不依赖 ``orch._ase``，故无 503）。
+    """读取**全局默认**拟人度配置（纯文件热读，不依赖 ``orch._ase``，故无 503）。
 
     4 worker 中只有 master 持有主动引擎，其余 worker 仍必须能答「当前拟人度
     是什么」—— 与 ``/api/proactive/config`` 的 503 语义刻意不同。
 
-    NEW-12（2026-10-29）：``user_key`` 支持数字 user_id（经 wechat_bindings
-    还原成会话键），与 reply-mode 同一还原器——admin 前端不再需要手输内部键。
+    2026-11-08：``?user_key`` 按用户覆盖视图随 per-user 层一并退役；用户侧
+    拟人节奏读写在 `GET/PUT /api/characters/{id}/my-settings`。
     """
-    target_key = (
-        await _resolve_admin_target_key(str(user_key), db) if user_key else None
-    )
-    scope = "user" if target_key else "global"
-    return {
-        "status": "ok",
-        "config": _humanize_payload(target_key),
-        "scope": scope,
-        "user_key": target_key or "",
-    }
+    return {"status": "ok", "config": _humanize_payload(), "scope": "global"}
 
 
 @router.post("/api/humanize/config", response_model=HumanizeConfigResponse)
@@ -759,18 +710,13 @@ async def update_humanize_config(
     req: HumanizeConfigRequest,
     _auth: bool = Security(verify_api_key_dep),
     _admin: tuple[int, User] = Depends(require_role("admin")),
-    db: AsyncSession = Depends(get_db),
 ):
-    """写入拟人度配置（partial merge；POST / PUT 同一实现，前端按 POST 消费）。
+    """写入**全局默认**拟人度配置（partial merge；POST / PUT 同一实现）。
 
     写入走 ``utils.humanize_config.write_humanize`` →
     ``utils.json_state.update_json``（跨进程 flock + ``os.replace``），
     锁内读改写且只触碰 ``humanize`` 块，故与 ``/api/proactive/config``
     并发保存同一文件不会互相覆盖。
-
-    ``user_key`` 非空（2026-10-27 G-2）→ 只写该用户的 ``user_humanize``
-    覆盖行，不动全局默认（admin 作用域）。NEW-12：支持数字 user_id，
-    经 `_resolve_admin_target_key` 还原（与 reply-mode 同一真源，不猜键）。
 
     错误语义：字段非法/越界 → 422（Pydantic 先行）；
     ``max_segments`` 非 2/3/4 或合并后跨字段冲突 → 400。
@@ -778,370 +724,13 @@ async def update_humanize_config(
     from utils.humanize_config import write_humanize
 
     payload = req.model_dump(exclude_none=True)
-    user_key = payload.pop("user_key", None)
-    target_key = (
-        await _resolve_admin_target_key(str(user_key), db) if user_key else None
-    )
-
-    if payload or target_key:
-        try:
-            write_humanize(user_key=target_key, **payload)
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from None
-        logger.info("拟人度配置已更新（scope=%s user=%s）: %s", "user" if target_key else "global", target_key or "-", payload)
-    return {
-        "status": "ok",
-        "config": _humanize_payload(target_key),
-        "scope": "user" if target_key else "global",
-        "user_key": target_key or "",
-    }
-
-
-@router.delete("/api/humanize/config", response_model=HumanizeConfigResponse)
-async def clear_humanize_user_override(
-    user_key: str = Query(..., min_length=1, max_length=200, description="要清除覆盖的用户键（数字 user_id 或完整会话键）"),
-    _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
-    db: AsyncSession = Depends(get_db),
-):
-    """清除某用户的拟人度覆盖（回落全局默认）。
-
-    ``status="noop"`` 表示该用户本来就没有覆盖行（幂等）。
-    NEW-12：``user_key`` 支持数字 user_id（经绑定还原，不猜键）。
-    """
-    from utils.humanize_config import clear_humanize_override
-
-    target_key = await _resolve_admin_target_key(str(user_key), db)
-    cleared = clear_humanize_override(target_key)
-    return {
-        "status": "ok" if cleared else "noop",
-        "config": _humanize_payload(),
-        "scope": "global",
-        "user_key": "",
-    }
-
-
-# ═══════════════════════════════════════════════════════
-# 用户自助拟人节奏（NEW-34，2026-10-29 用户主权裁决 D20-⑤）
-# 「用户需要能够自己进行设置，而不是全站统一」——复用 user_humanize
-# 按用户作用域机制（与 admin 覆盖同一张表、同一套字段校验），键从
-# **token 派生**（服务端还原绑定，绝不接受客户端自报归属）。
-# ═══════════════════════════════════════════════════════
-
-
-@router.get("/api/user/humanize", response_model=HumanizeConfigResponse)
-async def get_my_humanize(
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """读当前用户的合并生效视图（覆盖 → 全局 → 默认）。未绑定微信 → 全局视图。"""
-    user_key = await _user_session_key_for(int(user_id), db)
-    # scope 语义 = 是否存在本人覆盖行（「个人覆盖/跟随全局」徽标真源）；
-    # 已绑定但无覆盖 → 仍是全局视图（user_key 字段供前端判绑定态）。
-    from utils.humanize_config import has_user_override
-
-    return {
-        "status": "ok",
-        "config": _humanize_payload(user_key),
-        "scope": "user" if (user_key and has_user_override(user_key)) else "global",
-        "user_key": user_key or "",
-    }
-
-
-@router.post("/api/user/humanize", response_model=HumanizeConfigResponse)
-@router.put("/api/user/humanize", response_model=HumanizeConfigResponse)
-async def save_my_humanize(
-    req: HumanizeConfigRequest,
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """写当前用户自己的拟人度覆盖行（partial merge；字段校验同 admin 面）。
-
-    🔴 安全语义：``req.user_key`` 一律**忽略**——作用域键只从 token 派生，
-    用户不能借该端点改别人的节奏。未绑定微信 → 400（宁拒绝不猜键）。
-    """
-    from utils.humanize_config import write_humanize
-
-    target_key = await _user_session_key_for(int(user_id), db)
-    if not target_key:
-        raise HTTPException(
-            400,
-            "当前账号未绑定微信通道，个人拟人节奏暂不可用（宁拒绝不猜键）",
-        )
-    payload = req.model_dump(exclude_none=True)
-    payload.pop("user_key", None)  # 自助端点忽略客户端归属
     if payload:
         try:
-            write_humanize(user_key=target_key, **payload)
+            write_humanize(**payload)
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
-        logger.info("用户拟人节奏自助更新: user=%s key=%s: %s", user_id, target_key, payload)
-    return {
-        "status": "ok",
-        "config": _humanize_payload(target_key),
-        "scope": "user",
-        "user_key": target_key,
-    }
-
-
-@router.delete("/api/user/humanize", response_model=HumanizeConfigResponse)
-async def clear_my_humanize(
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """清除自己的拟人度覆盖（回落全局默认；幂等 noop）。"""
-    from utils.humanize_config import clear_humanize_override
-
-    target_key = await _user_session_key_for(int(user_id), db)
-    if not target_key:
-        raise HTTPException(400, "当前账号未绑定微信通道，无个人覆盖可清除")
-    cleared = clear_humanize_override(target_key)
-    return {
-        "status": "ok" if cleared else "noop",
-        "config": _humanize_payload(),
-        "scope": "global",
-        "user_key": "",
-    }
-
-
-# ═══════════════════════════════════════════════════════
-# 用户自助主动调度（D20，2026-10-30 用户主权裁决）
-# 「用户需要能够自己进行设置，而不是全站统一」——复用
-# `utils.proactive_config` 的 per-user 覆盖机制（与 admin 的全局真源
-# `data/scheduler_config.json` 同一套键位/同一份默认值），键从 **token 派生**
-# （服务端还原绑定，绝不接受客户端自报归属）。
-#
-# 与 admin 面的分工（**双分支，不在门内加判断**）：
-#   · `/api/proactive/{config,state,pause,send,history}` —— `require_role("admin")`
-#     原样保留（SEC-P0 已把那三条 GET 钉为读面闸），语义仍是**全局默认值**；
-#   · `/api/user/proactive*` —— 本段四条，只影响调用者自己的那个会话键。
-# 所以「用户自助」不会削弱任何既有 admin 闸，也不会给 admin 面加 if。
-# ═══════════════════════════════════════════════════════
-
-
-def _hub_global_engine_values() -> dict:
-    """四个引擎级键的**全局**真值：持久文件 > hub 记账 > 部署默认。
-
-    ⚠️ 不用 ``ASEHub.get_runtime_config()``：那是首引擎视图，会被 A 的
-    per-user 值污染（见 ``get_proactive_config`` 的注释）。
-
-    ⚠️ 也不用「replay 优先」：4 worker 下只有接到 admin POST 的那个 worker
-    有最新 ``_replay``，其余 worker 的 replay 是**旧值**；持久文件
-    （``scheduler_config.json`` 的 ``proactive_runtime``）才是跨 worker 真源，
-    由 ``utils.proactive_config.global_engine_values`` 逐键压过 replay
-    （2026-10-30 二轮复核：文件 6.25 + 旧 replay 5.5 必须读 6.25）。
-    """
-    from utils.proactive_config import global_engine_values
-
-    replay = None
-    try:
-        ase = getattr(deps.orch, "_ase", None) if deps.orch else None
-        replay = (getattr(ase, "_replay", None) or {}).get("runtime_config")
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("读取 hub 全局运行时记账失败（用部署默认）: %s", exc)
-        replay = None
-    return global_engine_values(replay)
-
-
-def _proactive_config_payload(user_key: str | None) -> dict:
-    """响应体 —— 生效值 / 全局默认 / 覆盖键（真源热读，不做进程缓存）。
-
-    ``global_default`` 的四个引擎键取**全局面**（hub ``_replay`` > 部署默认）：
-    否则用户看到的是 ``config/system.yaml`` 的静态值，而 admin 明明已经保存过
-    别的全局值（2026-10-30 复核 medium）。用户覆盖了某键时 ``effective`` 仍
-    显示该用户值，只有未覆盖的引擎键才会被全局值顶上来。
-    """
-    from utils.proactive_config import ENGINE_KEYS, FIELDS_ALL, effective
-
-    cfg = effective(user_key)
-    engine_global = _hub_global_engine_values()
-    global_default = {key: cfg.global_values[key] for key in FIELDS_ALL}
-    effective_values = cfg.as_dict()
-    for key in ENGINE_KEYS:
-        global_default[key] = engine_global[key]
-        if key not in cfg.overridden_keys:
-            effective_values[key] = engine_global[key]
-    return {
-        "effective": effective_values,
-        "global_default": global_default,
-        "overridden_keys": sorted(cfg.overridden_keys),
-        "scope": "user" if cfg.overridden_keys else "global",
-        "user_key_present": bool(user_key),
-    }
-
-
-class UserProactiveConfigRequest(BaseModel):
-    """本人主动调度节奏的 partial merge 入参（只改传入键）。
-
-    ``user_key`` 字段**只用于显式忽略**：客户端自报归属一律丢弃，作用域键
-    服务端从 token 派生（与 ``/api/user/humanize`` 同一条纪律）。留成字段而不是
-    静默丢弃，是为了让「传了也不生效」可被测试断言。
-    """
-
-    enabled: bool | None = Field(default=None, description="是否接收主动消息（本人）")
-    paused: bool | None = Field(default=None, description="暂停本人的主动消息")
-    quiet_hours_start: int | None = Field(
-        default=None, ge=0, le=23, description="本人免打扰开始小时（0-23）",
-    )
-    quiet_hours_end: int | None = Field(
-        default=None, ge=0, le=23, description="本人免打扰结束小时（0-23）",
-    )
-    threshold: float | None = Field(
-        default=None, ge=0.0, le=20.0, description="紧迫度阈值（引擎级）",
-    )
-    max_daily_messages: int | None = Field(
-        default=None, ge=1, le=200, description="本人每日主动上限",
-    )
-    min_interval_minutes: int | None = Field(
-        default=None, ge=0, le=1440, description="两次主动最小间隔（分钟）",
-    )
-    cooldown_after_reply_minutes: int | None = Field(
-        default=None, ge=0, le=1440, description="自己发言后的冷却（分钟）",
-    )
-    user_key: str | None = Field(
-        default=None,
-        max_length=200,
-        description="⚠️ 忽略：归属键只从 token 派生（自助端点不接受客户端自报归属）",
-    )
-
-
-class UserProactivePauseRequest(BaseModel):
-    paused: bool
-
-
-@router.get("/api/user/proactive-config")
-async def get_my_proactive_config(
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """读取**本人**生效的主动调度配置 + 全局默认值（供前端展示「继承/覆盖」）。
-
-    未绑定微信 → **400**（与写面同一口径：宁拒绝不猜键）。域规格明令四条自助
-    端点「未绑定微信 → 400」，读面无副作用不构成放宽理由 —— 猜一个键去读别人
-    的覆盖比拒绝更危险，而 `user_key_present` 只是回执字段，不承担「无键可读」
-    的语义。
-    """
-    user_key = await _user_session_key_for(int(user_id), db)
-    if not user_key:
-        raise HTTPException(
-            400,
-            "当前账号未绑定微信通道，个人主动消息设置暂不可用（宁拒绝不猜键）",
-        )
-    return {"status": "ok", **_proactive_config_payload(user_key)}
-
-
-@router.post("/api/user/proactive-config")
-async def save_my_proactive_config(
-    req: UserProactiveConfigRequest,
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """写**本人**的主动调度覆盖（partial merge；字段校验同字段表）。
-
-    🔴 安全语义：``req.user_key`` 一律**忽略**——作用域键只从 token 派生，
-    用户不能借该端点改别人的节奏；未绑定微信 → 400（宁拒绝不猜键）。
-    admin 的全局默认值（``/api/proactive/config``）**不受影响**：本端点只写
-    ``user_proactive_config`` 覆盖行，从不触碰全局文件/引擎广播。
-    """
-    from utils.proactive_config import write_proactive_config
-
-    target_key = await _user_session_key_for(int(user_id), db)
-    if not target_key:
-        raise HTTPException(
-            400,
-            "当前账号未绑定微信通道，个人主动消息设置暂不可用（宁拒绝不猜键）",
-        )
-    payload = req.model_dump(exclude_none=True)
-    payload.pop("user_key", None)  # 自助端点忽略客户端归属
-    if payload:
-        try:
-            write_proactive_config(user_key=target_key, **payload)
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from None
-        logger.info("用户主动调度自助更新: user=%s key=%s: %s", user_id, target_key, payload)
-    return {
-        "status": "ok",
-        **_proactive_config_payload(target_key),
-        "user_key": target_key,
-    }
-
-
-@router.post("/api/user/proactive/pause")
-async def pause_my_proactive(
-    req: UserProactivePauseRequest,
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """暂停/恢复**本人**的主动消息（只切 ``paused``，不动其他键与全局开关）。
-
-    调度器在该会话的决策点读到 ``paused=true`` 即「生成前」短路并落账本
-    reason=``paused`` —— 其他用户的会话完全不受影响（per-user 生效）。
-    """
-    from utils.proactive_config import write_proactive_config
-
-    target_key = await _user_session_key_for(int(user_id), db)
-    if not target_key:
-        raise HTTPException(400, "当前账号未绑定微信通道，无法暂停个人主动消息")
-    try:
-        write_proactive_config(user_key=target_key, paused=bool(req.paused))
-    except ValueError as e:  # pragma: no cover - bool 入参不会触发，保守兜底
-        raise HTTPException(400, str(e)) from None
-    logger.info("用户主动消息暂停自助切换: user=%s paused=%s", user_id, req.paused)
-    return {
-        "status": "ok",
-        "paused": bool(req.paused),
-        **_proactive_config_payload(target_key),
-        "user_key": target_key,
-    }
-
-
-@router.delete("/api/user/proactive-config")
-async def clear_my_proactive_config(
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-):
-    """清除本人的主动调度覆盖（回落全局默认；幂等 noop）。
-
-    🔴 引擎级键**不能只删行**：`utils.proactive_config.clear_override` 会留
-    墓碑行，本端点再调 `scheduler.reconcile_user_engine` 做一次即时回滚
-    （跨 worker 的最终一致性由 master 下一拍读墓碑保证）。写/清失败一律
-    **500**，绝不回 ``noop`` 冒充成功。
-    """
-    import sqlite3
-
-    from utils.proactive_config import clear_override
-
-    target_key = await _user_session_key_for(int(user_id), db)
-    if not target_key:
-        raise HTTPException(400, "当前账号未绑定微信通道，无个人覆盖可清除")
-    try:
-        cleared = clear_override(target_key)
-    except (sqlite3.Error, OSError, ValueError) as exc:
-        logger.warning("清除个人主动调度覆盖失败 user=%s: %s", user_id, exc)
-        raise HTTPException(500, f"proactive_config 清除失败: {exc}") from exc
-    # 即时回滚（本 worker 若持有该用户的引擎）：无引擎/无 hub 时静默跳过，
-    # 由 master 的下一拍按墓碑行完成回滚。
-    scheduler = _scheduler_or_none()
-    if scheduler is not None and hasattr(scheduler, "reconcile_user_engine"):
-        try:
-            scheduler.reconcile_user_engine(target_key)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("个人主动调度引擎回滚失败（留待下一拍） user=%s: %s", user_id, exc)
-    return {
-        "status": "ok" if cleared else "noop",
-        # 🔴 2026-10-31 R1-5：必须用**实际** target_key 计算 payload。旧实现传
-        # None → user_key_present=False；已绑定用户点「恢复继承全局」后前端
-        # 会误判「账号未绑定微信」并弹假横幅（一次往返后才自愈）。
-        **_proactive_config_payload(target_key),
-        "user_key": target_key,
-    }
+        logger.info("全局拟人度配置已更新: %s", payload)
+    return {"status": "ok", "config": _humanize_payload(), "scope": "global"}
 
 
 class KnowledgeCollectConfigRequest(BaseModel):

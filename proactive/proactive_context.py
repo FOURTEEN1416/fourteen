@@ -21,7 +21,9 @@ _MES_EXAMPLE_MAX_CHARS = 600
 _CREATOR_NOTES_MAX_CHARS = 400
 
 
-def _strip_stage_directions_if_immersive(text: str, user_key: str | None = None) -> str:
+def _strip_stage_directions_if_immersive(
+    text: str, user_key: str | None = None, character_id: str | None = None,
+) -> str:
     """沉浸式下剥掉括号/星号动作段；小说式原样返回。
 
     2026-10-21 FIX-2：角色卡里 mes_example/creator_notes/description 等字段
@@ -44,9 +46,10 @@ def _strip_stage_directions_if_immersive(text: str, user_key: str | None = None)
             strip_stage_directions,
         )
 
-        # 2026-10-21 R7：主动线也按**该会话**的模式（有覆盖用覆盖，否则全局）。
-        # user_key 为空（无会话上下文的后台调用）→ 回落全局默认，旧行为不变。
-        if read_reply_mode(user_key) != REPLY_MODE_IMMERSIVE:
+        # 2026-10-21 R7 / D-C 2026-11-08：主动线也按「会话 × 角色」快照的模式
+        # 解析（快照优先，未设置回落全局）。两者任一为空（无会话/角色上下文的
+        # 后台调用）→ 回落全局默认，旧行为不变。
+        if read_reply_mode(user_key, character_id) != REPLY_MODE_IMMERSIVE:
             return raw
         return strip_stage_directions(raw)
     except Exception as e:  # noqa: BLE001
@@ -75,14 +78,14 @@ def load_full_persona_hint(character_id: str, user_key: str | None = None) -> st
         from utils.project_paths import project_path
 
         if cid in ("default", "demo"):
-            return _persona_from_yaml(project_path("config", "persona.yaml"), user_key)
+            return _persona_from_yaml(project_path("config", "persona.yaml"), user_key, cid)
         return _persona_from_card(project_path("config", "characters"), cid, user_key)
     except Exception as e:  # noqa: BLE001
         logger.debug("load_full_persona_hint failed cid=%s: %s", cid, e)
         return ""
 
 
-def _persona_from_yaml(path, user_key: str | None = None) -> str:
+def _persona_from_yaml(path, user_key: str | None = None, character_id: str = "default") -> str:
     """内置十四（persona.yaml）：description 全量 + 通用禁令小节。"""
     from pathlib import Path
 
@@ -97,7 +100,7 @@ def _persona_from_yaml(path, user_key: str | None = None) -> str:
     name = str(data.get("name") or "").strip() or "十四"
     # 2026-10-21 FIX-2：沉浸式下先剥括号动作再拼段（剥空则不注入该段）。
     desc = _strip_stage_directions_if_immersive(
-        str(data.get("description") or "").strip(), user_key
+        str(data.get("description") or "").strip(), user_key, character_id
     )
     notes = str(data.get("creator_notes") or "")
     segments = [f"角色：{name}"]
@@ -107,7 +110,9 @@ def _persona_from_yaml(path, user_key: str | None = None) -> str:
     # 只服务主链被直球拷问的场景，主动消息用不上（跳过它前面的全部内容）
     idx = notes.find("## 通用禁令")
     if idx >= 0:
-        bans = _strip_stage_directions_if_immersive(notes[idx:].strip(), user_key)
+        bans = _strip_stage_directions_if_immersive(
+            notes[idx:].strip(), user_key, character_id
+        )
         if bans:
             segments.append(bans)
     hint = "\n\n".join(s for s in segments if s).strip()
@@ -154,12 +159,12 @@ def _persona_from_card(root, cid: str, user_key: str | None = None) -> str:
     if style:
         segments.append(f"【说话风格】\n{style}")
     mes = _strip_stage_directions_if_immersive(
-        str(d.get("mes_example") or "").strip(), user_key
+        str(d.get("mes_example") or "").strip(), user_key, cid
     )
     if mes:
         segments.append(f"【回复示例】\n{mes[:_MES_EXAMPLE_MAX_CHARS]}")
     notes = _strip_stage_directions_if_immersive(
-        str(d.get("creator_notes") or "").strip(), user_key
+        str(d.get("creator_notes") or "").strip(), user_key, cid
     )
     if notes:
         segments.append(f"【扮演规则】\n{notes[:_CREATOR_NOTES_MAX_CHARS]}")
@@ -167,7 +172,9 @@ def _persona_from_card(root, cid: str, user_key: str | None = None) -> str:
     return hint[:_PERSONA_HINT_MAX_CHARS]
 
 
-def immersive_proactive_constraints(user_key: str | None = None) -> str:
+def immersive_proactive_constraints(
+    user_key: str | None = None, character_id: str | None = None,
+) -> str:
     """按当前回复模式渲染主动消息约束段（决策/生成两线共用）。
 
     主链 ``utils.reply_mode`` 已有沉浸式/小说式双模式指令，但主动两条线从未
@@ -178,8 +185,8 @@ def immersive_proactive_constraints(user_key: str | None = None) -> str:
     try:
         from utils.reply_mode import REPLY_MODE_NOVEL, read_reply_mode
 
-        # 2026-10-21 R7：跟随该会话的模式（主动链也有明确会话归属）
-        if read_reply_mode(user_key) == REPLY_MODE_NOVEL:
+        # 2026-10-21 R7 / D-C 2026-11-08：「会话 × 角色」快照优先，未设置回落全局
+        if read_reply_mode(user_key, character_id) == REPLY_MODE_NOVEL:
             return _NOVEL_CONSTRAINTS
         return _IMMERSIVE_CONSTRAINTS
     except Exception as e:  # noqa: BLE001

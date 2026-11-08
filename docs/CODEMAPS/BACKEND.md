@@ -33,9 +33,10 @@ api/ (51 py 文件)            ← FastAPI 路由层
 ├── session_manager.py      ← 会话管理
 ├── state/                  ← safety_log / tool_history / training_state
 │
-└── routers/                ← 路由模块 (26 个，不含 __init__.py)
-    ├── character_routes.py   (21 endpoints，tag=character)
-    ├── training_routes.py    (23，training/* 5 + proactive/* 6（state/config×2/pause/send/history，config 含 reply_mode 与 dice_gate 块 4C）+ knowledge/collect-config×2 + /api/user/reply-mode GET/POST R7 + /api/humanize/config 4 v1.57 + **/api/user/humanize GET/POST/PUT/DELETE 批5**)
+└── routers/                ← 路由模块 (27 个，不含 __init__.py)
+    ├── character_routes.py   (22 endpoints，tag=character；含 POST /api/characters/deactivate)
+    ├── training_routes.py    (19，training/* 5 + proactive/* 6（state/config×2/pause/send/history，config 含 reply_mode 全局默认与 dice_gate 块 4C）+ humanize/config 3（GET/POST/PUT）+ knowledge/collect-config×2 + user/proactive/history + user/self-profile×2；**2026-11-08 退役 11 条**：user/reply-mode×2 + user/humanize×4 + humanize/config DELETE + user/proactive-config×3 + user/proactive/pause)
+    ├── character_settings_routes.py (3，GET/PUT/DELETE /api/characters/{id}/my-settings——「用户 × 角色」全量快照，2026-11-08 新增)
     ├── misc_routes.py        (17，stats/dashboard/meta + diary seed/diary/facts + important-dates×2 + logs×2 + config×2 + user/llm-config×2 + **llm-config/test 批5** + channels + routes)
     ├── auth_routes.py        (13，register/login/refresh/logout/me/change-password/admin reset + consent 状态机 + W9 自服务 consent/status|withdraw、account/delete|export(+chats))
     ├── safety_routes.py      (12，safety/rag/voice/files/cache)
@@ -73,12 +74,13 @@ api/ (51 py 文件)            ← FastAPI 路由层
 
 ---
 
-## API 端点清单（模块级，2026-10-30 内省亲测 249——按 handler 所属文件）
+## API 端点清单（模块级，2026-11-08 内省亲测 249——按 handler 所属文件）
 
 | 模块文件 | 端点数 | 路径 |
 |------|------|------|
-| character_routes | 21 | /api/characters/*, /api/presets/*（含 .png 导入/导出） |
-| training_routes | 23 | /api/training/* 5, /api/proactive/* 6（config 含 reply_mode 与 **dice_gate 块（4C 骰子闸）**、send/pause/history）+ /api/knowledge/collect-config×2 + /api/user/reply-mode GET/POST（R7）+ /api/humanize/config 4（v1.57）+ **/api/user/humanize GET/POST/PUT/DELETE（批5 自助端点）** |
+| character_routes | 22 | /api/characters/*, /api/presets/*（含 .png 导入/导出；v1.63 +`POST /api/characters/deactivate`） |
+| training_routes | 19 | /api/training/* 5 + /api/proactive/* 6（state/config GET+POST/pause/send/history；config 含 reply_mode 全局默认与 **dice_gate 块（4C 骰子闸）**）+ /api/humanize/config 3（GET/POST/PUT，全局默认唯一写面）+ /api/knowledge/collect-config×2 + **/api/user/proactive/history（只读）** + **/api/user/self-profile GET/PUT**。**2026-11-08 退役 11 条**：`/api/user/reply-mode` ×2、`/api/user/humanize` ×4、`DELETE /api/humanize/config`、`/api/user/proactive-config` ×3、`/api/user/proactive/pause`；替代 owner = `character_settings_routes`（见下） |
+| **character_settings_routes（2026-11-08 新增）** | **3** | /api/characters/{id}/my-settings GET/PUT/DELETE——「用户 × 角色」全量快照（`user_character_settings`），回复模式 / 拟人节奏 / 主动调度的唯一用户可写真源 |
 | misc_routes | 17 | /api/stats, /api/stats/dashboard, /api/meta, /api/memory/diary*（seed/diary）, /api/characters/{id}/important-dates×2, /api/memory/facts, /api/logs*, /api/config×2, /api/user/llm-config×2, **/api/user/llm-config/test（批5 BYOK 反馈环）**, /api/channels, /api/routes |
 | auth_routes | 13 | /api/auth/*：register/login/refresh/logout/me/change-password/admin reset + consent(AGREEMENT_VERSION) + W9 自服务 consent/status、consent/withdraw、account/delete、account/export、account/export/chats |
 | safety_routes | 12 | /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/* |
@@ -114,7 +116,7 @@ api/ (51 py 文件)            ← FastAPI 路由层
 | shisi/api/stats_routes | 1 | /api/shisi/stats |
 | app_factory（直挂） | 1 | /api/shisi/status（shisi 域合计 31 = 30 路由 + 本端点） |
 | qrcode_store | 1 | /api/wechat/qrcode |
-| **合计** | **249** | **118 GET / 90 POST / 18 PUT / 23 DELETE**（205 唯一路径；`len(app.routes)`=253 含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`，2026-10-30 内省亲测） |
+| **合计** | **249** | **119 GET / 89 POST / 19 PUT / 22 DELETE**（207 唯一路径；`len(app.routes)`=253 含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`，2026-11-08 内省亲测） |
 
 ---
 

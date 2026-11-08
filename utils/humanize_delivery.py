@@ -9,8 +9,9 @@
 会二次导入 main 模块）。故把本链下沉到本模块 —— 只依赖
 `utils.humanize_config` 与连接器对象的鸭子类型，两个投递点共用同一实现；
 `main` 侧再从本模块转出既有公共名（`main.humanize_proactive_split_enabled` /
-`main.send_proactive_segmented` / `main.direct_send_proactive`），run_api 与
-既有测试的消费面不变。
+`main.send_proactive_segmented` / `main.direct_send_proactive` /
+`main.proactive_split_enabled`——2026-11-08 新增，投递失败归因闸，按
+「用户 × 角色」作用域判定主动拆条开关），run_api 与既有测试的消费面不变。
 
 配置真源 = `data/scheduler_config.json` 的 `humanize.proactive_split`（跨 worker
 热读，无进程内缓存；读侧归 `utils.humanize_config`）。默认 `False` ⇒ 主动投递
@@ -27,11 +28,18 @@ logger = logging.getLogger("humanize_delivery")
 _READ_WARNED = False
 
 
-def humanize_proactive_split_enabled() -> bool:
+def humanize_proactive_split_enabled(
+    user_key: str | None = None, character_id: str | None = None,
+) -> bool:
     """热读拟人度配置：主动消息是否走「拆条 + 段间节奏」。
 
-    每次调用直读配置文件（**无进程内缓存**）——多 worker 改配置即时一致，
-    与 `utils.reply_mode.read_reply_mode` 同源哲学。
+    每次调用直读配置文件/角色快照（**无进程内缓存**）——多 worker 改配置即时
+    一致，与 `utils.reply_mode.read_reply_mode` 同源哲学。
+
+    ``user_key`` + ``character_id`` 同时给出时按「用户 × 角色」快照读取
+    （2026-11-08 D-A：per-user 覆盖层退役后，用户自己的「主动拆条」开关只
+    存在于角色设置快照里）；缺任一 → 只读全局块（机器面/无角色上下文）。
+
     任何读取异常（模块缺席/文件缺失/字段越界）一律回落 False，即回落到
     「整段直发」的现行为：**绝不因配置不可读把主动消息判成投递失败**。
     """
@@ -39,7 +47,11 @@ def humanize_proactive_split_enabled() -> bool:
     try:
         from utils import humanize_config
 
-        cfg = humanize_config.read_humanize()
+        # 无角色上下文时**不带参**调用（机器面/控制台读全局块的既有契约）
+        if user_key and character_id:
+            cfg = humanize_config.read_humanize(user_key, character_id)
+        else:
+            cfg = humanize_config.read_humanize()
     except Exception:  # noqa: BLE001
         if not _READ_WARNED:
             _READ_WARNED = True
@@ -52,6 +64,36 @@ def humanize_proactive_split_enabled() -> bool:
         else getattr(cfg, "proactive_split", None)
     )
     return bool(value)
+
+
+def _scope_from(connector: Any, peer: str) -> tuple[str | None, str | None]:
+    """从连接器取该 peer 的拟人度作用域（`humanize_scope` 鸭子类型）。
+
+    连接器是唯一知道「会话键 + 当前角色」的对象（角色解析 owner 见
+    `utils.character_resolver`）；取不到就返回 `(None, None)`，调用方按
+    全局块读取（机器面/测试替身场景，零行为变更）。
+    """
+    scope = getattr(connector, "humanize_scope", None)
+    if not callable(scope):
+        return (None, None)
+    try:
+        user_key, character_id = scope(peer)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("拟人度作用域解析失败，按全局读取: %s", exc)
+        return (None, None)
+    return (str(user_key or "") or None, str(character_id or "") or None)
+
+
+def proactive_split_enabled(connector: Any, peer: str) -> bool:
+    """该 peer 的「主动拆条」是否开启（按连接器解析出的「用户 × 角色」作用域）。
+
+    与 `direct_send_proactive` 共用同一判据：投递失败归因（`main.py` 的
+    wechat 通道发送器区分「未完整受理」与「整段直发被拒」）必须读同一份
+    作用域开关，否则「按角色开了主动拆条、全局关」时会把「未完整受理」
+    误报成「微信定向投递失败」（两者都 raise RuntimeError，只错在语义）。
+    """
+    user_key, character_id = _scope_from(connector, peer)
+    return humanize_proactive_split_enabled(user_key, character_id)
 
 
 def segment_sender(connector: Any):
@@ -106,8 +148,11 @@ def direct_send_proactive(connector: Any, peer: str, msg: str) -> bool:
     拟人度关闭（默认）⇒ 逐字走 `connector.send_text`（整段直发，零行为变更）；
     开启且连接器支持拆条 ⇒ 走「拆条 + 段间节奏」链；开启但连接器无拆条实现
     ⇒ 回落 `send_text`（不误报失败）。
+
+    2026-11-08 D-A：「主动拆条」开关按 `connector.humanize_scope(peer)`
+    解析的「用户 × 角色」快照读取；连接器不提供作用域时回落全局块。
     """
-    if humanize_proactive_split_enabled():
+    if proactive_split_enabled(connector, peer):
         accepted = send_proactive_segmented(connector, peer, msg)
         if accepted is not None:
             return accepted

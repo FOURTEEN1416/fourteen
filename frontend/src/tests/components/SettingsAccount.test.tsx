@@ -20,12 +20,7 @@ import { AGREEMENT_VERSION } from '../../constants/agreement'
 const {
   mockGetConsentStatus, mockWithdrawConsent, mockConsent,
   mockDeleteAccount, mockExportManifest, mockExportAllChats,
-  mockDownloadJson, mockDatedFilename, mockLogout, mockNavigate,
-  mockGetMyReplyMode,
-  mockSetMyReplyMode,
-  mockGetMyHumanize,
-  mockSaveMyHumanize,
-  mockClearMyHumanize} = vi.hoisted(() => ({
+  mockDownloadJson, mockDatedFilename, mockLogout, mockNavigate} = vi.hoisted(() => ({
   mockGetConsentStatus: vi.fn(),
   mockWithdrawConsent: vi.fn(),
   mockConsent: vi.fn(),
@@ -36,11 +31,6 @@ const {
   mockDatedFilename: vi.fn((prefix: string, ext: string) => `${prefix}-2026-09-28.${ext}`),
   mockLogout: vi.fn(async () => undefined),
   mockNavigate: vi.fn(),
-  mockGetMyReplyMode: vi.fn(),
-  mockSetMyReplyMode: vi.fn(),
-  mockGetMyHumanize: vi.fn(),
-  mockSaveMyHumanize: vi.fn(),
-  mockClearMyHumanize: vi.fn(),
 }))
 
 vi.mock('../../api/selfservice', () => ({
@@ -56,15 +46,6 @@ vi.mock('../../api/selfservice', () => ({
 
 vi.mock('../../api/auth', () => ({
   consent: (...a: unknown[]) => mockConsent(...a),
-}))
-
-vi.mock('../../api/system', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../api/system')>()),
-  getMyReplyMode: (...a: unknown[]) => mockGetMyReplyMode(...a),
-  setMyReplyMode: (...a: unknown[]) => mockSetMyReplyMode(...a),
-  getMyHumanize: (...a: unknown[]) => mockGetMyHumanize(...a),
-  saveMyHumanize: (...a: unknown[]) => mockSaveMyHumanize(...a),
-  clearMyHumanize: (...a: unknown[]) => mockClearMyHumanize(...a),
 }))
 
 vi.mock('../../utils/download', () => ({
@@ -107,13 +88,6 @@ beforeEach(() => {
   useErrorStore.setState({ toasts: [], lastError: null })
   mockGetConsentStatus.mockResolvedValue({ status: 'granted', agreement_version: AGREEMENT_VERSION })
   mockExportManifest.mockResolvedValue(MANIFEST)
-  // NEW-34：个人偏好区挂载即拉自助端点——全文件默认桩（各用例可覆盖）
-  mockGetMyReplyMode.mockResolvedValue({
-    data: { status: 'ok', reply_mode: 'immersive', source: 'global', user_key_present: true },
-  })
-  mockGetMyHumanize.mockResolvedValue({
-    data: { status: 'ok', config: { delay_mode: 'dynamic', per_char_ms: 45, fixed_ms: 600, proactive_split: false }, scope: 'global', user_key: '' },
-  })
 })
 
 describe('同意状态展示与撤回', () => {
@@ -262,63 +236,30 @@ describe('注销账号', () => {
   })
 })
 
+// ── D-A（2026-11-08 用户裁决）：账号页不再承载「个人偏好」区 ──
+// 回复模式与拟人节奏属「用户 × 角色」体验参数，已划归角色设置页的
+// 「我 × 角色」面板（CharacterSettingsPanel / my-settings 端点）。
+// 本组用例锁住「整块已从账号页消失」，防止旧入口被复活。
+describe('SettingsAccount 不再有个人偏好区（D-A）', () => {
+  it('不渲染个人偏好标题、回复模式控件与「保存个人节奏」按钮', async () => {
+    mount()
 
-// ── NEW-34（2026-10-29）：个人偏好自助区——回复模式 + 拟人节奏 ──
-describe('SettingsAccount 个人偏好（NEW-34）', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockGetConsentStatus.mockResolvedValue({ status: 'granted', agreement_version: AGREEMENT_VERSION })
-    mockGetMyReplyMode.mockResolvedValue({
-      data: { status: 'ok', reply_mode: 'immersive', source: 'global', user_key_present: true },
-    })
-    mockGetMyHumanize.mockResolvedValue({
-      data: { status: 'ok', config: { delay_mode: 'dynamic', per_char_ms: 45, fixed_ms: 600, proactive_split: false }, scope: 'global', user_key: '2:wx' },
-    })
+    // 页面主体先渲染出来（协议区在），再断言偏好区缺席
+    expect(await screen.findByText(/协议与同意/)).toBeInTheDocument()
+    expect(screen.queryByText('个人偏好')).toBeNull()
+    expect(screen.queryByText('沉浸式（真人聊天）')).toBeNull()
+    expect(screen.queryByText('小说式（带动作神态）')).toBeNull()
+    expect(screen.queryByText('保存个人节奏')).toBeNull()
+    expect(screen.queryByText('跟随全局默认')).toBeNull()
+    expect(screen.queryByText('个人覆盖')).toBeNull()
   })
 
-  it('渲染回复模式与拟人节奏（含作用域徽标「跟随全局默认」）', async () => {
-    render(<SettingsAccount />)
-    expect(await screen.findByText('个人偏好')).toBeDefined()
-    expect(await screen.findByText('沉浸式（真人聊天）')).toBeDefined()
-    expect(screen.getAllByText('跟随全局默认').length).toBeGreaterThan(0)
-  })
+  it('三块保留面仍在：协议与同意 / 我的数据 / 注销账号', async () => {
+    mount()
 
-  it('切换回复模式调用自助端点并给成功提示', async () => {
-    mockSetMyReplyMode.mockResolvedValue({ data: { status: 'ok', reply_mode: 'novel', scope: 'user' } })
-    render(<SettingsAccount />)
-    fireEvent.click(await screen.findByText('小说式（带动作神态）'))
-    await waitFor(() => expect(mockSetMyReplyMode).toHaveBeenCalledWith('novel'))
-    // 作用域徽标翻为「个人覆盖」（toast 容器不在测试 DOM，不.assert 文案）
-    await waitFor(() => {
-      expect(screen.getAllByText('个人覆盖').length).toBeGreaterThan(0)
-    })
-  })
-
-  it('保存个人节奏调用 /user/humanize 并翻「个人覆盖」徽标', async () => {
-    mockSaveMyHumanize.mockResolvedValue({ data: { status: 'ok', scope: 'user' } })
-    render(<SettingsAccount />)
-    fireEvent.click(await screen.findByText('保存个人节奏'))
-    await waitFor(() => expect(mockSaveMyHumanize).toHaveBeenCalled())
-    await waitFor(() => {
-      // 拟人节奏徽标翻「个人覆盖」
-      expect(screen.getAllByText('个人覆盖').length).toBeGreaterThan(0)
-    })
-  })
-
-  it('拟人节奏加载失败：错误态 + 重试，绝不拿硬编码默认值冒充现状（P11）', async () => {
-    mockGetMyHumanize.mockRejectedValue({ response: { data: { detail: '后端不可用' } } })
-    render(<SettingsAccount />)
-    // 错误文案落到页面
-    expect(await screen.findByText(/后端不可用|加载失败/)).toBeDefined()
-    // 表单不渲染：没有「保存个人节奏」按钮，也没有假的「每字 45」
-    expect(screen.queryByText('保存个人节奏')).not.toBeInTheDocument()
-    expect(screen.queryByText(/每字/)).not.toBeInTheDocument()
-    // 重试入口可用
-    const retry = screen.getByRole('button', { name: '重试' })
-    mockGetMyHumanize.mockResolvedValue({
-      data: { status: 'ok', config: { delay_mode: 'dynamic', per_char_ms: 45, fixed_ms: 600, proactive_split: false }, scope: 'global', user_key: '2:wx' },
-    })
-    fireEvent.click(retry)
-    expect(await screen.findByText('保存个人节奏')).toBeInTheDocument()
+    expect(await screen.findByText(/协议与同意/)).toBeInTheDocument()
+    expect(await screen.findByText('我的数据')).toBeInTheDocument()
+    // 「注销账号」在标题与按钮上各出现一次 → 按标题定位
+    expect(await screen.findByRole('heading', { name: '注销账号' })).toBeInTheDocument()
   })
 })

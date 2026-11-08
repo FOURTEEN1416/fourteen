@@ -202,9 +202,12 @@ class _StreamPipelineMixin:
 
         return {
             "character_name": character_name,
-            # 2026-10-21 R7：优先用本轮已解析的模式（`ctx` 透传），不再二次热读
+            # 2026-10-21 R7 / D-C 2026-11-08：优先用本轮已解析的模式（`ctx` 透传），
+            # 不再二次热读；真热读时按「会话键 × 角色 id」的快照解析。
             "reply_mode": (
-                reply_mode if reply_mode in ("immersive", "novel") else read_reply_mode(session_id or None)
+                reply_mode
+                if reply_mode in ("immersive", "novel")
+                else read_reply_mode(session_id or None, character_id or None)
             ),
             "legal": legal,
             "forbidden": forbidden,

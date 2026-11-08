@@ -10,21 +10,22 @@
  *  ② 读失败不渲染默认假表单 —— 显式错误态 + 重试（照 MessageTab 的 W11-D5 写法）；
  *  ③ 保存以回执 `status === 'ok'` 判成功，成功才落 `savedAt`；
  *     dirty 时按钮显式标注「未保存」；
- *  ④ `max_segments` / 阅读延迟 / typing / 口误 / 按用户覆盖等所有可写字段
- *     都必须在前端有显式入口（Q6/Q2 裁决；「只做后端」= 半成品）。
+ *  ④ `max_segments` / 阅读延迟 / typing / 口误等所有可写字段都必须在前端有
+ *     显式入口（Q6/Q2 裁决；「只做后端」= 半成品）。
+ *     2026-11-08：per-user 覆盖层退役，本面板只剩**全局默认**写面；
+ *     用户自己的拟人节奏在「角色设置 → 说话节奏」（my-settings）。
  *
  * 关于「不延时」档位：`off` 即段间连发（无停顿），等价于把「段间停顿」这一拟人化
  * 特征关掉；`bracket_delay_ms = 0`（默认）让括号段覆盖分支保持惰性（零行为变更）。
  */
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import Section from './RoleSettingsSection'
 import Slider from '../shared/Slider'
 import Toggle from '../shared/Toggle'
 import { useAuthStore } from '../../store/authStore'
 import { humanizeIsDirty, useHumanizeStore } from '../../store/humanizeStore'
 import type { HumanizeConfig } from '../../store/humanizeStore'
-import { clearHumanizeUserOverride, humanizeGetConfig, updateHumanizeConfig } from '../../api/system'
-import { adminListUsers } from '../../api/admin'
+import { humanizeGetConfig, updateHumanizeConfig } from '../../api/system'
 import type { HumanizeDelayMode } from '../../api/system'
 
 //: 四档延时模式：标签与后端 utils/humanize_config.py::DELAY_MODE_LABELS 逐字对齐
@@ -82,20 +83,10 @@ export default function HumanizeSection() {
   const patch = useHumanizeStore((s) => s.patch)
   const save = useHumanizeStore((s) => s.save)
   const reset = useHumanizeStore((s) => s.reset)
-  // 作用域：空 = 全局默认；非空 = 该用户的合并视图（保存→只写该用户覆盖行）
-  const [scopeKey, setScopeKey] = useState('')
-  const activeScope = scopeKey.trim()
-  // NEW-12（2026-10-29）：选用户代替手输内部会话键（后端支持数字 user_id 还原）
-  const [adminUsers, setAdminUsers] = useState<Array<{ id: number; display_name?: string; username?: string; email?: string }>>([])
-
   useEffect(() => {
     // 非 admin 不打 admin-only 接口（后端 /api/humanize/config 一律 require_role admin）
     if (!isAdmin) return
     void load(humanizeGetConfig)
-    // NEW-12：用户下拉数据源（与 reply-mode 同一来源）
-    void adminListUsers(1, 100)
-      .then(res => setAdminUsers(res.users ?? []))
-      .catch(() => setAdminUsers([]))
   }, [isAdmin, load])
 
   // ── 门禁（照 MessageTab）────────────────────────────────
@@ -419,80 +410,6 @@ export default function HumanizeSection() {
             unit="%"
             onChange={(v) => patch({ typo_rate: v })}
           />
-
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm text-gray-700">按用户覆盖总开关</p>
-              <p className="text-[11px] text-gray-400 mt-0.5">
-                关闭后忽略所有用户的独立覆盖，统一回落全局默认（回滚开关）
-              </p>
-            </div>
-            <Toggle
-              checked={config.user_override_enabled}
-              onChange={(v) => patch({ user_override_enabled: v })}
-            />
-          </div>
-        </div>
-
-        {/* 按用户覆盖：加载该用户合并视图 / 保存只写该用户 / 清除覆盖 */}
-        <div className="pt-3 border-t border-gray-100 space-y-2" data-testid="humanize-user-scope">
-          <p className="text-sm text-gray-700">按用户覆盖</p>
-          <p className="text-[11px] text-gray-400">
-            留空 = 全局默认；选择用户可单独调节该用户节奏（会话键由后端按绑定自动还原，无需手输）
-          </p>
-          <div className="flex items-center gap-2">
-            <select
-              aria-label="选择用户"
-              value={/^\d+$/.test(activeScope) ? activeScope : ''}
-              onChange={(e) => setScopeKey(e.target.value === '' ? '' : e.target.value)}
-              className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50"
-            >
-              <option value="">选择用户…</option>
-              {adminUsers.map(u => (
-                <option key={u.id} value={u.id}>
-                  {u.display_name || u.username || u.email || `#${u.id}`}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => { void load(humanizeGetConfig, activeScope || undefined) }}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors"
-            >
-              加载该用户
-            </button>
-            <button
-              type="button"
-              disabled={!activeScope}
-              onClick={async () => {
-                if (!activeScope) return
-                try {
-                  await clearHumanizeUserOverride(activeScope)
-                } finally {
-                  await load(humanizeGetConfig, activeScope)
-                }
-              }}
-              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40"
-            >
-              清除覆盖
-            </button>
-          </div>
-          {/* 高级入口：手输完整会话键（脚本/无绑定用户场景；后端同一还原器兜底） */}
-          <details className="text-[11px] text-gray-400">
-            <summary className="cursor-pointer select-none hover:text-gray-500">高级：手输完整会话键</summary>
-            <input
-              type="text"
-              value={/^\d+$/.test(activeScope) ? '' : scopeKey}
-              onChange={(e) => setScopeKey(e.target.value)}
-              placeholder="2:wxid@im.wechat"
-              aria-label="用户会话键"
-              data-testid="humanize-user-key"
-              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-1.5 font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/50"
-            />
-          </details>
-          <p className="text-[11px] text-gray-400">
-            当前作用域：{activeScope ? `用户 ${activeScope}` : '全局默认'}
-          </p>
         </div>
 
         {/* 只读说明（无开关）：ask 里点名的「纯指令隐身」目前在链路上只有**一半**
@@ -523,11 +440,11 @@ export default function HumanizeSection() {
           </button>
           <button
             type="button"
-            onClick={() => { void save(updateHumanizeConfig, activeScope || undefined) }}
+            onClick={() => { void save(updateHumanizeConfig) }}
             disabled={saving || !dirty}
             className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-primary-500 hover:bg-primary-400 rounded-lg transition-colors shadow-sm disabled:opacity-50"
           >
-            {saving ? '保存中…' : savedAt && !dirty ? `已保存（${savedAt}）` : activeScope ? '保存为该用户覆盖' : '保存拟人度'}
+            {saving ? '保存中…' : savedAt && !dirty ? `已保存（${savedAt}）` : '保存拟人度'}
           </button>
         </div>
       </div>

@@ -602,6 +602,36 @@ class StructuredMemory:
             logger.debug("identity_keys 解析失败，按未关联处理: %s", e)
             return [key]
 
+    def identity_keys_by_prefix(self, prefix: str) -> list[str]:
+        """user_key **前缀** → 匹配键所归属身份组的全部成员键（并集，含自身）。
+
+        用途：手上只有注册用户 id、没有会话键时（`wechat_bindings` 直查为空），
+        先按 ``"{uid}:"`` 前缀找到该用户登记过的键，再沿 `identity_keys` 这条
+        单一真源展组——**组解析逻辑不复制第二份**。
+
+        无匹配 / 表缺失 → ``[]``（调用方按「不猜键」处理，不返回合成键）。
+        """
+        p = str(prefix or "")
+        if not p:
+            return []
+        try:
+            with self._conn() as conn:
+                rows = conn.execute(
+                    "SELECT user_key FROM user_identity_map "
+                    "WHERE substr(user_key, 1, ?) = ?",
+                    (len(p), p),
+                ).fetchall()
+                keys = [str(r["user_key"]) for r in rows if r["user_key"]]
+            if not keys:
+                return []
+            members: set[str] = set()
+            for key in keys:
+                members.update(self.identity_keys(key))
+            return sorted(members)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("identity_keys_by_prefix 解析失败，按未关联处理: %s", e)
+            return []
+
     def link_identities(self, user_key_a: str, user_key_b: str) -> list[str]:
         """显式声明两个 user_key 属同一真人（幂等；可经 scripts/link_identities.py）。
 
@@ -1977,6 +2007,14 @@ class StructuredMemory:
                     if self._has_table(conn, "user_proactive_config"):
                         _run("user_proactive_config",
                              f"user_key IN ({ph})", tuple(keys))
+                    # 已退役但存量库仍有行的 per-user 偏好层（2026-11-08 D-A/D-C：
+                    # `user_humanize` 覆盖行与 `user_reply_mode` 模式行读层移除）。
+                    # 「只写不读」的遗留行同样是个人偏好数据，删号必须清干净；
+                    # `_has_table` 守卫：新库无此表（表已不再创建）时跳过。
+                    if self._has_table(conn, "user_humanize"):
+                        _run("user_humanize", f"user_key IN ({ph})", tuple(keys))
+                    if self._has_table(conn, "user_reply_mode"):
+                        _run("user_reply_mode", f"user_key IN ({ph})", tuple(keys))
                     if self._has_table(conn, "daily_summaries"):
                         like_ph = " OR ".join("date LIKE ?" for _ in keys)
                         _run("daily_summaries",
@@ -2105,6 +2143,11 @@ class StructuredMemory:
                 out["user_proactive_config"] = _cnt(
                     "user_proactive_config", "user_key"
                 )
+            # 已退役的 per-user 偏好层（2026-11-08）：存量库仍有行，随删号清空
+            if self._has_table(conn, "user_humanize"):
+                out["user_humanize"] = _cnt("user_humanize", "user_key")
+            if self._has_table(conn, "user_reply_mode"):
+                out["user_reply_mode"] = _cnt("user_reply_mode", "user_key")
             out["fact_deletion_watermarks"] = _cnt("fact_deletion_watermarks", "user_key")
             if has_daily and keys:
                 like_ph = " OR ".join("date LIKE ?" for _ in keys)

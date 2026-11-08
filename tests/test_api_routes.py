@@ -147,7 +147,7 @@ def test_control_plane_critical_routes_are_mounted(app):
         (chat_routes, 11, "chat/session + wechat channels"),
         (personality_routes, 10, "emotion/persona/psych（08-31? +emotion/distribution SP-1）"),
         (users_routes, 7, "users/*"),
-        (training_routes, 30, "training/* + proactive/*（…10-27 +humanize/config DELETE；10-29 +user/humanize GET/POST/PUT/DELETE 用户自助拟人节奏 NEW-34；10-30 +user/proactive-config GET/POST/DELETE + user/proactive/pause 用户自助主动调度 D20；11-07 +user/self-profile GET/PUT 自填自我介绍 P8 +user/proactive/history 本人主动消息读面 P7）"),
+        (training_routes, 19, "training/* + proactive/* + humanize/*（11-07 +user/self-profile GET/PUT P8 +user/proactive/history P7；11-08 D-A 退役 user/reply-mode×2 + user/humanize×4 + humanize/config DELETE×1 + user/proactive-config×3 + user/proactive/pause×1，30→19）"),
         (tools_routes, 6, "tools/* + plugins/* + health"),
         (safety_routes, 12, "safety/rag/voice/files/cache"),
         (clone_routes, 8, "clone/* (2026-08-27 剥离 /api/clone/preview 死路径)"),
@@ -168,8 +168,8 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_104(app):
-    """The 9 new sub-routers together contribute exactly 104 endpoints.
+def test_total_contribution_is_93(app):
+    """The 9 new sub-routers together contribute exactly 93 endpoints.
 
     2026-08-27: 微信克隆 Option B 剥离 /api/clone/preview，clone_routes 由 9 端点变 8 端点
     2026-08-28: training/extract 移除（9→8）；proactive +config(GET)/send/pause 手动控制（8→11）；misc +diary/important-dates×2/meta（11→15）
@@ -182,7 +182,11 @@ def test_total_contribution_is_104(app):
     2026-10-30: +user/proactive-config GET/POST/DELETE + user/proactive/pause（用户自助主动调度
                 D20，training 23→27；总 97→101）。
     2026-11-07: +user/self-profile GET/PUT（用户自填自我介绍 P8，training 27→29；总 101→103）
-                +user/proactive/history（本人主动消息读面 P7，training 29→30；总 103→**104**）。
+                +user/proactive/history（本人主动消息读面 P7，training 29→30；总 103→104）。
+    2026-11-08: D-A/D-C 用户裁决 —— per-user 偏好层退役，training_routes 移除
+                user/reply-mode×2 + user/humanize×4（POST/PUT 同函数两路由）
+                + humanize/config DELETE×1 + user/proactive-config×3
+                + user/proactive/pause×1 = 11 条（training 30→**19**；总 104→**93**）。
                 ⚠️ 本行按 create_api_app 内省**实测**重算，不接受算术外推
                 （v1.60「原记 10 个/101 系算术错误」即此类事故）。
     """
@@ -192,7 +196,7 @@ def test_total_contribution_is_104(app):
         topic_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 104, f"9 sub-routers contribute {total} routes, expected 104"
+    assert total == 93, f"9 sub-routers contribute {total} routes, expected 93"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():

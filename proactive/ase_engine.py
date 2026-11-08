@@ -605,10 +605,13 @@ class MessageGenerator:
                 load_full_persona_hint,
             )
 
-            # 2026-10-21 R7：主动线也按**该会话**的模式（per-user 覆盖优先），
-            # user_key 为空时回落全局默认（后台/无归属调用行为不变）。
+            # 2026-10-21 R7 / D-C 2026-11-08：主动线也按「会话 × 角色」快照的
+            # 模式（未设置回落全局）；user_key 为空时回落全局默认（无归属调用
+            # 行为不变）。
             persona = load_full_persona_hint(character_id, user_key or None)
-            mode_constraints = immersive_proactive_constraints(user_key or None)
+            mode_constraints = immersive_proactive_constraints(
+                user_key or None, character_id or None,
+            )
         except Exception as e:  # noqa: BLE001
             logger.debug("proactive_context 装载失败（回退中性兜底分支）: %s", e)
             persona = ""

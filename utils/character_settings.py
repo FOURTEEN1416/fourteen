@@ -30,10 +30,28 @@
 - **读侧逐字段容错**：行内脏值/越界/未知键 → 该字段回落出厂默认，绝不抛异常
   炸主链；**写侧严格**：越界/类型不符/未知键 → `ValueError`，调用方必须知道
   没生效（禁止回执假成功）。
-- **不新开第二个真源**：与 `user_profile` / `user_facts` / `user_humanize` /
-  `user_reply_mode` 同库（`data/sqlite.db`）同隔离域；全局文件仍由既有 admin
-  端点（`/api/humanize/config`、`/api/proactive/config`、`/api/topic-state/config`）
+- **不新开第二个真源**：与 `user_profile` / `user_facts` 同库
+  （`data/sqlite.db`）同隔离域；全局文件仍由既有 admin 端点
+  （`/api/humanize/config`、`/api/proactive/config`、`/api/topic-state/config`）
   作为「出厂默认」唯一写方，本模块**从不写全局文件**。
+
+## 2026-11-08 批：`reply` 组与旧 per-user 层退役
+
+用户裁决（原话）：「D-A 个人偏好区……整块从账号页删除，能力划归为用户×角色
+的角色设置；后端 `/api/user/reply-mode` 与 `/api/user/humanize` 端点、
+`user_reply_mode` 与 `user_humanize` 读层整体退役」；「D-C 回复模式契约：
+my-settings 快照新增字段 reply_mode，字段组键 reply，取值仅限 immersive 或
+novel，缺省/未设置=跟随全局默认」。
+
+因此本模块新增 `reply` 组（`reply_mode` 唯一字段）。该字段的「未设置」用
+空串表示（全量快照里也存得下），运行时解析链：
+快照值（immersive/novel）→ 全局默认（`data/scheduler_config.json`）→
+immersive 兜底；解析实现在 `utils/reply_mode.read_reply_mode`。
+
+同时**旧的 per-user 覆盖层（`user_humanize` / `user_proactive_config` /
+`user_reply_mode`）整体退役**：首次物化不再继承旧覆盖行，存量数据由
+`scripts/migrate_per_user_prefs_to_my_settings.py` 一次性迁入快照
+（默认 dry-run）。
 """
 
 from __future__ import annotations
@@ -56,8 +74,10 @@ _DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sqlite.db"
 #: 表名（删号 purge / count / verify 清单引用它，防字面量漂移）。
 TABLE = "user_character_settings"
 
-#: 四组 + 兜底组（`group` 供前端分区渲染，不参与校验）。
-GROUPS: tuple[str, ...] = ("humanize", "proactive", "llm", "dice", "topic")
+#: 五组 + 回复模式（`group` 供前端分区渲染，不参与校验）。
+#: 2026-11-08：`reply` 组置首 —— 回复模式决定「怎么回你」，是角色设置的第一层，
+#: 前端面板也把它排在「① 说话节奏」之前。
+GROUPS: tuple[str, ...] = ("reply", "humanize", "proactive", "llm", "dice", "topic")
 
 
 @dataclass(frozen=True)
@@ -79,6 +99,12 @@ class SettingField:
 #: proactive_config 部署默认 / llm_proactive.DEFAULT_WEB_CONFIG /
 #: frequency.DICE_GATE_DEFAULTS / topic_state.DEFAULTS）。
 SETTING_FIELDS: tuple[SettingField, ...] = (
+    # ── ⓪ 回复模式（reply，2026-11-08 D-C 裁决）────────────
+    # 取值仅 immersive / novel；空串 = 未设置 = 跟随全局默认（admin 的
+    # `/api/proactive/config` 写 `scheduler_config.json.reply_mode`）。
+    # 空串是「未设置」的存储形态，不是第三个模式。
+    SettingField("reply_mode", "str", "", "reply",
+                 choices=("", "immersive", "novel"), label="回复模式（空=跟随全局）"),
     # ── ① 说话节奏（humanize）──────────────────────────────
     SettingField("delay_mode", "str", "dynamic", "humanize",
                  choices=("dynamic", "fixed", "random", "off"), label="段间延时模式"),
@@ -412,10 +438,9 @@ def read(user_key: str, character_id: str) -> dict[str, Any]:
         _ensure_table(conn)
         raw = _row_config(conn, uk, cid)
         if raw is None:
-            # 首次物化：继承该用户旧的 per-user 覆盖值（迁移不丢设置），
-            # 没有旧覆盖才落出厂默认。用户裁决「每人每角色一份」——存的是
-            # 完整快照，不是差异。
-            values = _legacy_seed_values(uk)
+            # 首次物化：直接落当前出厂默认（全量快照，不是差异）。
+            # 旧的 per-user 覆盖层已于 2026-11-08 退役，存量值只经迁移脚本进入。
+            values = _seed_values()
             _upsert(conn, uk, cid, values)
             return values
         # 老行缺新字段 → 用出厂默认补齐并回写（保持「全量快照」语义）
@@ -476,94 +501,28 @@ def has_row(user_key: str, character_id: str) -> bool:
         return cur.fetchone() is not None
 
 
-def _legacy_seed_values(user_key: str) -> dict[str, Any]:
-    """物化初值：出厂默认 + 旧 per-user 覆盖（不写库，供 read/seed 复用）。"""
-    values = global_defaults()
-    try:
-        from utils.humanize_config import read_humanize
+def _seed_values() -> dict[str, Any]:
+    """物化初值 = 当前出厂默认的完整快照。
 
-        legacy_h = read_humanize(str(user_key))
-        for name in FIELDS_BY_GROUP["humanize"]:
-            if hasattr(legacy_h, name):
-                values[name] = getattr(legacy_h, name)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("继承旧 humanize 覆盖失败 user=%s: %s", user_key, exc)
-    try:
-        from utils.proactive_config import effective
-
-        legacy = effective(str(user_key))
-        legacy_p = getattr(legacy, "values", legacy)
-        for name in FIELDS_BY_GROUP["proactive"]:
-            if name in legacy_p:
-                values[name] = legacy_p[name]
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("继承旧 proactive 覆盖失败 user=%s: %s", user_key, exc)
-    return _sanitize(values)
+    2026-11-08：不再继承旧的 per-user 覆盖层（`user_humanize` /
+    `user_proactive_config` / `user_reply_mode` 三张表已退役）——存量值由
+    `scripts/migrate_per_user_prefs_to_my_settings.py` 一次性迁入快照，
+    运行时不做「隐形继承」，否则就是被裁决删除的那一层又活了一遍。
+    """
+    return global_defaults()
 
 
-def seed_from_legacy(user_key: str, character_id: str) -> dict[str, Any]:
-    """迁移：把旧 per-user 覆盖值继承进「我 × 角色」快照（不丢用户已有设置）。"""
+def seed_from_defaults(user_key: str, character_id: str) -> dict[str, Any]:
+    """按**当前出厂默认**物化「我 × 角色」快照（迁移/回填复用）。"""
     uk = str(user_key or "").strip()
     cid = str(character_id or "").strip()
     if not uk or not cid:
         raise ValueError("user_key / character_id 不能为空")
-    values = _legacy_seed_values(uk)
+    values = _seed_values()
     with closing(_conn()) as conn, conn:
         _ensure_table(conn)
         _upsert(conn, uk, cid, values)
     return values
-
-
-def purge_user(user_key: str) -> int:
-    """清空该用户的全部角色快照（旧「恢复出厂」入口的兼容动作）；返回删除行数。"""
-    uk = str(user_key or "").strip()
-    if not uk:
-        return 0
-    with closing(_conn()) as conn, conn:
-        _ensure_table(conn)
-        cur = conn.execute(f"DELETE FROM {TABLE} WHERE user_key = ?", (uk,))
-        return int(cur.rowcount or 0)
-
-
-def propagate_user_patch(user_key: str, patch: dict[str, Any]) -> int:
-    """把旧 per-user 写入同步到该用户**已物化**的各角色快照（兼容旧界面）。
-
-    2026-11-07：新真源是「用户 × 角色」，但旧前端仍会调
-    `/api/user/humanize`、`/api/user/proactive*` 写 per-user 行。若只写旧行，
-    快照已存在的用户会看到「保存成功但不生效」= 假回执。此处把同一补丁写到
-    该用户的每一行快照；**没有快照行时不创建**（不猜角色，留待首次访问物化）。
-
-    返回被更新的快照行数。
-    """
-    uk = str(user_key or "").strip()
-    if not uk or not isinstance(patch, dict):
-        return 0
-    allowed = {k: v for k, v in patch.items() if k in _FIELD_BY_NAME}
-    if not allowed:
-        return 0
-    updated = 0
-    with closing(_conn()) as conn, conn:
-        _ensure_table(conn)
-        rows = conn.execute(
-            f"SELECT character_id, config FROM {TABLE} WHERE user_key = ?", (uk,)
-        ).fetchall()
-        for character_id, raw in rows:
-            try:
-                data = json.loads(raw)
-            except (TypeError, ValueError):
-                data = {}
-            if not isinstance(data, dict):
-                data = {}
-            merged = {**global_defaults(), **{k: v for k, v in data.items() if k in _FIELD_BY_NAME}}
-            merged.update({k: v for k, v in allowed.items() if k in _FIELD_BY_NAME})
-            values = _sanitize(merged)
-            try:
-                _check_cross(values)
-            except ValueError:
-                continue
-            _upsert(conn, uk, str(character_id), values)
-            updated += 1
-    return updated
 
 
 def backfill_pairs(pairs: Iterable[tuple[str, str]]) -> int:
@@ -575,7 +534,7 @@ def backfill_pairs(pairs: Iterable[tuple[str, str]]) -> int:
             continue
         if has_row(uk, cid):
             continue
-        seed_from_legacy(uk, cid)
+        seed_from_defaults(uk, cid)
         created += 1
     return created
 
@@ -585,6 +544,26 @@ def group_of(name: str) -> str:
     if field is None:
         raise ValueError(f"未知设置字段: {name}")
     return field.group
+
+
+def sanitize_patch(patch: dict[str, Any]) -> dict[str, Any]:
+    """宽松过滤一份补丁：未知键/非法值**逐键丢弃**，返回可安全写入的子集。
+
+    用途只有一个：存量迁移（`scripts/migrate_per_user_prefs_to_my_settings.py`）
+    把旧表里的手改坏值折进快照时，不能因为一个脏键让整条迁移失败 —— 但也不能
+    把脏值塞进快照。**写侧（`write`）仍然严格**，本函数不是写入路径的兜底。
+    """
+    out: dict[str, Any] = {}
+    if not isinstance(patch, dict):
+        return out
+    for name, value in patch.items():
+        if name not in _FIELD_BY_NAME:
+            continue
+        try:
+            out[name] = _coerce(name, value)
+        except ValueError:
+            logger.debug("迁移跳过非法字段 %r=%r", name, value)
+    return out
 
 
 __all__ = [
@@ -598,9 +577,8 @@ __all__ = [
     "write",
     "reset",
     "has_row",
-    "seed_from_legacy",
-    "purge_user",
-    "propagate_user_patch",
+    "seed_from_defaults",
     "backfill_pairs",
     "group_of",
+    "sanitize_patch",
 ]

@@ -1,22 +1,26 @@
-"""主动调度 per-user 覆盖（三级读取：用户覆盖 > 全局 > 默认）—— 读写唯一真源。
+"""主动调度设置 —— 「我 × 这个角色」快照 + 全局默认（读唯一真源）。
 
-为什么需要（2026-10-30 D20 用户主权裁决「用户需要能够自己进行设置，而不是
-全站统一」）：主动搭话的开关 / 暂停 / 免打扰时段 / 频率参数此前只有
-``/api/proactive/*`` 那条 **admin 全局** 通道（``data/scheduler_config.json`` +
-``ASEHub.apply_runtime_config``），普通注册用户既没有入口、也无法只影响自己。
-本模块把全局真源**降为默认值**，在其上叠一层 per-user 覆盖：
+## 2026-11-08 批：per-user 覆盖层退休
 
-    用户覆盖（``user_proactive_config`` 表）→ 全局 → 静态默认
+用户裁决（D-A / 本批任务书 item 3）：「后端 /api/user/reply-mode 与
+/api/user/humanize 端点、user_reply_mode 与 user_humanize 读层整体退役」；
+`user_proactive_config` per-user 层同样退役（保留 `/api/user/proactive/history`
+只读面）。主动开关 / 暂停 / 免打扰 / 频率参数因此不再按「人」叠一层覆盖，
+而是收进「用户 × 这个角色」的全量快照（`utils.character_settings`）：
 
-对齐既有唯一模板 ``utils/humanize_config.py``（声明式字段表 / 覆盖表 /
-三级合并 / 幂等建表 / 每次热读无缓存）与 ``utils/reply_mode.py``
-（``_OVERRIDE_DB_PATH`` 模块常量 + 同库同隔离域）。**不新开第二个真源**：
-覆盖表与 ``user_profile`` / ``user_facts`` / ``user_humanize`` /
-``user_reply_mode`` 同库（``data/sqlite.db``），键形态同为完整会话键
-``N:wxid``（v1.28 隔离域）。本模块**从不写全局文件**（admin 端点
-``/api/proactive/config`` 是全局面唯一 owner，原样保留）。
+    角色快照（user_key × character_id，唯一用户可写真源）
+        ↓ 无角色上下文
+    全局默认（config/system.yaml 的 proactive 块 + data/scheduler_config.json）
+        ↓ 缺失
+    静态默认（字段表 / ProactiveConfig 模型默认）
 
-全局值的真源分三处（2026-10-30 复核修正：此前硬编码 4.0/10 与生产不符）：
+**墓碑机制一并退役**：旧实现给「清除覆盖」写 `{"__revert__": [...]}` 墓碑行，
+由 scheduler 下一拍把该用户引擎还原成全局值。快照语义下不需要墓碑——
+`DELETE /api/characters/{id}/my-settings` 后下一次读取会按当前出厂默认整份
+重新物化，scheduler 的值比较（`_apply_user_engine_config`）自动把引擎对齐回
+全局，稳态零写入。
+
+## 全局值的真源分三处（2026-10-30 复核修正：此前硬编码 4.0/10 与生产不符）
 
 - ``enabled`` ← ``data/scheduler_config.json`` 的 ``llm_proactive.enabled``
 - ``paused`` ← 同文件 ``proactive.paused``
@@ -33,57 +37,30 @@
   ``proactive_runtime`` 块（跨 worker 持久真源）逐键**压过**本进程
   ``ASEHub._replay``（见 :func:`global_engine_values`）：4 worker 下只有接到那次
   POST 的 worker 会更新 ``_replay``，其余 worker 的 replay 是旧值 —— 让 replay
-  优先会让 admin GET / 用户 ``global_default`` / 墓碑回滚读到旧全局值
+  优先会让 admin GET / 用户 ``global_default`` 读到旧全局值
   （2026-10-30 二轮复核）。``ASEHub.get_runtime_config()`` 是「第一个已加载
   引擎」视图，会被 per-user 值污染，**不得**当作全局真值。
 
-**不做 user_key × character_id 双维**：主动消息按会话（=人）调度，
-``_llm_proactive_one_user`` 的读取点只有会话键，per-character 维度没有任何
-消费方（registry 登记 deferred）。
+可配置键 = 决策前置闸的 ``enabled`` / ``paused``、静默时段两端、四个引擎级
+频率参数。``llm_proactive_*`` 提示词类字段与 ``dice_gate`` 走各自 owner
+（`proactive.llm_proactive` / `proactive.frequency`）。
 
-首批可覆盖键 = **运行时真有 per-user 读取点** 的八个：``enabled`` / ``paused``
-（决策前置闸）、``quiet_hours_start/end``（决策闸 + 上下文 + judge + 投递）、
-``threshold`` / ``max_daily_messages`` / ``min_interval_minutes`` /
-``cooldown_after_reply_minutes``（引擎实例字段，直调该用户的引擎）。
-``llm_proactive_*`` 提示词类字段与 ``dice_gate`` 不在首批（前者是全局风格，
-后者是引擎级概率闸）→ deferred。
+🔴 引擎级下发的硬约束（值在本模块，下发纪律在 scheduler）：角色快照里的引擎级
+值**不得**经 ``ASEHub.apply_runtime_config`` —— 它会写
+``_replay["runtime_config"]`` 并扇出到**全部**引擎（``proactive/ase_hub.py:235-241``），
+既跨用户泄漏、又会被 ``_apply_replay`` 传染给新创建的引擎。必须对该用户的引擎
+直调 ``eng.apply_runtime_config(...)``。
 
-🔴 引擎级下发的硬约束（值在本模块，下发纪律在 scheduler）：per-user 值
-**不得**经 ``ASEHub.apply_runtime_config`` —— 它会写 ``_replay["runtime_config"]``
-并扇出到**全部**引擎（``proactive/ase_hub.py:235-241``），既跨用户泄漏、又会被
-``_apply_replay`` 传染给新创建的引擎。必须对该用户的引擎直调
-``eng.apply_runtime_config(...)``。
-
-清除后的回滚（2026-10-30 复核补齐）：``DELETE /api/user/proactive-config``
-若该用户覆盖过**引擎级**键，不能只删行——已写进引擎（且被
-``ASEEngine.save_state`` 持久化、重启后 ``_load_state`` 恢复）的个人值会留在
-原地，用户看到「已回到全局」却仍按个人值调度。故 :func:`clear_override`
-写入一条**墓碑行**（``config = {"__revert__": [待回滚的引擎键]}``），
-scheduler 在下一拍按它把该用户引擎还原成全局值后再 :func:`purge_override_row`
-删行。墓碑行不算「有覆盖」（:func:`has_override` 只看有效覆盖键），
-API 读面照常显示 scope=global。
-
-并发口径（照 ``utils/humanize_config``）：读侧**每次热读、无进程缓存**；
-覆盖行写入只经 :func:`write_proactive_config`（单行 upsert，不碰全局文件）；
-覆盖库不可用 / 行内脏值 → **逐字段回落全局**，绝不抛异常炸主链；写/清失败
-**上抛**（调用方必须知道没生效，不得回执假成功）。三处「读 → 改 → 写」
-（:func:`write_proactive_config` / :func:`clear_override` /
-:func:`clear_revert_marker`）全程在同一个 ``BEGIN IMMEDIATE`` 事务内
-（:func:`_override_txn`）：4 worker 并发 DELETE×POST 不会用陈旧快照互相覆盖。
+并发口径：读侧**每次热读、无进程缓存**；全局文件写入只经
+:func:`write_engine_globals`（`utils.json_state.update_json` 锁内读改写）。
 """
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
 import math
 import os
-import sqlite3
-from collections.abc import Iterator
-from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -98,25 +75,11 @@ _CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "scheduler_conf
 #: 引擎级默认值的部署真源（与 ``_init_mixin`` 构造引擎用的 ``cfg.proactive`` 同源）。
 _SYSTEM_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "system.yaml"
 
-#: per-user 覆盖库：与 ``user_profile`` / ``user_facts`` / ``user_humanize`` /
-#: ``user_reply_mode`` **同库同隔离域**（``data/sqlite.db``）。模块常量便于
-#: 测试隔离（``tests/conftest.py`` 把真实库重定向到沙箱）。
-_OVERRIDE_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sqlite.db"
-
-#: 覆盖表名（删号 purge / count / verify 的清单都引用它，防三处字面量漂移）。
-OVERRIDE_TABLE = "user_proactive_config"
-
-#: 墓碑行的内部键：待回滚的引擎级键清单（不是用户可写字段，读侧 sanitize 丢弃）。
-_REVERT_KEY = "__revert__"
-
 #: 全局文件内的默认值来源（与 scheduler 读的是同一批键，不另立真源口径）。
 _GLOBAL_ENABLED_BLOCK = "llm_proactive"
 _GLOBAL_PAUSED_BLOCK = "proactive"
 _GLOBAL_QUIET_BLOCK = "quiet_hours"
 #: admin 经 ``/api/proactive/config`` 保存的**引擎级全局值**（跨 worker 持久真源）。
-#: 只在本进程 ``ASEHub._replay`` 里记是不够的：4 worker 中只有接到那次 POST 的
-#: worker 有 replay，其余 worker 的用户 GET/墓碑回滚会回落部署默认 → 同一次
-#: 保存在不同 worker 上读数不一致（2026-10-30 复核）。
 GLOBAL_RUNTIME_BLOCK = "proactive_runtime"
 _FALLBACK_QUIET_HOURS = (23, 7)
 
@@ -184,17 +147,16 @@ FREQUENCY_KEYS: frozenset[str] = frozenset(
 )
 
 #: 进/出闸键（调度器前置闸读它们，不涉及引擎）。
-GATE_KEYS: tuple[str, ...] = ("enabled", "paused")
 QUIET_KEYS: tuple[str, ...] = ("quiet_hours_start", "quiet_hours_end")
 
 
 @dataclass(frozen=True)
 class EffectiveConfig:
-    """三级合并后的生效值 + 该用户真正覆盖了哪些键。
+    """生效值 + 该作用域真正覆盖了哪些键。
 
-    ``overridden_keys`` 是 scheduler 的「per-user 优先、否则全局」判据：
-    静默时段只有被覆盖的那一端才使用用户值，另一端仍用调度器内存里的
-    全局时段（``self._quiet_hours``）—— 与人工设置半对时段的直觉一致。
+    ``overridden_keys`` 是 scheduler 的「快照优先、否则全局」判据：
+    - 走角色快照时 = 字段表全部键（快照是**全量**设置，不是差异）；
+    - 只读全局时 = 空集（所有键都取全局值）。
     """
 
     values: dict[str, Any]
@@ -362,6 +324,15 @@ def _persisted_engine_values() -> dict[str, Any]:
     return out
 
 
+def _coerce_hour(value: Any) -> int | None:
+    """0..23 的整数小时；其余（bool/浮点/越界/字符串）→ None（保持默认）。"""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if not 0 <= value <= 23:
+        return None
+    return value
+
+
 def global_config() -> dict[str, Any]:
     """全局默认值 = 静态默认 → ``system.yaml`` 引擎参数 → ``scheduler_config.json``。
 
@@ -427,7 +398,8 @@ def write_engine_globals(**partial: Any) -> dict[str, Any]:
     **不套**用户自助字段表的 0-20 / 1-200 / 0-1440 上界，否则 ``threshold=25`` /
     ``max_daily=0`` 这类旧行为可接受的保存会变成 400（admin API 契约回退）。
     归一规则见 :func:`_coerce_engine_value`（与 ``ASEEngine.apply_runtime_config``
-    同口径）。写侧的用户自助路径仍走 :func:`validate_partial` 的严格上界。
+    同口径）。用户侧设置不再有独立的写入口 —— per-user 层已退役，改走
+    `PUT /api/characters/{id}/my-settings`（严格字段表在 `utils.character_settings`）。
     """
     payload: dict[str, Any] = {}
     for key, value in partial.items():
@@ -460,12 +432,13 @@ def global_engine_values(replay: dict[str, Any] | None = None) -> dict[str, Any]
     Args:
         replay: ``ASEHub._replay["runtime_config"]``（**本进程**的 admin 记账）。
             传 None 表示本进程尚未有 admin 保存。**不要**传
-            ``hub.get_runtime_config()``：那是首引擎视图，会被 per-user 值污染。
+            ``hub.get_runtime_config()``：那是首引擎视图，会被某个用户的角色
+            快照值污染。
 
     🔴 优先级（2026-10-30 二轮复核）：**持久文件逐键压过 replay**。动机是
     4-worker 下的陈旧 replay —— admin 后一次保存只更新接到 POST 的那个 worker
     的 ``_replay``；其余 worker 的 replay 仍是上一次的值。若 replay 优先，它们
-    的 admin GET / 用户 ``global_default`` / 墓碑回滚会读旧值（实证：文件
+    的 admin GET / 角色快照的全局默认 / 引擎对齐会读旧值（实证：文件
     6.25/5 + 旧 replay 5.5/6 → 旧实现返回 5.5/6）。故：文件里**存在**的键用
     文件值；文件里缺该键时 replay 才作为兜底（覆盖「本进程刚保存但持久写失败
     之前」与「本批之前只写过 replay 的遗留」两种情形）；最后才是 yaml/模型默认。
@@ -489,93 +462,21 @@ def global_engine_values(replay: dict[str, Any] | None = None) -> dict[str, Any]
     return out
 
 
-def _coerce_hour(value: Any) -> int | None:
-    """0..23 的整数小时；其余（bool/浮点/越界/字符串）→ None（保持默认）。"""
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    if not 0 <= value <= 23:
-        return None
-    return value
-
-
-def _type_ok(field: ProactiveField, value: Any) -> bool:
-    if field.type == "bool":
-        return isinstance(value, bool)
-    if field.type == "int":
-        if isinstance(value, bool) or not isinstance(value, int):
-            return False
-    elif field.type == "float":
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            return False
-    else:  # pragma: no cover - 字段表只声明上面三种
-        return False
-    if field.bounds is not None:
-        lo, hi = field.bounds
-        return lo <= float(value) <= hi
-    return True
-
-
-def _normalize(field: ProactiveField, value: Any) -> Any:
-    """按字段类型归一（int 键钳成 int；float 键钳成 float；bool 原样）。"""
-    if field.type == "int":
-        return int(value)
-    if field.type == "float":
-        return float(value)
-    return bool(value)
-
-
-def _sanitize_override(data: dict[str, Any]) -> dict[str, Any]:
-    """宽松修复库里存的手改坏值：未知键/类型不符/越界一律丢弃（回落全局）。"""
-    out: dict[str, Any] = {}
-    for key, value in data.items():
-        if key == _REVERT_KEY:
-            continue
-        field = _FIELD_BY_NAME.get(key)
-        if field is None:
-            logger.debug("user_proactive_config 忽略未知字段 %r", key)
-            continue
-        if not _type_ok(field, value):
-            logger.debug("user_proactive_config 忽略非法值 %r=%r", key, value)
-            continue
-        out[key] = _normalize(field, value)
-    return out
-
-
-def validate_partial(payload: dict[str, Any]) -> dict[str, Any]:
-    """按字段表严格校验一份 partial payload；未知/类型不符/越界 → ``ValueError``。
-
-    写侧（用户自助端点）走严格判定 —— 与 :func:`_sanitize_override` 的
-    「读侧宽松、坏值丢弃」分工互补：写坏必须当场 400，读坏绝不炸主链。
-    """
-    out: dict[str, Any] = {}
-    for key, value in payload.items():
-        field = _FIELD_BY_NAME.get(key)
-        if field is None:
-            raise ValueError(f"未知的主动调度字段: {key!r}；可覆盖字段为 {list(FIELDS_ALL)}")
-        if not _type_ok(field, value):
-            hint = ""
-            if field.bounds is not None:
-                hint = f"（允许 {field.bounds[0]}..{field.bounds[1]}）"
-            raise ValueError(f"{key} 取值非法: {value!r}{hint}")
-        out[key] = _normalize(field, value)
-    return out
-
-
 def effective(
     user_key: str | None = None, character_id: str | None = None
 ) -> EffectiveConfig:
-    """热读生效配置（2026-11-07 起：用户×角色快照 → 全局；旧 per-user 链保留兜底）。
+    """热读生效配置：「我 × 这个角色」快照 → 全局默认。
 
     Args:
         user_key: 完整会话键（v1.28 形态 ``N:wxid``）。``None``/空串 → 只读
             全局默认（后台线 / 无会话上下文的调用点保持旧行为）。
-        character_id: 卡片 id。**给了就走「我 × 这个角色」的全量快照**
-            （`utils.character_settings` 唯一真源，2026-11-07 用户裁决
-            「每个角色各自一套设置」）；不给维持旧的 per-user 覆盖链。
+        character_id: 卡片 id。**两者都给才走快照**（`utils.character_settings`
+            唯一真源，用户裁决「每个角色各自一套设置」）；缺任一项 → 全局。
 
     语义（D15 显式声明、绝不猜测）：
       - 快照行全量存在（首次读取物化），所以 ``overridden_keys`` 为该组全部键；
-      - 快照不可用 → 回落旧 per-user 覆盖链 → 全局，**绝不抛异常炸主链**。
+      - 快照不可用 → 回落全局，**绝不抛异常炸主链**；
+      - 旧的 per-user 覆盖层已于 2026-11-08 退役，本函数不再读它。
     """
     base = global_config()
 
@@ -596,339 +497,4 @@ def effective(
                 user_key, character_id, exc,
             )
 
-    overrides = read_override(user_key)
-    if not overrides:
-        return EffectiveConfig(values=base, overridden_keys=frozenset(), global_values=base)
-    merged = {**base, **overrides}
-    return EffectiveConfig(
-        values=merged,
-        overridden_keys=frozenset(overrides),
-        global_values=base,
-    )
-
-
-def read_override(user_key: str | None) -> dict[str, Any]:
-    """读该用户的**有效**覆盖字典（已宽松修复，墓碑键不出现）；失败 → 空 dict。"""
-    uk = str(user_key or "").strip()
-    if not uk:
-        return {}
-    raw = _read_raw(uk, strict=False)
-    return _sanitize_override(raw)
-
-
-def pending_revert_keys(user_key: str | None) -> list[str]:
-    """墓碑行里待回滚的引擎键（无墓碑/库不可用 → 空列表）。"""
-    uk = str(user_key or "").strip()
-    if not uk:
-        return []
-    raw = _read_raw(uk, strict=False)
-    keys = raw.get(_REVERT_KEY)
-    if not isinstance(keys, list):
-        return []
-    return [str(k) for k in keys if str(k) in ENGINE_KEYS]
-
-
-def has_override(user_key: str) -> bool:
-    """该用户是否有**有效覆盖**（墓碑行不算；前端「个人设置/跟随全局」徽标真源）。"""
-    uk = str(user_key or "").strip()
-    if not uk:
-        return False
-    try:
-        with closing(_override_conn()) as conn:
-            row = conn.execute(
-                f"SELECT config FROM {OVERRIDE_TABLE} WHERE user_key = ?", (uk,)
-            ).fetchone()
-        if not row or not row[0]:
-            return False
-        data = json.loads(row[0])
-        return bool(_sanitize_override(data)) if isinstance(data, dict) else False
-    except Exception as e:  # noqa: BLE001
-        logger.warning("查询主动调度覆盖存在性失败 user=%s: %s", uk, e)
-        return False
-
-
-def write_proactive_config(*, user_key: str, **partial: Any) -> EffectiveConfig:
-    """partial merge 写**该用户**的覆盖行（只改传入键，绝不动全局默认）。
-
-    Args:
-        user_key: 必填的完整会话键。空 → ``ValueError``：本模块**没有**全局写
-            路径，全局面唯一 owner 是 ``/api/proactive/config``（admin）。
-        **partial: 字段表内的局部更新（``None`` 视同未提供）。
-
-    若该用户存在待回滚墓碑，本次写入的键会从墓碑清单里摘掉（用户重新设置了
-    就不该再被还原），其余引擎键继续按墓碑回滚。
-
-    「读 → 合并墓碑 → 写」全程在同一 ``BEGIN IMMEDIATE`` 事务内（2026-10-30
-    二轮复核）：旧实现用两个独立连接，4 worker 下与 ``clear_override`` 并发时
-    会丢新覆盖或把刚摘掉的墓碑写回。跨进程由 SQLite RESERVED 锁串行化。
-
-    Raises:
-        ValueError: ``user_key`` 为空 / 字段未知 / 类型不符 / 越界。
-        sqlite3.Error / OSError: 落盘失败**上抛**（调用方必须知道没生效）。
-    """
-    uk = str(user_key or "").strip()
-    if not uk:
-        raise ValueError("user_key 必填：全局主动调度配置的写入 owner 是 /api/proactive/config")
-    payload = {k: v for k, v in partial.items() if v is not None}
-    if not payload:
-        return effective(uk)
-    validate_partial(payload)
-    with _override_txn() as conn:
-        stored = _read_raw_conn(conn, uk, strict=True)
-        raw_revert = stored.get(_REVERT_KEY)
-        revert = {
-            str(k) for k in (raw_revert if isinstance(raw_revert, list) else [])
-            if str(k) in ENGINE_KEYS
-        }
-        stored.pop(_REVERT_KEY, None)
-        stored.update(payload)
-        revert -= set(payload)
-        if revert:
-            stored[_REVERT_KEY] = sorted(revert)
-        _write_override_conn(conn, uk, stored)
-    # 2026-11-07：旧界面写 per-user 行时必须同步到该用户已物化的角色快照，
-    # 否则新真源（用户×角色）下会「保存成功但不生效」= 假回执。
-    try:
-        from utils import character_settings
-
-        character_settings.propagate_user_patch(uk, payload)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("同步角色快照失败 user=%s: %s", uk, exc)
-    return effective(uk)
-
-
-def clear_override(user_key: str) -> bool:
-    """清除该用户的覆盖（回落全局）。返回是否真的清掉了东西（幂等）。
-
-    🔴 引擎级键不能只删行：已写进该用户引擎的个人值（且被引擎状态文件持久化）
-    会留在原地，用户看到「回到全局」却仍按个人值调度。故此处改写**墓碑行**
-    ``{"__revert__": [引擎键...]}``，由 scheduler 在下一拍把引擎还原成全局值后
-    :func:`clear_revert_marker` 摘标记（**保留**期间新写入的覆盖）。
-    只覆盖非引擎键（如 paused/enabled）时直接删行 —— 没有引擎残留要清。
-
-    「读 → 判定 → 写/删」在同一 ``BEGIN IMMEDIATE`` 事务内（2026-10-30 二轮
-    复核）：并发 DELETE×2 或 DELETE×POST 不再互相覆盖（旧实现各自独立连接，
-    后写者用陈旧快照回写）。
-
-    Raises:
-        sqlite3.Error / OSError: 覆盖库不可用 → **上抛**。旧实现吞异常返回
-            False，DELETE 端点据此回 ``noop/200`` = 写盘失败却假成功。
-    """
-    uk = str(user_key or "").strip()
-    if not uk:
-        return False
-    # 2026-11-07：同步清空该用户的全部「用户 × 角色」快照——旧界面的
-    # 「恢复默认」必须继续成立；只删旧行不删快照 = 回执成功但行为不变。
-    try:
-        from utils import character_settings
-
-        character_settings.purge_user(uk)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("清除角色快照失败 user=%s: %s", uk, exc)
-    with _override_txn() as conn:
-        stored = _read_raw_conn(conn, uk, strict=True)
-        raw_revert = stored.get(_REVERT_KEY)
-        pending = {
-            str(k) for k in (raw_revert if isinstance(raw_revert, list) else [])
-            if str(k) in ENGINE_KEYS
-        }
-        # 🔴 引擎键取自**原始**键集，不经 sanitize（2026-10-30 复核）：某引擎键当前
-        # 值已损坏/越界会被 sanitize 丢弃，但引擎此前确按旧的有效值写过个人值 ——
-        # 只按 sanitize 结果算 engine_keys 会直接删行、不写墓碑，用户的 DELETE 回
-        # ``noop`` 而引擎永远停在旧个人值。
-        raw_keys = {k for k in stored if k in _FIELD_BY_NAME}
-        engine_keys = sorted(raw_keys & set(ENGINE_KEYS))
-        had_any = bool(raw_keys) or bool(pending)
-        if engine_keys or pending:
-            _write_override_conn(conn, uk, {_REVERT_KEY: sorted(pending | set(engine_keys))})
-        elif stored:
-            _delete_row_conn(conn, uk)
-    return had_any
-
-
-def clear_revert_marker(user_key: str, reverted_keys: Any = None) -> bool:
-    """摘掉**本次已回滚**的墓碑键，保留其余墓碑与有效覆盖（scheduler 调用）。
-
-    🔴 不能直接删整行：``DELETE`` 之后用户常常立刻重新设置（例如先取消自动
-    消息、再单独把 ``paused`` 打开）。若回滚完成时 ``purge`` 整行，就会把
-    刚写进去的新覆盖一起删掉 —— UI 行消失、引擎仍可能保留旧个人值
-    （2026-10-30 复核 high）。
-
-    🔴 也不能「有墓碑就整段摘」：回滚读到的 pending 与摘标记之间可能又发生
-    一次 DELETE（新墓碑）或写入。``reverted_keys`` 是**本次真正下发成功**的
-    键集，只有它们从墓碑里移除；期间新加的墓碑键原样保留、下一拍继续回滚
-    （2026-10-30 复核 medium：无 expected pending 集合会误摘并发新墓碑）。
-
-    「读 → 过滤 → 写/删」在同一 ``BEGIN IMMEDIATE`` 事务内（2026-10-30 二轮
-    复核）：与并发的 DELETE/POST 互斥，不会把已被改写的行按旧快照写回。
-
-    Args:
-        reverted_keys: 本次已回滚的引擎键；``None`` → 视为全部（旧调用口径）。
-
-    返回是否真的改动了墓碑标记（无墓碑 → False）。
-    """
-    uk = str(user_key or "").strip()
-    if not uk:
-        return False
-    with _override_txn() as conn:
-        stored = _read_raw_conn(conn, uk, strict=True)
-        raw_revert = stored.get(_REVERT_KEY)
-        if not isinstance(raw_revert, list) or not raw_revert:
-            return False
-        current = {str(k) for k in raw_revert if str(k) in ENGINE_KEYS}
-        done = current if reverted_keys is None else {
-            str(k) for k in reverted_keys if str(k) in ENGINE_KEYS
-        }
-        remaining = sorted(current - done)
-        stored.pop(_REVERT_KEY, None)
-        if remaining:
-            stored[_REVERT_KEY] = remaining
-        if stored:
-            _write_override_conn(conn, uk, stored)
-        else:
-            _delete_row_conn(conn, uk)
-    return True
-
-
-def purge_override_row(user_key: str) -> bool:
-    """硬删该用户的覆盖行（运维/测试用的整行清除；scheduler 回滚走
-    :func:`clear_revert_marker`，不得用本函数 —— 会连带删掉新写入的覆盖）。"""
-    uk = str(user_key or "").strip()
-    if not uk:
-        return False
-    return _delete_row(uk)
-
-
-# ── per-user 覆盖存储 ─────────────────────────────────────────
-#
-# 与 user_profile / user_facts / user_humanize 同库同隔离域（user_key = 完整
-# 会话键 `N:wxid`）。幂等建表：每次连接 `CREATE TABLE IF NOT EXISTS`
-# （SQLite 的 DDL 是原子的）；不写迁移脚本 —— 旧库首次访问即建表。
-#
-# 删号 purge：`shisi/memory/legacy/structured_memory.py::purge_owner_data` /
-# `count_owner_data` 的固定清单已登记本表（与 user_profile 同款 `_has_table`
-# 守卫）—— 否则删号后残留个人调度行（隐私红线）。
-
-_OVERRIDE_SCHEMA = f"""
-CREATE TABLE IF NOT EXISTS {OVERRIDE_TABLE} (
-    user_key TEXT PRIMARY KEY,
-    config TEXT NOT NULL DEFAULT '{{}}',
-    updated_at TEXT NOT NULL DEFAULT ''
-)
-"""
-
-
-def _override_conn() -> sqlite3.Connection:
-    """打开覆盖库并幂等建表。
-
-    路径父目录不存在时先建（冷启动 / 测试 tmp 场景）；失败上抛，由调用方决定
-    是「回落全局」还是「写入失败上抛」。
-    """
-    path = Path(_OVERRIDE_DB_PATH)
-    if path.parent and not path.parent.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=5.0)
-    conn.execute(_OVERRIDE_SCHEMA)
-    conn.commit()
-    return conn
-
-
-@contextlib.contextmanager
-def _override_txn() -> Iterator[sqlite3.Connection]:
-    """覆盖表的**单写事务**：``BEGIN IMMEDIATE`` 起持 RESERVED 锁，提交时释放。
-
-    为什么需要（2026-10-30 二轮复核）：``write_proactive_config`` /
-    ``clear_override`` / ``clear_revert_marker`` 都是「读 → 改 → 写」三步。
-    旧实现每步各开一个连接：4 worker 下 DELETE 与 POST 并发时，后写者用读到
-    的**陈旧快照**回写 → 丢新覆盖、或把刚摘掉的墓碑写回。显式 ``BEGIN IMMEDIATE``
-    让第二个写者在 ``timeout`` 内阻塞等待而非读脏快照（WAL/rollback-journal
-    下均由 SQLite 的写锁保证）。
-
-    失败路径整体 ``ROLLBACK`` 再上抛（写盘失败必须让调用方知道没生效）。
-    """
-    conn = _override_conn()
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        yield conn
-        conn.commit()
-    except BaseException:
-        with contextlib.suppress(Exception):
-            conn.rollback()
-        raise
-    finally:
-        with contextlib.suppress(Exception):
-            conn.close()
-
-
-def _read_raw_conn(
-    conn: sqlite3.Connection, user_key: str, *, strict: bool,
-) -> dict[str, Any]:
-    """在**给定连接/事务**里读原始覆盖字典（含墓碑键）。
-
-    ``strict=False`` → 任何异常/坏 JSON → 空 dict（读侧回落全局）；
-    ``strict=True`` → 上抛（写/清路径必须知道一行坏了，不能静默覆盖）。
-    """
-    try:
-        row = conn.execute(
-            f"SELECT config FROM {OVERRIDE_TABLE} WHERE user_key = ?", (user_key,)
-        ).fetchone()
-    except Exception as e:  # noqa: BLE001
-        if strict:
-            raise
-        logger.debug("读取主动调度覆盖失败 user=%s（回落全局）: %s", user_key, e)
-        return {}
-    if not row or not row[0]:
-        return {}
-    try:
-        data = json.loads(row[0])
-    except Exception as e:  # noqa: BLE001
-        if strict:
-            raise ValueError(f"覆盖行 JSON 损坏（user={user_key}）: {e}") from e
-        logger.warning("user_proactive_config.config 非法 JSON（user=%s），忽略", user_key)
-        return {}
-    if not isinstance(data, dict):
-        if strict:
-            raise ValueError(f"覆盖行不是 JSON 对象（user={user_key}）")
-        logger.warning("user_proactive_config.config 非 dict（user=%s），忽略", user_key)
-        return {}
-    return data
-
-
-def _read_raw(user_key: str, *, strict: bool) -> dict[str, Any]:
-    """读原始覆盖字典（含墓碑键）。``strict=False`` 时任何异常 → 空 dict。"""
-    try:
-        with closing(_override_conn()) as conn:
-            return _read_raw_conn(conn, user_key, strict=strict)
-    except Exception as e:  # noqa: BLE001
-        if strict:
-            raise
-        logger.debug("读取主动调度覆盖失败 user=%s（回落全局）: %s", user_key, e)
-        return {}
-
-
-def _write_override_conn(
-    conn: sqlite3.Connection, user_key: str, overrides: dict[str, Any],
-) -> None:
-    """在给定连接/事务里写/更新该用户的覆盖行。失败**上抛**。"""
-    conn.execute(
-        f"INSERT INTO {OVERRIDE_TABLE} (user_key, config, updated_at) VALUES (?, ?, ?) "
-        f"ON CONFLICT(user_key) DO UPDATE SET config = excluded.config, "
-        f"updated_at = excluded.updated_at",
-        (
-            user_key,
-            json.dumps(overrides, ensure_ascii=False, sort_keys=True),
-            datetime.now().isoformat(timespec="seconds"),
-        ),
-    )
-
-
-def _delete_row_conn(conn: sqlite3.Connection, user_key: str) -> bool:
-    """在给定连接/事务里删行；返回是否有行被删。失败**上抛**。"""
-    cur = conn.execute(f"DELETE FROM {OVERRIDE_TABLE} WHERE user_key = ?", (user_key,))
-    return bool(cur.rowcount)
-
-
-def _delete_row(user_key: str) -> bool:
-    """删行（独立写事务）；返回是否有行被删。失败**上抛**。"""
-    with _override_txn() as conn:
-        return _delete_row_conn(conn, user_key)
+    return EffectiveConfig(values=base, overridden_keys=frozenset(), global_values=base)

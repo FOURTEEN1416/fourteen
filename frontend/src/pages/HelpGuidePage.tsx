@@ -84,7 +84,7 @@ const GUIDE_ITEMS: GuideItem[] = [
   {
     to: '/settings/account',
     title: '账号与数据 · 你的主权',
-    desc: '回复模式（沉浸式/小说式）等个人偏好、数据导出。',
+    desc: '协议与同意状态、导出你的数据与聊天记录、注销账号。回复模式等体验参数已归到「角色设置 → 消息」里按角色调整。',
   },
   {
     to: '/settings/security',

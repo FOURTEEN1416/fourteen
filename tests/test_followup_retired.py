@@ -97,7 +97,7 @@ def test_message_main_path_registers_no_timers(tmp_path, monkeypatch):
     c = wc.WeChatConnector(SimpleNamespace(), owner_user_id=42)
     c.token = "test-token"
     monkeypatch.setattr(c, "_merge_session_state", lambda updates: {})
-    monkeypatch.setattr(wc, "_segment_delay", lambda text: 0)
+    monkeypatch.setattr(wc, "_segment_delay", lambda text, **kwargs: 0)
     calls: list[str] = []
 
     def send(**kwargs):

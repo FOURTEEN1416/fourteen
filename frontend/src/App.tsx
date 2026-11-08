@@ -30,7 +30,6 @@ const SettingsSecurity = lazy(() => import('./pages/SettingsSecurity'))
 const SettingsAccount = lazy(() => import('./pages/SettingsAccount'))
 const ToolsDashboard = lazy(() => import('./pages/ToolsDashboard'))
 const SettingsLogs = lazy(() => import('./pages/SettingsLogs'))
-const AdminProactivePage = lazy(() => import('./pages/SettingsProactivePage'))
 const RolesPage = lazy(() => import('./pages/RolesPage'))
 
 
@@ -180,8 +179,8 @@ export default function App() {
             <Route path="security" element={<AnimatedSuspense><SettingsSecurity /></AnimatedSuspense>} />
             <Route path="account" element={<AnimatedSuspense><SettingsAccount /></AnimatedSuspense>} />
             <Route path="logs" element={<AnimatedSuspense><SettingsLogs /></AnimatedSuspense>} />
-            {/* P5（2026-11-07）：主动消息引擎 = 出厂默认 + 运维（仅管理员） */}
-            <Route path="proactive" element={<RoleGuard roles={['admin'] as const}><AnimatedSuspense><AdminProactivePage /></AnimatedSuspense></RoleGuard>} />
+            {/* 2026-11-08 D-B 用户裁决：/settings/proactive 整机删除（页面/路由/侧栏/守卫）——
+                全局主动急停与出厂默认值不再提供任何 UI，只保留既有后端 API。 */}
           </Route>
 
           {/* 管理后台 */}

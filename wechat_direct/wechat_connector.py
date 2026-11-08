@@ -671,26 +671,38 @@ def is_pure_instruction(text: str) -> bool:
         return False
 
 
-def _segment_delay(prev: str, *, mode: str | None = None) -> float:
+def _segment_delay(
+    prev: str, *, mode: str | None = None, humanize: Any = None,
+) -> float:
     """两段之间的「打字停顿」（秒）。
 
     档位见上方 ``_TIER_PRESET_PER_CHAR_MS`` 说明；``mode=None`` 时取配置
     ``humanize.delay_mode``（默认 dynamic＝现行为）。纯指令段零延时。
+
+    ``humanize`` 给出时**直接用这份已解析配置**（调用方已按「用户 × 角色」
+    快照解析，见 ``WeChatConnector._humanize_for``）；缺省才自行
+    ``utils.humanize_config.read_humanize`` 热读全局块。2026-11-08 D-A：
+    per-user 覆盖层退役后，用户调过的段间节奏只存在于角色快照里，投递链
+    必须把快照传进来才能生效。
 
     配置经 ``utils.humanize_config.read_humanize`` **热读**（跨 worker 即时生效，
     无进程内缓存）；**读取失败一律回落旧式公式** —— 段循环对异常是 ``break``
     （未受理前缀即停），配置不可读绝不能把整条回复截断，故此处必须 fail-soft。
 
     ⚠️ 位置签名恒为单参 ``prev``：既有契约测试以 ``lambda text: 0``
-    monkeypatch 本函数（tests/test_wechat_reply_split.py:89,125、
-    tests/test_followup_retired.py:100），``mode`` 只能作 keyword-only 追加。
+    monkeypatch 本函数（tests/test_humanize_split_cap.py:39、
+    tests/test_wechat_reply_split.py:91,130、tests/test_followup_retired.py:100），
+    ``mode`` / ``humanize`` 只能是 keyword-only 追加，不得成为第二个位置参数。
     """
     if is_pure_instruction(prev):
         return 0.0
     try:
-        from utils import humanize_config
+        if humanize is not None:
+            cfg = humanize
+        else:
+            from utils import humanize_config
 
-        cfg = humanize_config.read_humanize()
+            cfg = humanize_config.read_humanize()
     except Exception as exc:  # noqa: BLE001
         logger.debug("[wx][step=humanize_cfg_unreadable] %s", exc)
         # 旧式公式 = 拟人度引入前的现行为，作为配置不可读时的安全底线。
@@ -1507,6 +1519,15 @@ class WeChatConnector:
                 self.bot_id = bot_id
                 self.scanner_wxid = str(status_resp.get("ilink_user_id") or "")
                 self._reconnect_attempts = 0
+                # D-D（2026-11-08 用户裁决）写侧根治：扫码登录是 D16「谁扫码谁聊」
+                # 的唯一正规入口，必须在此补写 wechat_bindings（幂等 upsert，挂该
+                # 用户当前激活角色）。否则「先网页激活 → 后扫码登录」的用户在
+                # my-settings 等 15 处永远 409「尚未绑定微信」，与 /wechat 页
+                # 「通道已连接」自相矛盾。补写失败只告警、不阻断登录（异常契约
+                # 见 wechat_direct/binding_sync.py）。
+                from wechat_direct.binding_sync import sync_login_binding
+
+                sync_login_binding(self.owner_user_id, self.scanner_wxid)
                 self._merge_session_state({
                     "connected": True,
                     "bot_id": bot_id,
@@ -1845,12 +1866,49 @@ class WeChatConnector:
     # 模块删除，角色选择唯一入口 = 网页控制台 /characters/{id}/activate，
     # 聊天侧由 activate 同步的扫码人绑定（wechat_bindings）决定角色。
 
-    def _split_cap_for(self, peer: str) -> int:
+    def _character_id_for(self, peer: str) -> str:
+        """peer 的当前角色 id（唯一 owner：``utils.character_resolver``）。
+
+        2026-11-08 D-A：拟人度配置改由「用户 × 角色」快照承载（per-user 覆盖层
+        退役），投递链必须带角色 id 才能读到用户自己在角色设置里调的值。
+        解析走与 ``api/run_api._character_resolver`` 同一判据（绑定表 →
+        ``user_manager.get_user_character``），不在此另建一套。
+        解析不到返回 ``"default"``（resolver 的既有语义），异常同样回落它。
+        """
+        try:
+            from utils.character_resolver import resolve_character_id
+
+            return str(
+                resolve_character_id(self._session_key(peer), self.user_manager) or ""
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[wx][step=character_resolve_failed] %s", exc)
+            return "default"
+
+    def humanize_scope(self, peer: str) -> tuple[str, str]:
+        """该 peer 的拟人度作用域：``(会话键, 角色 id)``。
+
+        对外公开（`utils.humanize_delivery` 用于「主动消息是否拆条」的同一
+        解析），避免投递链各处自行拼键/猜角色。
+        """
+        return (self._session_key(peer), self._character_id_for(peer))
+
+    def _humanize_for(self, peer: str):
+        """该会话的拟人度配置（用户×角色快照 → 全局块 → 出厂默认）。
+
+        读取失败抛给调用方（拆条上限回落 ``_SPLIT_MAX_SEGMENTS``、段间延时
+        回落旧式公式）——与 ``read_humanize`` 自己的「绝不炸主链」语义叠加。
+        """
+        from utils.humanize_config import read_humanize
+
+        user_key, character_id = self.humanize_scope(peer)
+        return read_humanize(user_key, character_id)
+
+    def _split_cap_for(self, peer: str, humanize: Any = None) -> int:
         """该会话的拆条上限（Q6：2/3/4，默认 2；读配置失败回落默认）。"""
         try:
-            from utils.humanize_config import read_humanize
-
-            return int(read_humanize(self._session_key(peer)).max_segments)
+            cfg = humanize if humanize is not None else self._humanize_for(peer)
+            return int(cfg.max_segments)
         except Exception:  # noqa: BLE001
             return _SPLIT_MAX_SEGMENTS
 
@@ -1864,13 +1922,23 @@ class WeChatConnector:
         主链由 ``_handle_message_serial`` 外层 ``with self._peer_lock(...)`` 覆盖
         生成与发送全程；主动线由 ``main.send_proactive_segmented`` 在外部补同一把
         可重入 RLock（RLock，重复获取不自死锁）。**不得在本方法内再持一半**。
+
+        2026-11-08 D-A：拆条上限与段间节奏同读一份「用户 × 角色」快照
+        （``_humanize_for``），一次解析两处消费，不再各自读全局。
         """
-        segments = split_reply_for_wechat(reply, max_segments=self._split_cap_for(peer))
+        humanize = None
+        try:
+            humanize = self._humanize_for(peer)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[wx][step=humanize_scope_unreadable] %s", exc)
+        segments = split_reply_for_wechat(
+            reply, max_segments=self._split_cap_for(peer, humanize)
+        )
         accepted = []
         for idx, segment in enumerate(segments):
             try:
                 if idx:
-                    time.sleep(_segment_delay(segments[idx - 1]))
+                    time.sleep(_segment_delay(segments[idx - 1], humanize=humanize))
                 response = _send_text(
                     to=peer, text=segment,
                     context_token=self._get_context_token(peer) or context_token,
@@ -2191,7 +2259,14 @@ class WeChatConnector:
             try:
                 from utils.fallback_lines import get_fallback_line
                 from utils.reply_mode import read_reply_mode
-                _exc_text = get_fallback_line(None, "exception", read_reply_mode())
+
+                # 2026-11-08 验收修复：兜底文案的回复模式必须与主链同作用域
+                # （「用户 × 角色」快照）。旧无参调用只读全局默认 → 小说式角色
+                # 在异常兜底时被套上沉浸式口径。
+                _uk, _mode_cid = self.humanize_scope(from_user)
+                _exc_text = get_fallback_line(
+                    None, "exception", read_reply_mode(_uk, _mode_cid)
+                )
             except Exception:  # noqa: BLE001
                 _exc_text = "刚才好像出问题了，再说一次好吗"
             # NEW-13③（2026-10-29）：BYOK 配置类失败给控制台指引——错 Key/缺 Key
@@ -2232,7 +2307,12 @@ class WeChatConnector:
                 from utils.reply_mode import read_reply_mode
                 # character_id 可能藏在 result 里；拿不到则用 default 池
                 _cid = result.get("character_id") or result.get("character") or None
-                reply = get_fallback_line(_cid, "empty_reply", read_reply_mode())
+                # 2026-11-08 验收修复：回复模式按「用户 × 角色」快照读取
+                # （与主链/投递链同一作用域解析 owner `humanize_scope`）。
+                _uk, _mode_cid = self.humanize_scope(from_user)
+                reply = get_fallback_line(
+                    _cid, "empty_reply", read_reply_mode(_uk, _mode_cid)
+                )
             except Exception:  # noqa: BLE001
                 reply = "刚才没接上，你再说一句？"
         else:
@@ -2381,7 +2461,10 @@ class WeChatConnector:
             from utils.fallback_lines import get_fallback_line
             from utils.reply_mode import read_reply_mode
 
-            line = get_fallback_line(None, kind, read_reply_mode())
+            # 2026-11-08 验收修复：按该 peer 的「用户 × 角色」快照读回复模式
+            # （旧无参调用只读全局默认，小说式角色会拿到沉浸式口径文案）。
+            _uk, _mode_cid = self.humanize_scope(peer)
+            line = get_fallback_line(None, kind, read_reply_mode(_uk, _mode_cid))
         except Exception:  # noqa: BLE001
             logger.debug("[wx][step=fallback_line_failed] 降级话术获取失败，跳过媒体占位回复")
             return

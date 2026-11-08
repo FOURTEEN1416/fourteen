@@ -179,8 +179,11 @@ describe('控件呈现', () => {
     await renderReady()
 
     expect(screen.getByTestId('humanize-pure-instruction-note')).toBeDefined()
-    // 面板里唯一的开关是「主动消息拆句」
-    expect(screen.getAllByRole('switch').length).toBeGreaterThanOrEqual(4)
+    // 面板只剩三个**真实可写**的开关：主动消息拆句 / 阅读延迟 / typing。
+    // 2026-11-08 D-A：per-user 覆盖层退役，「按用户覆盖总开关」随
+    // user_humanize 表一并删除（少一个开关是正确结果，不是回归）——
+    // 用户自己的节奏改由「我 × 角色」my-settings 承载。
+    expect(screen.getAllByRole('switch').length).toBe(3)
   })
 
   it('区间互钳：下界推过上界时上界跟随，不产生倒置载荷（避免必然的 400）', async () => {

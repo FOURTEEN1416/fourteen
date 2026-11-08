@@ -15,15 +15,25 @@
 段间 0.4s→0.0s，属有意变更、非本模块默认值所致。）
 
 声明式字段表（2026-10-27 G-1）：所有字段收敛到 :data:`HUMANIZE_FIELDS` 单一
-字段表（名称/类型/默认值/边界/可写/可按用户覆盖/标签），``DEFAULTS`` /
-``INT_BOUNDS`` / ``WRITABLE_FIELDS`` 均由它派生 —— 新增字段只改一处，杜绝
-API 校验、读侧回落、前端镜像三处字面量再次分叉（v1.56 R7 键漂移 P0 教训）。
+字段表（名称/类型/默认值/边界/可写/标签），``DEFAULTS`` / ``INT_BOUNDS`` /
+``WRITABLE_FIELDS`` 均由它派生 —— 新增字段只改一处，杜绝 API 校验、读侧回落、
+前端镜像三处字面量再次分叉（v1.56 R7 键漂移 P0 教训）。
 
-按用户覆盖（2026-10-27 G-2/Q2 裁决）：全局 ``humanize`` 块降为**默认值**；
-``user_humanize`` 表（``data/sqlite.db``，与 ``user_profile`` / ``user_facts``
-同库同隔离域）存**按用户覆盖**。读取顺序：用户覆盖 → 全局块 → 默认值；
-**键缺失 = 继承**（不是「缺失 = 钉死默认」）。回滚总开关
-``humanize.user_override_enabled=false`` 即忽略覆盖表（表保留不读、无迁移）。
+## 2026-11-08 批：per-user 覆盖层退休
+
+用户裁决（D-A）：「后端 /api/user/humanize 端点、user_humanize 读层整体退役」
+——「拟人节奏」不再是账号页的全站/按人偏好，而是「用户 × 这个角色」的
+设置项（`utils.character_settings` 的 humanize 组）。因此本模块的读取链收敛为：
+
+    角色快照（user_key × character_id，`character_settings.read`）
+        ↓ 无角色上下文
+    全局默认（``humanize`` 块）
+        ↓ 缺失/脏值
+    静态默认（字段表）
+
+`user_humanize` 表与 `user_override_enabled` 全局开关一并退役（后者的唯一作用
+就是开关那张表）；存量覆盖行由
+`scripts/migrate_per_user_prefs_to_my_settings.py` 迁入各用户当前激活角色的快照。
 
 并发口径（**不得绕过**）：
 - 写侧只经 :func:`write_humanize` → :func:`utils.json_state.update_json`
@@ -37,18 +47,13 @@ API 校验、读侧回落、前端镜像三处字面量再次分叉（v1.56 R7 �
 跨字段不一致（``random_min_ms > random_max_ms`` 或 ``delay_floor_ms > delay_ceil_ms``）
 同样在**读侧**愈合（两侧一并回落默认）—— 单字段各自都在界内、组合起来却
 无法使用（``randint(min, max)`` 会直接抛 ``ValueError``），若照原样透出，
-一个手改坏的真源文件就能让发送路径炸在投递时刻。按用户覆盖的坏值同理：
-只回滚该用户冲突的两侧键，不影响全局。
+一个手改坏的真源文件就能让发送路径炸在投递时刻。
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import sqlite3
-from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -94,32 +99,30 @@ class HumanizeField:
     default: Any
     bounds: tuple[int, int] | None = None
     writable: bool = True           # 是否可经 API/文件写入
-    per_user: bool = True           # 是否支持 user_humanize 按用户覆盖
     label: str = ""
 
 
 #: 爱语默认键位对照见设计契约；本项目的默认值 = 现行公式的等价参数。
 #: 顺序即落盘键序（新增键追加在末尾，保持文件形态稳定）。
 HUMANIZE_FIELDS: tuple[HumanizeField, ...] = (
-    HumanizeField("delay_mode", "str", DEFAULT_DELAY_MODE, None, True, True, "段间延时模式"),
-    HumanizeField("per_char_ms", "int", 45, (5, 200), True, True, "逐字每字毫秒"),
-    HumanizeField("fixed_ms", "int", 600, (0, 5000), True, True, "固定延时毫秒"),
-    HumanizeField("random_min_ms", "int", 400, (0, 10000), True, True, "随机区间下界"),
-    HumanizeField("random_max_ms", "int", 1600, (0, 10000), True, True, "随机区间上界"),
-    HumanizeField("delay_floor_ms", "int", 400, (0, 10000), True, True, "延时下钳"),
-    HumanizeField("delay_ceil_ms", "int", 1600, (0, 60000), True, True, "延时上钳"),
-    HumanizeField("bracket_delay_ms", "int", 0, (0, 5000), True, True, "括号段覆盖延时"),
-    HumanizeField("proactive_split", "bool", False, None, True, True, "主动消息拆条"),
-    HumanizeField("read_delay_enabled", "bool", True, None, True, True, "生成前阅读延迟"),
-    HumanizeField("read_delay_min_ms", "int", 1000, (0, 30000), True, True, "阅读延迟下界"),
-    HumanizeField("read_delay_max_ms", "int", 6000, (0, 60000), True, True, "阅读延迟上界"),
-    HumanizeField("read_delay_chars_per_second", "int", 0, (0, 100), True, True, "阅读速度(字/秒,0=关)"),
-    HumanizeField("read_delay_max_total_ms", "int", 30000, (0, 120000), True, True, "阅读延迟总上限"),
-    HumanizeField("read_delay_channel_cap_ms", "int", 5000, (0, 60000), True, True, "无typing渠道封顶"),
-    HumanizeField("typing_enabled", "bool", True, None, True, True, "输入状态(typing)"),
-    HumanizeField("typo_rate", "int", 0, (0, 100), True, True, "沉浸式口误概率(%)"),
-    HumanizeField("user_override_enabled", "bool", True, None, True, False, "按用户覆盖总开关"),
-    HumanizeField("max_segments", "int", MAX_SEGMENTS, None, True, False, "单次拆条上限(2/3/4)"),
+    HumanizeField("delay_mode", "str", DEFAULT_DELAY_MODE, None, True, "段间延时模式"),
+    HumanizeField("per_char_ms", "int", 45, (5, 200), True, "逐字每字毫秒"),
+    HumanizeField("fixed_ms", "int", 600, (0, 5000), True, "固定延时毫秒"),
+    HumanizeField("random_min_ms", "int", 400, (0, 10000), True, "随机区间下界"),
+    HumanizeField("random_max_ms", "int", 1600, (0, 10000), True, "随机区间上界"),
+    HumanizeField("delay_floor_ms", "int", 400, (0, 10000), True, "延时下钳"),
+    HumanizeField("delay_ceil_ms", "int", 1600, (0, 60000), True, "延时上钳"),
+    HumanizeField("bracket_delay_ms", "int", 0, (0, 5000), True, "括号段覆盖延时"),
+    HumanizeField("proactive_split", "bool", False, None, True, "主动消息拆条"),
+    HumanizeField("read_delay_enabled", "bool", True, None, True, "生成前阅读延迟"),
+    HumanizeField("read_delay_min_ms", "int", 1000, (0, 30000), True, "阅读延迟下界"),
+    HumanizeField("read_delay_max_ms", "int", 6000, (0, 60000), True, "阅读延迟上界"),
+    HumanizeField("read_delay_chars_per_second", "int", 0, (0, 100), True, "阅读速度(字/秒,0=关)"),
+    HumanizeField("read_delay_max_total_ms", "int", 30000, (0, 120000), True, "阅读延迟总上限"),
+    HumanizeField("read_delay_channel_cap_ms", "int", 5000, (0, 60000), True, "无typing渠道封顶"),
+    HumanizeField("typing_enabled", "bool", True, None, True, "输入状态(typing)"),
+    HumanizeField("typo_rate", "int", 0, (0, 100), True, "沉浸式口误概率(%)"),
+    HumanizeField("max_segments", "int", MAX_SEGMENTS, None, True, "单次拆条上限(2/3/4)"),
 )
 
 _FIELD_BY_NAME: dict[str, HumanizeField] = {f.name: f for f in HUMANIZE_FIELDS}
@@ -133,24 +136,16 @@ INT_BOUNDS: dict[str, tuple[int, int]] = {
     if f.type == "int" and f.bounds is not None
 }
 
-#: 可写字段（依序落盘，保证文件形态稳定）；``max_segments`` 只读、不在其中。
+#: 可写字段（依序落盘，保证文件形态稳定；``max_segments`` 仅接受 2/3/4）。
 WRITABLE_FIELDS: tuple[str, ...] = tuple(f.name for f in HUMANIZE_FIELDS if f.writable)
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "scheduler_config.json"
 _HUMANIZE_KEY = "humanize"
 
-#: per-user 覆盖库（2026-10-27 G-2）：与 ``user_profile`` / ``user_facts``
-#: **同库同隔离域**（``data/sqlite.db``），不新开第二个真源。模块常量便于
-#: 测试隔离（conftest 已把真实 ``data/sqlite.db`` 重定向到沙箱）。
-_OVERRIDE_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sqlite.db"
-
-#: 覆盖表名（删号 purge/count/verify 三处清单都引用它，防三处字面量漂移）。
-OVERRIDE_TABLE = "user_humanize"
-
 
 @dataclass(frozen=True)
 class HumanizeConfig:
-    """生效中的拟人度配置（值语义；``max_segments`` 只读，见字段表）。"""
+    """生效中的拟人度配置（值语义；``max_segments`` 取值 2/3/4，见字段表）。"""
 
     delay_mode: str = DEFAULT_DELAY_MODE
     per_char_ms: int = 45
@@ -169,7 +164,6 @@ class HumanizeConfig:
     read_delay_channel_cap_ms: int = 5000
     typing_enabled: bool = True
     typo_rate: int = 0
-    user_override_enabled: bool = True
     max_segments: int = MAX_SEGMENTS
 
     def as_dict(self) -> dict[str, Any]:
@@ -192,7 +186,6 @@ class HumanizeConfig:
             "read_delay_channel_cap_ms": self.read_delay_channel_cap_ms,
             "typing_enabled": self.typing_enabled,
             "typo_rate": self.typo_rate,
-            "user_override_enabled": self.user_override_enabled,
             "max_segments": self.max_segments,
         }
 
@@ -221,7 +214,7 @@ def _read_bool(block: dict[str, Any], key: str) -> bool:
 
 
 def _read_segment_cap(block: dict[str, Any]) -> int:
-    """拆条上限（Q6）：只接受 2/3/4；其余（含手改坏值）回落默认 2。"""
+    """拆条上限（Q6）：只接受 2/3/4；其余（含手改坏值）回落默认 3。"""
     value = block.get("max_segments")
     if isinstance(value, bool) or not isinstance(value, int):
         return MAX_SEGMENTS
@@ -270,7 +263,6 @@ def _effective_global_values(block: dict[str, Any]) -> dict[str, Any]:
         "read_delay_channel_cap_ms": _read_int(block, "read_delay_channel_cap_ms"),
         "typing_enabled": _read_bool(block, "typing_enabled"),
         "typo_rate": _read_int(block, "typo_rate"),
-        "user_override_enabled": _read_bool(block, "user_override_enabled"),
         "max_segments": _read_segment_cap(block),
     }
 
@@ -278,21 +270,19 @@ def _effective_global_values(block: dict[str, Any]) -> dict[str, Any]:
 def read_humanize(
     user_key: str | None = None, character_id: str | None = None
 ) -> HumanizeConfig:
-    """热读当前拟人度配置（2026-11-07 起：用户×角色快照 → 全局块 → 默认值）。
+    """热读当前拟人度配置（用户×角色快照 → 全局块 → 默认值）。
 
     Args:
         user_key: 完整会话键（v1.28 形态 ``N:wxid``，由
-            ``StructuredMemory.user_key_from_session`` 产出）。``None``/空串
-            → 只读全局默认（后台线/提醒线等无会话上下文的调用点保持旧行为）。
-        character_id: 卡片 id。**给了就走「我 × 这个角色」的全量快照**
+            ``StructuredMemory.user_key_from_session`` 产出）。
+        character_id: 卡片 id。**两者都给才走「我 × 这个角色」的全量快照**
             （`utils.character_settings` 唯一真源，用户裁决「每个角色各自一套」）；
-            不给则维持旧的 per-user 覆盖链（机器面/无角色上下文的调用点）。
+            缺任一项 → 只读全局默认（机器面/无角色上下文的调用点）。
 
     语义（D15 显式声明、绝不猜测）：
-      - 覆盖表里没有该 user_key 的行 → 回落全局块，不做任何模糊匹配；
-      - 覆盖行存在但单字段非法 → 该字段回落全局（不信任脏数据，不抛异常）；
-      - 覆盖库不可用（缺失/损坏/权限）→ 回落全局，**绝不抛异常炸主链**；
-      - ``user_override_enabled=false`` → 覆盖表整体忽略（回滚开关）。
+      - 快照行缺失 → 由 `character_settings.read` 按当前出厂默认整份物化；
+      - 快照不可用（库损坏/权限）→ 回落全局，**绝不抛异常炸主链**；
+      - 全局块单字段非法 → 该字段回落静态默认（不信任脏数据）。
 
     本函数**不做缓存**（含无 lru_cache、无模块级快照）：4 worker 中任一进程
     写入后，其他 worker 的下一次调用必须立刻看到新值。
@@ -304,8 +294,8 @@ def read_humanize(
     values = _effective_global_values(block)
 
     if user_key and character_id:
-        # 2026-11-07 用户裁决：设置按「我 × 这个角色」全量快照，不再回落到
-        # 跨角色的 per-user 层。行不存在时 read() 会从出厂默认整份物化。
+        # 2026-11-07 用户裁决：设置按「我 × 这个角色」全量快照。
+        # 2026-11-08：跨角色的 per-user 层已退役，此处不再回落它。
         try:
             from utils import character_settings
 
@@ -323,30 +313,6 @@ def read_humanize(
         except Exception as exc:  # noqa: BLE001
             logger.warning("角色级拟人设置读取失败，回落全局 user=%s ch=%s: %s",
                            user_key, character_id, exc)
-
-    if user_key and values.get("user_override_enabled", True):
-        override = _read_override(str(user_key).strip())
-        if override:
-            merged = {**values, **override}
-            if merged["random_min_ms"] > merged["random_max_ms"]:
-                logger.warning(
-                    "user_humanize 随机区间倒置（user=%s），该用户覆盖回落全局", user_key,
-                )
-                merged["random_min_ms"] = values["random_min_ms"]
-                merged["random_max_ms"] = values["random_max_ms"]
-            if merged["delay_floor_ms"] > merged["delay_ceil_ms"]:
-                logger.warning(
-                    "user_humanize 延时钳位倒置（user=%s），该用户覆盖回落全局", user_key,
-                )
-                merged["delay_floor_ms"] = values["delay_floor_ms"]
-                merged["delay_ceil_ms"] = values["delay_ceil_ms"]
-            if merged["read_delay_min_ms"] > merged["read_delay_max_ms"]:
-                logger.warning(
-                    "user_humanize 阅读延迟区间倒置（user=%s），该用户覆盖回落全局", user_key,
-                )
-                merged["read_delay_min_ms"] = values["read_delay_min_ms"]
-                merged["read_delay_max_ms"] = values["read_delay_max_ms"]
-            values = merged
 
     return HumanizeConfig(**values)
 
@@ -392,7 +358,7 @@ def validate_payload(values: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{key} 越界: {value}（允许 {lo}..{hi}）")
         out[key] = int(value)
 
-    for key in ("proactive_split", "read_delay_enabled", "typing_enabled", "user_override_enabled"):
+    for key in ("proactive_split", "read_delay_enabled", "typing_enabled"):
         value = values.get(key)
         if value is None:
             value = DEFAULTS[key]
@@ -438,12 +404,15 @@ def _validate_partial(payload: dict[str, Any]) -> None:
             raise ValueError(f"delay_mode 非法: {value!r}；可选 {DELAY_MODES}")
 
 
-def write_humanize(*, user_key: str | None = None, **partial: Any) -> HumanizeConfig:
-    """partial merge 写入（只改传入键）；返回写入后的生效配置。
+def write_humanize(**partial: Any) -> HumanizeConfig:
+    """partial merge 写入**全局默认**（只改传入键）；返回写入后的生效配置。
+
+    2026-11-08：per-user 写入路径已随 `user_humanize` 读层一并退役——用户的
+    拟人节奏属于「我 × 这个角色」，写入走
+    `PUT /api/characters/{id}/my-settings`（`utils.character_settings`）。
+    本函数只剩全局默认这一个写入面（owner = admin 的 `/api/humanize/config`）。
 
     Args:
-        user_key: 非空 → 写**该用户**的覆盖行（不动全局默认）；空/``None`` →
-            写全局默认（旧行为，全站生效）。
         **partial: 可写字段的局部更新（``None`` 视同未提供）。
 
     真源文件是**共享**的（``/api/proactive/config`` 也读写同一份），故
@@ -451,9 +420,6 @@ def write_humanize(*, user_key: str | None = None, **partial: Any) -> HumanizeCo
     且只触碰 ``humanize`` 块 —— 其余顶层键（reply_mode / quiet_hours /
     llm_proactive / vault …）逐字保留。校验失败时直接抛 ``ValueError``，
     **不落盘**（异常在 ``update_json`` 的写盘之前抛出）。
-
-    ``max_segments`` 为只读字段：传入非合法档位一律 ``ValueError``；
-    恰为默认档位时不落盘（读侧恒定由字段表产出）。
     """
     payload = {k: v for k, v in partial.items() if v is not None}
     unknown = sorted(set(payload) - set(WRITABLE_FIELDS))
@@ -461,30 +427,6 @@ def write_humanize(*, user_key: str | None = None, **partial: Any) -> HumanizeCo
         raise ValueError(f"未知的拟人度字段: {unknown}；可写字段为 {list(WRITABLE_FIELDS)}")
 
     _validate_partial(payload)
-
-    uk = str(user_key or "").strip()
-    if uk:
-        for key in payload:
-            if not _FIELD_BY_NAME[key].per_user:
-                raise ValueError(f"{key} 是全局开关，不支持按用户覆盖")
-        current = read_humanize(uk)
-        candidate = {
-            f.name: getattr(current, f.name) for f in HUMANIZE_FIELDS if f.writable
-        }
-        candidate.update(payload)
-        _check_cross_field(candidate)
-        stored = _read_override_raw(uk)
-        stored.update(payload)
-        _write_override(uk, stored)
-        # 2026-11-07：旧界面写 per-user 行时必须同步到该用户已物化的角色快照，
-        # 否则新真源（用户×角色）下会「保存成功但不生效」= 假回执。
-        try:
-            from utils import character_settings
-
-            character_settings.propagate_user_patch(uk, payload)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("同步角色快照失败 user=%s: %s", uk, e)
-        return read_humanize(uk)
 
     def _mutate(data: dict[str, Any]) -> None:
         block = data.get(_HUMANIZE_KEY)
@@ -498,144 +440,3 @@ def write_humanize(*, user_key: str | None = None, **partial: Any) -> HumanizeCo
 
     json_state.update_json(_CONFIG_PATH, _mutate)
     return read_humanize()
-
-
-def has_user_override(user_key: str) -> bool:
-    """该用户是否有 user_humanize 覆盖行（前端「个人覆盖/跟随全局」徽标真源）。"""
-    uk = str(user_key or "").strip()
-    if not uk:
-        return False
-    try:
-        with closing(_override_conn()) as conn:
-            cur = conn.execute(
-                f"SELECT 1 FROM {OVERRIDE_TABLE} WHERE user_key = ? LIMIT 1", (uk,)
-            )
-            return cur.fetchone() is not None
-    except Exception as e:  # noqa: BLE001
-        logger.warning("查询拟人度覆盖存在性失败 user=%s: %s", uk, e)
-        return False
-
-
-def clear_humanize_override(user_key: str) -> bool:
-    """删除该用户的覆盖行（回落全局默认）。返回是否有行被删。
-
-    2026-11-07：同时清空该用户的全部「用户 × 角色」快照——旧界面的
-    「恢复跟随全局」语义必须继续成立；只删旧行不删快照会让用户看到
-    「已恢复」而行为仍按旧快照跑（假成功）。
-    """
-    uk = str(user_key or "").strip()
-    if not uk:
-        return False
-    purged = 0
-    try:
-        from utils import character_settings
-
-        purged = character_settings.purge_user(uk)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("清除角色快照失败 user=%s: %s", uk, e)
-    try:
-        with closing(_override_conn()) as conn, conn:
-            cur = conn.execute(f"DELETE FROM {OVERRIDE_TABLE} WHERE user_key = ?", (uk,))
-            return bool(cur.rowcount) or purged > 0
-    except Exception as e:  # noqa: BLE001
-        logger.warning("清除拟人度覆盖失败 user=%s: %s", uk, e)
-        return purged > 0
-
-
-# ── per-user 覆盖存储（2026-10-27 G-2）──────────────────────────
-#
-# 为什么放在 `shisi` 侧的同一个 sqlite.db：用户隔离域（user_key = 完整会话键
-# `N:wxid`）与 `user_profile` / `user_facts` / `user_reply_mode` 完全一致。
-# 开第二个库只会制造「删了一个、漏了另一个」的第二个真源。
-#
-# 幂等建表：每次连接 `CREATE TABLE IF NOT EXISTS`（SQLite 的 DDL 是原子的）。
-# 不写迁移脚本 —— 旧库首次访问即建表，与 `UserProfileStore._ensure_schema` 同款。
-
-_OVERRIDE_SCHEMA = f"""
-CREATE TABLE IF NOT EXISTS {OVERRIDE_TABLE} (
-    user_key TEXT PRIMARY KEY,
-    config TEXT NOT NULL DEFAULT '{{}}',
-    updated_at TEXT NOT NULL DEFAULT ''
-)
-"""
-
-
-def _override_conn() -> sqlite3.Connection:
-    """打开覆盖库并幂等建表。
-
-    路径父目录不存在时先建（冷启动/测试 tmp 场景）；失败上抛，由调用方决定
-    是「回落全局」还是「写入失败上抛」。
-    """
-    path = Path(_OVERRIDE_DB_PATH)
-    if path.parent and not path.parent.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=5.0)
-    conn.execute(_OVERRIDE_SCHEMA)
-    conn.commit()
-    return conn
-
-
-def _sanitize_override(data: dict[str, Any]) -> dict[str, Any]:
-    """宽松修复库里存的手改坏值：未知键/不可覆盖键/类型不符/越界一律丢弃。"""
-    out: dict[str, Any] = {}
-    for key, value in data.items():
-        field = _FIELD_BY_NAME.get(key)
-        if field is None or not field.per_user:
-            logger.debug("user_humanize 忽略不可覆盖字段 %r", key)
-            continue
-        if field.type == "bool":
-            if isinstance(value, bool):
-                out[key] = value
-            continue
-        if field.type == "int":
-            if isinstance(value, bool) or not isinstance(value, int):
-                continue
-            lo, hi = field.bounds or (0, 0)
-            if lo <= value <= hi:
-                out[key] = int(value)
-            continue
-        if key == "delay_mode" and value in DELAY_MODES:
-            out[key] = value
-    return out
-
-
-def _read_override_raw(user_key: str) -> dict[str, Any]:
-    """读该用户的覆盖字典（已宽松修复）；无键/无行/库不可用 → 空 dict。"""
-    uk = str(user_key or "").strip()
-    if not uk:
-        return {}
-    try:
-        with closing(_override_conn()) as conn:
-            row = conn.execute(
-                f"SELECT config FROM {OVERRIDE_TABLE} WHERE user_key = ?", (uk,)
-            ).fetchone()
-        if not row or not row[0]:
-            return {}
-        data = json.loads(row[0])
-        if not isinstance(data, dict):
-            logger.warning("user_humanize.config 非 dict（user=%s），忽略", uk)
-            return {}
-        return _sanitize_override(data)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("读取拟人度覆盖失败 user=%s（回落全局）: %s", uk, e)
-        return {}
-
-
-def _read_override(user_key: str) -> dict[str, Any]:
-    """``read_humanize`` 的覆盖读取入口（语义同 :func:`_read_override_raw`）。"""
-    return _read_override_raw(user_key)
-
-
-def _write_override(user_key: str, overrides: dict[str, Any]) -> None:
-    """写/更新该用户的覆盖行。失败**上抛**（调用方必须知道没生效）。"""
-    with closing(_override_conn()) as conn, conn:
-        conn.execute(
-            f"INSERT INTO {OVERRIDE_TABLE} (user_key, config, updated_at) VALUES (?, ?, ?) "
-            f"ON CONFLICT(user_key) DO UPDATE SET config = excluded.config, "
-            f"updated_at = excluded.updated_at",
-            (
-                user_key,
-                json.dumps(overrides, ensure_ascii=False, sort_keys=True),
-                datetime.now().isoformat(timespec="seconds"),
-            ),
-        )

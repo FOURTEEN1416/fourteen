@@ -4,7 +4,8 @@
 - **每个角色一份完整快照**（不是「与全局的差异」）——首次读取即从出厂默认整份物化；
 - **两维隔离**：A 用户调林挽夏不影响 B 用户调林挽夏，也不影响 A 自己调孙颖莎；
 - **读侧容错 / 写侧严格**：坏行逐字段回落默认，非法写入必须抛 ValueError（禁止假成功）；
-- **迁移不丢设置**：`seed_from_legacy` 把旧的 per-user 覆盖值继承进快照。
+- **2026-11-08**：旧的 per-user 覆盖层退役后，物化只取当前出厂默认（存量用户
+  设置由 `scripts/migrate_per_user_prefs_to_my_settings.py` 迁入）。
 """
 
 from __future__ import annotations
@@ -123,18 +124,15 @@ def test_bad_row_falls_back_per_field_and_heals() -> None:
     assert "__junk__" not in values
 
 
-def test_seed_from_legacy_inherits_per_user_override() -> None:
-    """迁移必须继承旧 per-user 覆盖，而不是把用户设置清零。"""
-    user, ch = _keys("legacy")
-    from utils import humanize_config, proactive_config
+def test_seed_from_defaults_materializes_current_defaults() -> None:
+    """2026-11-08：物化初值 = 当前出厂默认（旧 per-user 层已退役，不再隐形继承）。"""
+    user, ch = _keys("seed")
+    values = cs.seed_from_defaults(user, ch)
 
-    humanize_config.write_humanize(user_key=user, per_char_ms=77)
-    proactive_config.write_proactive_config(user_key=user, max_daily_messages=5)
-
-    values = cs.seed_from_legacy(user, ch)
-
-    assert values["per_char_ms"] == 77
-    assert values["max_daily_messages"] == 5
+    assert cs.has_row(user, ch)
+    assert values["per_char_ms"] == cs.global_defaults()["per_char_ms"]
+    assert values["max_daily_messages"] == cs.global_defaults()["max_daily_messages"]
+    assert values["reply_mode"] == ""
 
 
 def test_backfill_skips_existing_rows() -> None:

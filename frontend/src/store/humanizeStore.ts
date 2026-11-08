@@ -22,14 +22,11 @@ import { useErrorStore } from './errorStore'
 // 由组件层（HumanizeSection）从 `../../api/system` 传入真实实现，
 // 测试传入 mock。store 因此保持零 API 依赖，只做状态存取。
 
-/** GET 配置的 API 函数签名（组件层注入真实实现，测试注入 mock）；userKey 非空=读该用户合并视图 */
-export type HumanizeGetConfigFn = (
-  userKey?: string,
-) => Promise<{ data?: { status?: string; config?: unknown } }>
-/** POST 配置的 API 函数签名；userKey 非空=只写该用户覆盖（admin 作用域） */
+/** GET 配置的 API 函数签名（组件层注入真实实现，测试注入 mock）；只读全局默认 */
+export type HumanizeGetConfigFn = () => Promise<{ data?: { status?: string; config?: unknown } }>
+/** POST 配置的 API 函数签名；只写全局默认 */
 export type HumanizeUpdateConfigFn = (
   cfg: HumanizeConfigPayload,
-  userKey?: string,
 ) => Promise<{ data?: { status?: string; config?: unknown } }>
 
 /** 单次回复拆条上限默认值（Q6：可配 2/3/4；前端只读展示，管理员经 API 调整） */
@@ -77,8 +74,6 @@ export interface HumanizeConfigPayload {
   typing_enabled?: boolean
   /** 沉浸式可选口误概率（百分比，默认 0=关闭） */
   typo_rate?: number
-  /** 按用户覆盖总开关（默认 true；关闭=忽略 user_humanize 覆盖表） */
-  user_override_enabled?: boolean
   /** 单次回复拆条上限（Q6：2/3/4，默认 3） */
   max_segments?: number
   /** **只读**展示标签，GET 回执附带，不落真源文件 */
@@ -106,7 +101,6 @@ export const DEFAULT_HUMANIZE_CONFIG: HumanizeConfig = {
   read_delay_channel_cap_ms: 5000,
   typing_enabled: true,
   typo_rate: 0,
-  user_override_enabled: true,
   max_segments: HUMANIZE_MAX_SEGMENTS,
 }
 
@@ -129,7 +123,6 @@ export const HUMANIZE_WRITABLE_KEYS = [
   'read_delay_channel_cap_ms',
   'typing_enabled',
   'typo_rate',
-  'user_override_enabled',
   'max_segments',
 ] as const
 
@@ -232,9 +225,6 @@ export function normalizeHumanizeConfig(raw: unknown): HumanizeConfig {
     read_delay_channel_cap_ms: readInt('read_delay_channel_cap_ms', r.read_delay_channel_cap_ms),
     typing_enabled: typeof r.typing_enabled === 'boolean' ? r.typing_enabled : d.typing_enabled,
     typo_rate: readInt('typo_rate', r.typo_rate),
-    user_override_enabled: typeof r.user_override_enabled === 'boolean'
-      ? r.user_override_enabled
-      : d.user_override_enabled,
     max_segments: readSegmentCap(r.max_segments),
   }
 }
@@ -275,9 +265,9 @@ export interface HumanizeState {
   error: string
   saving: boolean
   savedAt: string
-  load: (getConfig: HumanizeGetConfigFn, userKey?: string) => Promise<void>
+  load: (getConfig: HumanizeGetConfigFn) => Promise<void>
   patch: (partial: Partial<HumanizeConfig>) => void
-  save: (updateConfig: HumanizeUpdateConfigFn, userKey?: string) => Promise<boolean>
+  save: (updateConfig: HumanizeUpdateConfigFn) => Promise<boolean>
   reset: () => void
 }
 
@@ -293,11 +283,11 @@ export const useHumanizeStore = create<HumanizeState>()((set, get) => ({
   saving: false,
   savedAt: '',
 
-  /** 热读真源（userKey 非空=读该用户合并视图）；后端未回 `status:'ok'` 一律判失败 */
-  async load(getConfig, userKey) {
+  /** 热读全局真源；后端未回 `status:'ok'` 一律判失败 */
+  async load(getConfig) {
     set({ status: 'loading', error: '' })
     try {
-      const res = userKey ? await getConfig(userKey) : await getConfig()
+      const res = await getConfig()
       const receipt = res?.data as { status?: string; config?: unknown } | undefined
       if (receipt?.status !== 'ok' || !receipt.config) {
         throw new Error('后端未确认拟人度配置（status≠ok）')
@@ -322,8 +312,8 @@ export const useHumanizeStore = create<HumanizeState>()((set, get) => ({
     })
   },
 
-  /** 保存增量（userKey 非空=写该用户覆盖）；返回是否**确实**生效（回执 ok） */
-  async save(updateConfig, userKey) {
+  /** 保存增量（只写全局默认）；返回是否**确实**生效（回执 ok） */
+  async save(updateConfig) {
     const { config, snapshot } = get()
     const diff = humanizeDiff(config, snapshot)
     if (Object.keys(diff).length === 0) {
@@ -333,7 +323,7 @@ export const useHumanizeStore = create<HumanizeState>()((set, get) => ({
     }
     set({ saving: true })
     try {
-      const res = userKey ? await updateConfig(diff, userKey) : await updateConfig(diff)
+      const res = await updateConfig(diff)
       const receipt = res?.data as { status?: string; config?: unknown } | undefined
       if (receipt?.status !== 'ok') {
         useErrorStore.getState().addToast({

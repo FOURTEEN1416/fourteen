@@ -32,7 +32,6 @@ from utils import humanize_config as hc
 @pytest.fixture
 def rhythm_env(monkeypatch, tmp_path):
     monkeypatch.setattr(hc, "_CONFIG_PATH", tmp_path / "scheduler_config.json")
-    monkeypatch.setattr(hc, "_OVERRIDE_DB_PATH", tmp_path / "humanize_override.db")
     return tmp_path
 
 
@@ -43,14 +42,15 @@ def _orch() -> OptimizedOrchestrator:
 
 def _run_small_delay(
     session_id: str, ctx: dict, *, bump_after: float | None = None,
-    typing_capable: bool = False,
+    typing_capable: bool = False, character_id: str = "",
 ) -> dict:
     orch = _orch()
 
     async def _go() -> dict:
         task = asyncio.create_task(
             orch._apply_humanize_rhythm(
-                session_id, "你好呀", ctx, typing_capable=typing_capable,
+                session_id, "你好呀", ctx,
+                typing_capable=typing_capable, character_id=character_id,
             )
         )
         if bump_after is not None:
@@ -156,11 +156,17 @@ def test_typing_requires_capable_channel(rhythm_env):
     assert out["delay_ms"] == 60
 
 
-def test_per_user_override_controls_rhythm(rhythm_env):
-    """Q2 按用户覆盖：该用户可单独关闭阅读延迟。"""
+def test_character_snapshot_controls_rhythm(rhythm_env):
+    """2026-11-08：拟人节奏按「用户 × 角色」快照生效（per-user 覆盖层已退役）。"""
+    from utils import character_settings
+
     hc.write_humanize(read_delay_enabled=True, read_delay_min_ms=40, read_delay_max_ms=40)
-    hc.write_humanize(user_key="2:alice@im.wechat", read_delay_enabled=False)
-    out = _run_small_delay("2:alice@im.wechat", {"chat_history": []})
+    character_settings.write(
+        "2:alice@im.wechat", "ch_x", {"read_delay_enabled": False},
+    )
+    out = _run_small_delay(
+        "2:alice@im.wechat", {"chat_history": []}, character_id="ch_x",
+    )
     assert out["delay_ms"] == 0
 
 

@@ -10,7 +10,7 @@
   ``ValueError`` 且真源文件保持原样；
 - **宽松读**（磁盘手改）：坏值逐字段回落默认，跨字段倒置两侧愈合，不抛异常。
 
-数据全部合成：``_CONFIG_PATH`` / ``_OVERRIDE_DB_PATH`` 经 fixture 重定向到
+数据全部合成：``_CONFIG_PATH`` 经 fixture 重定向到
 per-test 临时路径，**绝不触碰**开发机真实 ``data/``。
 """
 
@@ -25,9 +25,8 @@ from utils import humanize_config as hc
 
 @pytest.fixture
 def hm_tmp(monkeypatch, tmp_path):
-    """隔离配置文件与按用户覆盖库。"""
+    """隔离全局真源文件（per-user 覆盖层已于 2026-11-08 退役）。"""
     monkeypatch.setattr(hc, "_CONFIG_PATH", tmp_path / "scheduler_config.json")
-    monkeypatch.setattr(hc, "_OVERRIDE_DB_PATH", tmp_path / "humanize_override.db")
     return tmp_path / "scheduler_config.json"
 
 
@@ -63,11 +62,10 @@ def test_defaults_within_bounds_and_stable():
     assert hc.DEFAULTS["per_char_ms"] == 45
     assert hc.DEFAULTS["delay_floor_ms"] == 400
     assert hc.DEFAULTS["delay_ceil_ms"] == 1600
-    assert hc.DEFAULTS["user_override_enabled"] is True
 
 
 def test_max_segments_choices(hm_tmp):
-    """Q6：拆条上限默认 3（可配 2/3/4），其余值拒绝；全局开关、不支持按用户覆盖。"""
+    """Q6：拆条上限默认 3（可配 2/3/4），其余值拒绝。"""
     assert hc.HumanizeConfig().max_segments == hc.MAX_SEGMENTS == 3
     for cap in (2, 3, 4):
         hc.write_humanize(max_segments=cap)
@@ -76,21 +74,21 @@ def test_max_segments_choices(hm_tmp):
         assert raw["humanize"]["max_segments"] == cap
     with pytest.raises(ValueError):
         hc.write_humanize(max_segments=5)
-    with pytest.raises(ValueError):
-        hc.write_humanize(user_key="2:alice@im.wechat", max_segments=3)
     # 磁盘坏值宽松回落默认
     hm_tmp.write_text(json.dumps({"humanize": {"max_segments": 9}}), encoding="utf-8")
     assert hc.read_humanize().max_segments == 3
 
 
-def test_user_override_switch_is_global_only(hm_tmp):
-    """user_override_enabled 是全局开关，字段表标记 per_user=False。"""
-    field = next(f for f in hc.HUMANIZE_FIELDS if f.name == "user_override_enabled")
-    assert field.per_user is False
-    hc.write_humanize(user_override_enabled=False)
-    assert hc.read_humanize().user_override_enabled is False
+def test_retired_user_override_switch_is_not_a_field(hm_tmp):
+    """2026-11-08：per-user 层退役后 `user_override_enabled` 不再存在。
+
+    它唯一的语义就是「忽略 user_humanize 覆盖行」——覆盖层删除后保留一个
+    不生效的开关等于给用户假回执，故字段表、DEFAULTS、写入面同时移除。
+    """
+    assert "user_override_enabled" not in hc.DEFAULTS
+    assert all(f.name != "user_override_enabled" for f in hc.HUMANIZE_FIELDS)
     with pytest.raises(ValueError):
-        hc.write_humanize(user_key="2:alice@im.wechat", user_override_enabled=False)
+        hc.write_humanize(user_override_enabled=False)
 
 
 # ══════════════════════════════════════════════════════════
@@ -197,4 +195,3 @@ def test_missing_block_uses_defaults(hm_tmp):
     cfg = hc.read_humanize()
     assert cfg.delay_mode == "dynamic"
     assert cfg.per_char_ms == 45
-    assert cfg.user_override_enabled is True

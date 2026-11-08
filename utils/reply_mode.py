@@ -20,18 +20,27 @@
 ① 非共处约束（只能说话、不能做动作）② 把实际踩到的句子直接写成反例
 ③ 明确「场景设定 / 开场情境只是背景，不代表此刻在一起」。
 
-真源：`data/scheduler_config.json` 的 `reply_mode` 键。与 `quiet_hours`
-同一份**跨 worker 运行时配置文件**（uvicorn 4 worker 共读，
-web 控制端写入即对所有 worker 生效，无需重启）。
+真源分两层（2026-11-08 D-C 用户裁决）：
+
+    ① 「我 × 这个角色」快照的 reply_mode（`utils.character_settings`，
+       `user_character_settings` 表，唯一用户可写真源；空串 = 未设置）
+            ↓ 未设置/非法
+    ② 全局默认：`data/scheduler_config.json` 的 `reply_mode` 键
+       （与 `quiet_hours` 同一份**跨 worker 运行时配置文件**）
+            ↓ 缺失/非法
+    ③ 内置默认 `immersive`
+
+**旧的 per-user 覆盖表 `user_reply_mode` 已于 2026-11-08 整体退役**（用户裁决：
+「后端 /api/user/reply-mode 端点、user_reply_mode 读层整体退役」）。回复模式
+不再按「人」一刀切，而是按「用户 × 角色」各自设置；存量行由
+`scripts/migrate_per_user_prefs_to_my_settings.py` 迁入各用户当前激活角色的
+快照。本模块不再持有任何 sqlite 覆盖表。
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import sqlite3
-from contextlib import closing
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,14 +54,6 @@ REPLY_MODES = (REPLY_MODE_IMMERSIVE, REPLY_MODE_NOVEL)
 DEFAULT_REPLY_MODE = REPLY_MODE_IMMERSIVE
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "scheduler_config.json"
-
-#: per-user 覆盖库（2026-10-21 R7）：与 `user_profile` / `user_facts` **同库同隔离域**
-#: （`data/sqlite.db`），不新开第二个真源。模块常量便于测试隔离（conftest 已把
-#: 真实 `data/sqlite.db` 当生产库，测试必须改道临时路径）。
-_OVERRIDE_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sqlite.db"
-
-#: 覆盖表名（删号 purge/count/verify 三处清单都引用它，防三处字面量漂移）。
-OVERRIDE_TABLE = "user_reply_mode"
 
 _MODE_LABELS = {
     REPLY_MODE_IMMERSIVE: "沉浸式聊天（像真人发微信）",
@@ -137,56 +138,76 @@ _INSTRUCTION_NOVEL = """【回复模式：小说式】
   不要点破「隔了多久」、不要解释你怎么知道的——时间感是底色不是台词。"""
 
 
-def read_reply_mode(user_key: str | None = None) -> str:
-    """读取回复模式：**用户覆盖优先，无覆盖回落全局默认**。
+def read_reply_mode(
+    user_key: str | None = None, character_id: str | None = None
+) -> str:
+    """读取生效的回复模式（2026-11-08 D-C 契约）。
+
+    解析链（逐层只认确定值，绝不猜测）：
+
+        ① `user_character_settings` 快照的 `reply_mode`（`user_key` 与
+           `character_id` 都给才读；空串/非法 = 未设置）
+        ② `data/scheduler_config.json` 的全局默认 `reply_mode`
+        ③ 内置 `immersive`
 
     Args:
         user_key: 完整会话键（v1.28 形态 ``N:wxid``，由
             ``StructuredMemory.user_key_from_session`` 产出）。
-            ``None``/空串 → 只读全局默认——**保持旧行为**，供后台线/提醒线等
-            没有会话上下文的调用点使用（2026-10-21 R7 兼容契约）。
+        character_id: 卡片 id。缺任一项 → 跳过快照层，直接读全局默认
+            （后台线/提醒线/无角色上下文的调用点保持旧行为）。
 
     语义（D15 显式声明、绝不猜测）：
-      - 覆盖表里没有该 user_key 的行 → 回落全局默认，不做任何模糊匹配；
-      - 覆盖行存在但值是非法串 → 回落全局默认（不信任脏数据）；
-      - 覆盖库不可用（缺失/损坏/权限）→ 回落全局默认，**绝不抛异常炸主链**。
+      - 快照行缺失 → 由 `character_settings.read` 按当前出厂默认**整份物化**
+        （与 humanize / proactive / 骰子闸同一条纪律：读即物化，全量快照）；
+      - 快照值非法（脏数据）→ 回落全局（不信任脏数据）；
+      - 库不可用（缺失/损坏/权限）→ 回落全局，**绝不抛异常炸主链**。
 
     每次调用热读（无进程缓存）：控制端写入即对所有 worker 生效。
     """
-    override = _read_override(user_key)
-    if override in REPLY_MODES:
-        return override
+    uk = str(user_key or "").strip()
+    cid = str(character_id or "").strip()
+    if uk and cid:
+        try:
+            from utils import character_settings
+
+            snapshot = character_settings.read(uk, cid)
+            mode = snapshot.get("reply_mode")
+            if mode in REPLY_MODES:
+                return str(mode)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "角色级回复模式读取失败，回落全局 user=%s ch=%s: %s", uk, cid, exc,
+            )
+
     raw: Any = json_state.read_json(_CONFIG_PATH, default={}) or {}
-    mode = raw.get("reply_mode")
+    mode = raw.get("reply_mode") if isinstance(raw, dict) else None
     if mode in REPLY_MODES:
         return str(mode)
     return DEFAULT_REPLY_MODE
 
 
-def write_reply_mode(mode: str, user_key: str | None = None) -> str:
-    """写入回复模式（保留文件内其他键）。返回实际生效值。
+def write_reply_mode(mode: str) -> str:
+    """写入**全局默认**回复模式（保留文件内其他键）。返回实际生效值。
+
+    2026-11-08：用户级作用域已退役（能力划归「用户 × 角色」快照，写入走
+    `PUT /api/characters/{id}/my-settings` 的 `reply_mode` 字段）。本函数
+    只剩全局默认这一个写入面，owner 是 admin 的 `/api/proactive/config`。
 
     Args:
         mode: ``immersive`` / ``novel``。
-        user_key: 非空 → 写**该用户**的覆盖行（不动全局默认）；空/``None`` →
-            写全局默认（旧行为，全站生效）。
 
     与其他 ``data/*.json`` 状态文件共用 `utils.json_state` 的原子写 + 跨进程锁
-    —— 本文件是 4 个 uvicorn worker 共读的跨 worker 运行时配置，
+    —— 本文件是多个 uvicorn worker 共读的跨 worker 运行时配置，
     「控制端写入 / worker 读取」不允许出现半写。
 
     Raises:
         ValueError: mode 非法。
-        OSError / sqlite3.Error: 持久化失败**上抛**（2026-10-21 R7 修复）。
+        OSError: 持久化失败**上抛**（2026-10-21 R7 修复）。
             旧实现只 WARNING 后 ``return mode``，调用方据此记「回复模式已切换」
             = **写盘失败却假成功**（独立复核指出的既有缺陷）。
     """
     if mode not in REPLY_MODES:
         raise ValueError(f"unknown reply_mode: {mode!r}; expected one of {REPLY_MODES}")
-
-    if user_key:
-        _write_override(str(user_key).strip(), mode)
-        return mode
 
     def _mutate(data: dict) -> None:
         data["reply_mode"] = mode
@@ -195,89 +216,20 @@ def write_reply_mode(mode: str, user_key: str | None = None) -> str:
     return mode
 
 
-def clear_reply_mode_override(user_key: str) -> bool:
-    """删除该用户的覆盖行（回落全局默认）。返回是否有行被删。"""
-    uk = str(user_key or "").strip()
-    if not uk:
-        return False
-    try:
-        with closing(_override_conn()) as conn, conn:
-            cur = conn.execute("DELETE FROM user_reply_mode WHERE user_key = ?", (uk,))
-            return bool(cur.rowcount)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("清除回复模式覆盖失败 user=%s: %s", uk, e)
-        return False
-
-
-def reply_mode_instruction(mode: str | None = None, *, user_key: str | None = None) -> str:
+def reply_mode_instruction(
+    mode: str | None = None,
+    *,
+    user_key: str | None = None,
+    character_id: str | None = None,
+) -> str:
     """返回应追加到 system prompt 的模式指令。
 
-    ``mode`` 显式给出时优先（一轮内单次解析的透传入口）；否则按 ``user_key``
-    读真源（有覆盖用覆盖，否则全局）。
+    ``mode`` 显式给出时优先（一轮内单次解析的透传入口）；否则按
+    ``user_key`` × ``character_id`` 读真源（快照 → 全局 → 沉浸式）。
     """
-    m = mode if mode in REPLY_MODES else read_reply_mode(user_key)
+    m = mode if mode in REPLY_MODES else read_reply_mode(user_key, character_id)
     return _INSTRUCTION_NOVEL if m == REPLY_MODE_NOVEL else _INSTRUCTION_IMMERSIVE
 
 
 def reply_mode_label(mode: str) -> str:
     return _MODE_LABELS.get(mode, mode)
-
-
-# ── per-user 覆盖存储（R7 2026-10-21）────────────────────────────
-#
-# 为什么放在 `shisi` 侧的同一个 sqlite.db：用户隔离域（user_key = 完整会话键
-# `N:wxid`）与 `user_profile` / `user_facts` 完全一致，删号 purge 也按同一键集
-# 清理。开第二个库只会制造「删了一个、漏了另一个」的第二个真源。
-#
-# 幂等建表：每次连接 `CREATE TABLE IF NOT EXISTS`（SQLite 的 DDL 是原子的）。
-# 不写迁移脚本 —— 旧库首次访问即建表，与 `UserProfileStore._ensure_schema` 同款。
-
-_OVERRIDE_SCHEMA = f"""
-CREATE TABLE IF NOT EXISTS {OVERRIDE_TABLE} (
-    user_key TEXT PRIMARY KEY,
-    mode TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT ''
-)
-"""
-
-
-def _override_conn() -> sqlite3.Connection:
-    """打开覆盖库并幂等建表。
-
-    路径父目录不存在时先建（冷启动/测试 tmp 场景）；失败上抛，由调用方决定
-    是「回落全局」还是「写入失败上抛」。
-    """
-    path = Path(_OVERRIDE_DB_PATH)
-    if path.parent and not path.parent.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), timeout=5.0)
-    conn.execute(_OVERRIDE_SCHEMA)
-    conn.commit()
-    return conn
-
-
-def _read_override(user_key: str | None) -> str:
-    """读该用户的覆盖值；无键/无行/库不可用 → 空串（调用方回落全局）。"""
-    uk = str(user_key or "").strip()
-    if not uk:
-        return ""
-    try:
-        with closing(_override_conn()) as conn:
-            row = conn.execute(
-                f"SELECT mode FROM {OVERRIDE_TABLE} WHERE user_key = ?", (uk,)
-            ).fetchone()
-        return str(row[0]) if row and row[0] else ""
-    except Exception as e:  # noqa: BLE001
-        logger.debug("读取回复模式覆盖失败 user=%s（回落全局）: %s", uk, e)
-        return ""
-
-
-def _write_override(user_key: str, mode: str) -> None:
-    """写/更新该用户的覆盖行。失败**上抛**（调用方必须知道没生效）。"""
-    with closing(_override_conn()) as conn, conn:
-        conn.execute(
-            f"INSERT INTO {OVERRIDE_TABLE} (user_key, mode, updated_at) VALUES (?, ?, ?) "
-            f"ON CONFLICT(user_key) DO UPDATE SET mode = excluded.mode, "
-            f"updated_at = excluded.updated_at",
-            (user_key, mode, datetime.now().isoformat(timespec="seconds")),
-        )

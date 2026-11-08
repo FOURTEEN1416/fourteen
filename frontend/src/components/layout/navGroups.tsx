@@ -43,10 +43,11 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
     },
     {
       // V2-3①：旧名「系统设置」过重——6 项中 5 项实为个人数据/个性化
-      // （BYOK/语音/偏好），与「这是系统管理面」的观感相悖。改「偏好与设置」。
+      // （BYOK/语音/工具），与「这是系统管理面」的观感相悖。改「偏好与设置」。
+      // 2026-11-08 D-A：账号页「个人偏好」区删除（回复模式等归角色设置），desc 同步改写。
       label: '偏好与设置',
       items: [
-        { to: '/settings/account', icon: Database, label: '账号与数据', desc: '回复模式等个人偏好、数据导出' },
+        { to: '/settings/account', icon: Database, label: '账号与数据', desc: '协议与同意、数据导出、账号注销' },
         { to: '/settings/llm', icon: Sparkles, label: 'LLM 配置', desc: '自带 API Key（BYOK）、测试连接' },
         { to: '/settings/voice', icon: Mic, label: '语音引擎', desc: '给角色选音色、克隆声音' },
         { to: '/settings/tools', icon: Wrench, label: '工具仪表盘', desc: '天气/提醒/搜索等能力状态' },
@@ -61,7 +62,8 @@ export function buildGlobalNavGroups(isAdmin: boolean, activeRoleId?: string): N
         ? [
             { to: '/admin/users', icon: User, label: '用户管理', badge: 'admin' },
             { to: '/admin/providers', icon: Server, label: '供应商管理', badge: 'admin' },
-            { to: '/settings/proactive', icon: Activity, label: '主动消息引擎', desc: '出厂默认值与运维（仅管理员）', badge: 'admin' },
+            // 2026-11-08 D-B 用户裁决：`/settings/proactive` 管理员运维页整机删除——
+            // 全局出厂默认值与主动急停不再有任何 UI 入口（只保留后端 API）。
           ]
         : [],
     },

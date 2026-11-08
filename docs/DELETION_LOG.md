@@ -1,5 +1,66 @@
 # Code Deletion Log
 
+## [2026-11-08] D-A / D-C：个人偏好区收归「用户 × 角色」——per-user 偏好层整体退役
+
+### 裁决依据与替代 Owner
+- 用户裁决（逐字）：「D-A 个人偏好区（/settings/account 的回复模式+拟人节奏+保存个人节奏按钮）：功能正确但范围划定错误——整块从账号页删除，能力划归为用户×角色的角色设置；后端 /api/user/reply-mode 与 /api/user/humanize 端点、user_reply_mode 与 user_humanize 读层整体退役；存量行迁移到各用户当前激活角色的 my-settings 快照」；「D-C 回复模式契约：my-settings 快照新增字段 reply_mode，字段组键 reply，取值仅限 immersive 或 novel，缺省/未设置=跟随全局默认；运行时解析链改为：my-settings 快照 reply_mode → 全局默认配置 → immersive 兜底；user_reply_mode 表读层整体移除」。
+- 本批任务书第 3 条：`user_proactive_config` per-user 层同样退役（保留 `/api/user/proactive/history` 只读面）。
+- **替代 Owner**：
+  - 用户侧回复模式 / 拟人节奏 / 主动调度 → `utils/character_settings.py`（`user_character_settings` 表，user_key × character_id 全量快照）+ `GET/PUT/DELETE /api/characters/{id}/my-settings`；
+  - 回复模式运行时解析 → `utils/reply_mode.read_reply_mode(user_key, character_id)`（快照 → 全局默认 → immersive）；
+  - 全局默认写面保留：`/api/proactive/config`（含 `reply_mode`）、`/api/humanize/config`（全局 GET/POST/PUT）。
+- **存量数据**：`scripts/migrate_per_user_prefs_to_my_settings.py`（默认 dry-run，`--apply` 才写；只迁旧行里真出现过的键），旧表默认**保留**（`--purge-legacy` 才删），可回滚。
+
+### 删除清单（代码，删除前全文已读）
+- `utils/reply_mode.py`：`_OVERRIDE_DB_PATH`、`OVERRIDE_TABLE`、`_OVERRIDE_SCHEMA`、`_override_conn`、`_read_override`、`_write_override`、`clear_reply_mode_override`；`write_reply_mode` 的 `user_key` 形参（只剩全局默认写面）。
+- `utils/humanize_config.py`：`_OVERRIDE_DB_PATH`、`OVERRIDE_TABLE`、`_OVERRIDE_SCHEMA`、`_override_conn`、`_sanitize_override`、`_read_override_raw`、`_read_override`、`_write_override`、`has_user_override`、`clear_humanize_override`、`write_humanize` 的 `user_key` 形参；字段表 `HumanizeField.per_user` 属性与 `user_override_enabled` 字段（含 `HumanizeConfig` 字段 / `as_dict` 投影 / `_effective_global_values` / `validate_payload` 布尔清单）；`read_humanize` 的 per-user 合并分支。
+- `utils/proactive_config.py`：`_OVERRIDE_DB_PATH`、`OVERRIDE_TABLE`、`_REVERT_KEY`、`_override_conn`、`_override_txn`、`_read_raw_conn`、`_read_raw`、`_write_override_conn`、`_delete_row_conn`、`_delete_row`、`_sanitize_override`、`validate_partial`、`_type_ok`、`_normalize`、`read_override`、`has_override`、`write_proactive_config`、`clear_override`、`clear_revert_marker`、`purge_override_row`、`GATE_KEYS`；`effective()` 的 per-user 回落链。
+- `utils/character_settings.py`：`_legacy_seed_values`、`seed_from_legacy`、`purge_user`、`propagate_user_patch`（三者的唯一消费者都是上述退役层）；物化改为 `seed_from_defaults`（当前出厂默认）。
+- `proactive/scheduler.py`：`reconcile_user_engine`；`_apply_user_engine_config` 的墓碑读取/遮蔽/摘除逻辑；`_llm_proactive_one_user` 的「墓碑回滚前置块」。
+- `api/routers/training_routes.py`：`ProactiveConfigRequestScoped`（R7 作用域扩展）、`_resolve_admin_target_key`、`UserReplyModeRequest`、`GET/POST /api/user/reply-mode`、`GET/POST/PUT/DELETE /api/user/humanize`、`HumanizeConfigRequest.user_key`、`DELETE /api/humanize/config`（按用户清覆盖）、`GET/PUT /api/humanize/config?user_key` 作用域、`_proactive_config_payload`、`UserProactiveConfigRequest`、`UserProactivePauseRequest`、`GET/POST/DELETE /api/user/proactive-config`、`POST /api/user/proactive/pause`。合计 **11 条路由**（training 子路由 30 → 19）。
+- `frontend/src/api/system.ts`：`clearHumanizeUserOverride`；`humanizeGetConfig`/`updateHumanizeConfig` 的 `userKey` 形参；**以及四条用户自助主动消息的 client 函数与回执类型**（`userProactiveGetConfig` / `updateUserProactiveConfig` / `clearUserProactiveConfig` / `userProactivePause` + `UserProactiveEffective` / `UserProactiveConfigWrite` / `UserProactiveConfigResponse`）——它们打的是本批已删的 `/api/user/proactive-config` 与 `/api/user/proactive/pause`，留着就是打 404 的死代码（前次自报「全仓 grep 残留清零」只覆盖了组件内 import，client 层四个函数漏登记，2026-11-08 验收后补删）。
+- `frontend/src/api/client.ts`：上述四函数的具名再导出（三处：具名 import、具名 export、`api` 命名空间对象）。
+- `frontend/src/hooks/useQueries.ts`：`useUserProactiveConfig` hook 与 `queryKeys.userProactive`（唯一消费者是退役页；留着会继续请求 404 端点）。
+- `frontend/src/tests/components/RoleSettings.test.tsx`：上述 hook / 四函数 / 三个回执类型的 mock 与 `USER_*` 夹具（消费方已删，桩变死代码）；「不打旧 user 端点」的断言由新的静态守卫 `frontend/src/tests/api/system.test.ts` 承接。
+- `docs/DELETION_LOG.md` 本条目行数更正：`RoleSettingsTabs.tsx` 实读 `1913 → 851` 行（原记 1914 → 863 系估算偏差）。
+- `frontend/src/store/humanizeStore.ts`：`user_override_enabled`（类型/默认值/可写键/归一化）、`load`/`save` 的 `userKey` 形参。
+- `frontend/src/components/admin/HumanizeSection.tsx`：「按用户覆盖总开关」Toggle、「按用户覆盖」整块（用户下拉 / 加载该用户 / 清除覆盖 / 高级手输会话键 / 当前作用域提示）、`adminListUsers` 依赖与相关 `useState`。
+- `tests/conftest.py`：三个 `_OVERRIDE_DB_PATH` 沙箱重定向（模块属性已不存在，留着只会造出无人读的幽灵属性）。
+
+### 删除清单（测试）
+- **删除** `tests/test_humanize_user_override.py`（整文件 11 例：全部是 `user_humanize` 覆盖表的行为，机制已退役）；
+- **改写** `tests/test_reply_mode.py`（保留全局真源 + 指令内容 + 快照隔离；删 per-user 覆盖/自助端点/admin 作用域用例，新增快照解析 4 例）；
+- **改写** `tests/test_proactive_user_scope.py`（保留全局读取 + admin 全局端点 + 快照化调度；删覆盖表/事务/墓碑/自助端点/purge 相关用例，引擎回滚改钉「DELETE 快照 → 下一拍回全局」）；
+- **改写** `tests/api/test_humanize_config_api.py`（删 6 例用户作用域/自助端点；`_EXPECTED_KEYS`/`_DEFAULTS` 去 `user_override_enabled`）；
+- **改写** `tests/test_humanize_config_schema.py`（`user_override_enabled` 改为「不再是字段」的退役断言）、`tests/test_humanize_rhythm.py`（per-user 用例改快照）、`tests/test_humanize_split_cap.py` / `tests/test_character_settings.py`（夹具/种子语义）、`tests/test_api_routes.py`（计数 30→19 / 104→93）。
+
+### 有意保留
+- `GET /api/user/proactive/history`（状态页「最近主动消息」卡在用）；
+- `/api/proactive/config` 的 `reply_mode` 字段（全局默认唯一写面）；
+- `user_reply_mode` / `user_humanize` / `user_proactive_config` **表本身**：数据保留待迁移脚本 `--purge-legacy` 决定；
+- `shisi/memory/legacy/structured_memory.py` 里对 `user_proactive_config` 的删号 purge 登记（`_has_table` 守卫，旧库有残留行时仍会清）——**2026-11-08 验收后补齐**：同为「只写不读」遗留表的 `user_humanize` / `user_reply_mode` 一并进 `purge_owner_data` 与 `count_owner_rows`（同样 `_has_table` 守卫），删号后个人偏好行不再残留（数据隐私/多用户隔离硬约束）。
+
+### ⚠️ 待 owner 追认（越出裁决文范围的删除）
+- 本条目删除的 `/api/user/proactive-config`（GET/POST/DELETE）与 `POST /api/user/proactive/pause` **共 4 条用户自助路由**，依据写的是「本批任务书第 3 条」；但验收依据里给出的裁决文（D-A / D-C）只点名 `reply-mode` 与 `humanize`，D-B 明写「只保留既有 API」。即：**这 4 条属于需要 owner 明确追认的扩权**。
+- 现状与建议：per-user 覆盖层（`user_proactive_config`）已随任务书退役，这 4 条路由若保留则指向已删的读/写函数（必然 500/404），故**代码上无法回到「保留」形态**；建议 owner 追认「随层退役一并删除」，追认前本行不撤。
+
+### 跨模块消费者（删除必须同步处理）
+- `api/routers/topic_routes.py:167` 曾 `from api.routers.training_routes import _resolve_admin_target_key` —— 本批把它当「只剩退役层消费者」一并删除，但 `GET /api/topic-state/{session_key}` 的 **admin 分支一直在用**：删后该端点 import 即 `ImportError` → 500（`tests/api/test_topic_state_api.py` 14 例红，2026-11-08 验收实证）。
+- 处置：在 `training_routes._user_session_key_for` 旁**复名**为 `_normalize_admin_target_key`（不沿用旧名，避免让人误以为 reply-mode 的 user 作用域还在），`topic_routes` 改调新名、模块 docstring 同步。语义逐字保留：含 `:` 原样、纯数字经绑定表还原、无绑定/非法形态 400（D15 不猜键）。
+
+### 验证（⚠️ 本段已被下方「验收修复补记」取代，留档仅为审计线索）
+- 本域只做静态自检：`ast.parse` 覆盖 25 个改动/新增 py 文件 0 语法错；全仓 grep 退役符号零残留引用（仅注释/文档串命中）。
+- **未运行** pytest / vitest / tsc / ruff —— 门禁由工作流统一跑；跑法见 `AGENTS.md §4.3`（分块清单须 `find` 递归生成）。**（2026-11-08 注：门禁其后已两轮实跑，现役证据见下条「验收修复补记（门禁已实跑）」。）**
+
+### 2026-11-08 验收修复补记（门禁已实跑）
+- **本批门禁首次实跑即红，性质是「没跑过」而非「跑不过」**：pytest 命令曾被喂进一个 `.ts` 路径（`frontend/src/tests/store/humanizeStore.test.ts`）→ `exit=4 / collected 0`；vitest 1 红（`HumanizeSection.test.tsx` 断言面板 ≥4 个 switch，实际 3 —— 少的是随 `user_humanize` 退役的「按用户覆盖总开关」，属正确结果，断言已按事实改为 3）。
+- 后端真跑（四分块，`find` 递归生成清单）：**4623 通过 + 2 跳过 / 收集 4625 / 0 失败**（chunk0 1191 / chunk1 906 / chunk2 1245+1 / chunk3 1281+1）。新增测试 15 例：`tests/test_humanize_delivery_scope_20261108.py`（9）+ `tests/test_retired_prefs_purge_20261108.py`（6）。
+- 前端：`npx vitest run` **48 文件 / 352 例全绿**；`npx tsc --noEmit` 0 错；`python -m ruff check .` 全仓 0 错。
+- 期间首次全量跑出的 5 条 `optimized_orchestrator` 源码断言红，经比对 mtime 定性为**并行窗口（2026-11-08 主链 agent 化批）正在写该文件**的瞬时态；该批次落定后单独复跑 5/5 通过、整块复跑 1191/1191，与本批无关。
+- **第 2 轮验收修复后复跑（2026-11-08，本轮新鲜）**：后端四分块 **1193 + 906 + 1245+1skip + 1281+1skip = 4625 通过 + 2 跳过 / 收集 4627 / 0 失败**（`pytest --collect-only` = 4627，精确吻合；45 卡、294 测试文件）；较上轮 4623+2 多 2 例 = 本轮新增 `test_humanize_delivery_scope_20261108.py` 两例（主动拆条作用域判据 / 三处兜底文案作用域，突变验红 2/2）。前端 **48 文件 / 352 例**、`tsc --noEmit` 0、`ruff check .` 0。
+
+**Reversible**: `git checkout <本批前提交> -- utils/reply_mode.py utils/humanize_config.py utils/proactive_config.py utils/character_settings.py proactive/scheduler.py api/routers/training_routes.py frontend/src tests` 即整体恢复；旧表数据未删，回滚后立即可读。
+
 ## [2026-10-12] 追问链整体退役 + 拆条上限收敛批（用户裁决：「下一轮对话何时进行由 LLM 决策，不是数秒之内的多次回复，要像真人一样隔一段时间再回，类似主动关怀的主动消息」）
 
 ### 裁决依据与替代 Owner
@@ -1128,3 +1189,23 @@ equire() in MessageList.tsx even though MessageList is unused
 - **依据**：用户裁决「心理画像和状态中心合并，心理画像属于记忆的一部分」。页面内容抽取为 `frontend/src/components/psych/PsychProfileCard.tsx`（`PsychProfileCard({characterId, characterName})`），在角色状态页渲染；`/psych` 旧链接重定向到当前角色的状态页，导航项移除。
 - **删除前核验**：三个测试文件（重置业务判定/scope 同源/情绪信号口径）全部改挂卡片组件并全绿；`/api/psych/*` 后端端点零改动；免责条与热线文案原样保留在卡片内。
 - **可恢复性**：git 历史可取回。
+
+## 2026-11-08 — 设置面收敛：账号页个人偏好区删除（D-A）+ 主动消息引擎运维页整机删除（D-B）
+
+- **依据**：用户裁决（2026-11-08，逐字）——D-A「个人偏好区（`/settings/account` 的回复模式+拟人节奏+保存个人节奏按钮）功能正确但范围划定错误——整块从账号页删除，能力划归为用户×角色的角色设置」；D-B「`/settings/proactive` 整机删除：页面、路由、侧栏入口、RoleGuard 白名单条目、`ProactiveOpsTab` 组件与其专测全部删除；全局主动急停与出厂默认值不再有任何 UI，只保留既有 API 与代码常量」。
+- **删除清单（D-B · 文件级）**：
+  - `frontend/src/pages/SettingsProactivePage.tsx`（28 行整文件）——页面外壳，含「出厂默认值与引擎运维」横幅。理由：页面整机下线。
+  - `frontend/src/tests/components/ProactiveOpsTab.test.tsx`（165 行整文件）——页面内容的专测（全局表单可见 / 503 错误态 / 骰子闸+统计 / 非 admin 视图）。理由：被测组件已删，用例随之删除。
+  - `frontend/src/tests/components/RoleSettingsTabsHistory.test.ts`（整文件）——`normalizeProactiveHistory` / `localDayKey` / `formatHistoryTime` 的纯函数专测。理由：三个函数唯一消费者是被删运维页的「账本回放/消息统计」，函数随页删除。
+- **删除清单（D-B · 文件内切除）**：
+  - `frontend/src/components/admin/RoleSettingsTabs.tsx`（1913 行 → 851 行，`wc -l` 实读）：`ProactiveOpsTab`（原 770–1638 行，约 870 行：个人主动节奏表单 / 全局频率 / 回复模式作用域 / LLM 决策参数 / 零 token 骰子闸区 / Agent Plane 回放与记忆整理 / 拟人度与话题全局挂载 / 消息统计 / 最近主动消息只读区）、`ProactiveScopeBadge`、`UserFreqKey`、`DiceGateConfig`/`DiceGateLastRoll`/`DiceGateState`/`DEFAULT_DICE_GATE`/`DICE_NUM_FIELDS`/`ProactiveConfigPayload`、`ProactiveHistoryItem`/`normalizeProactiveHistory`/`localDayKey`/`formatHistoryTime`、`StatCard`、以及随之失效的 import（`useCallback`、`useQueryClient`、`Badge`、`useUserProactiveConfig`、`proactiveGetConfig`/`proactiveHistory`/`proactivePause`/`updateProactiveConfig`、`userProactivePause`/`updateUserProactiveConfig`/`clearUserProactiveConfig`、三个 `UserProactive*` 类型、`adminListUsers`、`HumanizeSection`、`TopicStateSection`）。理由：全局运维面唯一承载者，用户裁决不再提供 UI。
+  - `frontend/src/App.tsx`：`AdminProactivePage` 惰性 import + `<Route path="proactive">`（含其上的 `RoleGuard roles={['admin']}` 条目）。理由：路由下线，深链落 `path="*"` 404。
+  - `frontend/src/components/layout/navGroups.tsx`：管理后台「主动消息引擎」入口（`/settings/proactive`）。理由：入口下线。
+  - `frontend/src/components/auth/RoleGuard.tsx`：注释里的 `/settings/proactive` 举例改为 `/admin/*`（组件本身保留，仍为 `/admin/*` 提供服务）。理由：删除后不留死引用。
+- **删除清单（D-A）**：
+  - `frontend/src/pages/SettingsAccount.tsx`：`MyPreferencesSection` 组件（原 383–629 行：回复模式三选 + 拟人节奏表单 + 「保存个人节奏」+ 局部 state/effect/请求）与页面挂载点，以及随之失效的 `getMyReplyMode`/`setMyReplyMode`/`getMyHumanize`/`saveMyHumanize`/`clearMyHumanize` import 与 `SlidersHorizontal`/`Loader2` 图标。理由：范围划定错误，能力划归「我 × 角色」面板。
+  - `frontend/src/api/system.ts`：`getMyReplyMode` / `setMyReplyMode` / `getMyHumanize` / `saveMyHumanize` / `clearMyHumanize` 五个客户端函数（全仓零消费）。理由：对应后端端点 `/api/user/reply-mode`、`/api/user/humanize` 同批退役。
+- **删除前核验**：五个待删文件/区块**全文读完**；全仓 grep（`frontend/src` + `frontend/e2e`）确认：`getMyReplyMode|setMyReplyMode|getMyHumanize|saveMyHumanize|clearMyHumanize|SettingsProactivePage|ProactiveOpsTab` 删除后**零命中**；`/settings/proactive` 仅剩注释与「已下线」断言；`normalizeProactiveHistory|localDayKey|formatHistoryTime` 仅被被删用例引用。改写方：`RoleGuard.test.tsx`（路径换 `/admin/users`）、`RoleSettings.test.tsx`（六组编号）、`SettingsAccount.test.tsx`（偏好区改为缺席断言）、`CharacterSettingsPanel.test.tsx`（新增 D-C 用例 + 错误文案）、`e2e/w11_journey.spec.ts`（运维页用例改为「404 + 侧栏无入口 + 角色页无全局面」）。
+- **未删除（明确登记，避免误判漏删）**：`frontend/src/components/admin/HumanizeSection.tsx`、`frontend/src/components/admin/TopicStateSection.tsx` 及其 store（`humanizeStore`/`topicStateStore`）与专测**保留**——它们原挂载于被删运维页，现无挂载点；是否随 D-B 一并退役超出本任务书列举范围，交主控裁决。
+- **可恢复性**：全部为 git 跟踪文件，`git show <commit>^:<path>` 可取回；无数据删除（无 schema/DB 写）。
+- **效果**：`/settings/proactive` 全链清零（页面/路由/侧栏/守卫条目/内容组件/专测）；账号页只剩「协议与同意 / 我的数据 / 注销账号」三块；回复模式改由「我 × 角色」快照承载（D-C）。

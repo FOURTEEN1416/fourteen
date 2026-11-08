@@ -204,7 +204,7 @@ def _split_config(monkeypatch, enabled: bool) -> None:
     monkeypatch.setattr(
         humanize_config,
         "read_humanize",
-        lambda: humanize_config.HumanizeConfig(proactive_split=enabled),
+        lambda *a, **k: humanize_config.HumanizeConfig(proactive_split=enabled),
     )
 
 

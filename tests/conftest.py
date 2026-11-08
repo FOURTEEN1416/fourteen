@@ -192,41 +192,14 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
-    # 回复模式的 per-user 覆盖库（2026-10-21 R7）：默认是宿主 data/sqlite.db。
-    # 任何测试（直接调 write_reply_mode(user_key=...)）都会在那里建表/写行；
-    # 真实库被测试键污染正是 2026-09-22 块E 事故同型。必须重定向到沙箱。
-    try:
-        from utils import reply_mode as _rm
-
-        monkeypatch.setattr(
-            _rm, "_OVERRIDE_DB_PATH", sandbox / "reply_mode_override.db", raising=False,
-        )
-    except Exception:
-        pass
-
-    # 拟人度的 per-user 覆盖库（2026-10-27 G-2）：同型防线 ——
-    # `write_humanize(user_key=...)` 默认写宿主 data/sqlite.db 的 user_humanize 表。
-    try:
-        from utils import humanize_config as _hm
-
-        monkeypatch.setattr(
-            _hm, "_OVERRIDE_DB_PATH", sandbox / "humanize_override.db", raising=False,
-        )
-    except Exception:
-        pass
-
-    # 主动调度 per-user 覆盖库（2026-10-30 D20）：同型防线 ——
-    # `write_proactive_config(user_key=...)` 默认写宿主 data/sqlite.db 的
-    # user_proactive_config 表；不重定向 → 测试键会污染开发机真实库
-    # （与 2026-09-22 块E 事故同型，git 看不见）。全局真源同样重定向到沙箱的
-    # 同一个 `scheduler_config.json` 文件名，复现「与 ProactiveScheduler 同一
-    # 物理文件」语义。
+    # 旧 per-user 覆盖库（回复模式 / 拟人度 / 主动调度三张表）已于 2026-11-08
+    # 随读层整体退役，模块里不再有 `_OVERRIDE_DB_PATH` —— 这里的重定向一并删除，
+    # 避免 `raising=False` 造出一个没人读的幽灵属性（会让后来者误以为该层还在）。
+    # 主动调度的**全局真源**仍要重定向到沙箱的同一个 `scheduler_config.json`，
+    # 复现「与 ProactiveScheduler 同一物理文件」语义。
     try:
         from utils import proactive_config as _pc
 
-        monkeypatch.setattr(
-            _pc, "_OVERRIDE_DB_PATH", sandbox / "proactive_override.db", raising=False,
-        )
         _redirect(_pc, "_CONFIG_PATH", "scheduler_config.json")
     except Exception:
         pass

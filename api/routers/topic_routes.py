@@ -14,7 +14,8 @@
 路由注册顺序是硬约束：``/config`` 必须在 ``/{session_key}`` 之前，否则
 FastAPI 会把 ``config`` 当成会话键。
 
-会话键口径沿用 R7 P0 修复后的 ``_resolve_admin_target_key``：含 ``:`` 的完整键
+会话键口径沿用 R7 P0 修复后的解析规则（现名
+``training_routes._normalize_admin_target_key``）：含 ``:`` 的完整键
 原样使用；纯数字仅当该用户存在微信绑定时还原为 ``N:wxid``，否则 400（不猜键，
 web/WS 的 ``N:web:8hex`` 必须传完整键）。该还原只服务 admin 分支——普通用户
 分支**不**解析客户端自报的键，只做白名单比对（不猜键也就不存在猜错人的可能）。
@@ -164,11 +165,15 @@ async def get_topic_state_snapshot(
         raise HTTPException(
             401, "Missing Authorization header (Bearer token)"
         )
-    from api.routers.training_routes import _resolve_admin_target_key
+    # 2026-11-08 验收修复：`_resolve_admin_target_key` 已随 reply-mode 作用域退役；
+    # 「数字 user_id → 完整会话键」的存活消费者是本端点的 admin 分支，
+    # 现名 `_normalize_admin_target_key`（同一 owner：training_routes 的
+    # `_user_session_key_for` 唯一还原器）。
+    from api.routers.training_routes import _normalize_admin_target_key
     from utils.topic_state import get_topic_snapshot
 
     if principal.role == "admin":
-        key = await _resolve_admin_target_key(session_key, db)
+        key = await _normalize_admin_target_key(session_key, db)
     else:
         # 普通用户：不解析、不还原，只做白名单比对（含数字 id 形态一律 404）
         key = str(session_key or "").strip()

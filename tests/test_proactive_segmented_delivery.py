@@ -121,7 +121,7 @@ def _stub_read_humanize(monkeypatch, value) -> None:
     """替换 `read_humanize` 的返回值/行为（容忍分支用）。"""
     from utils import humanize_config
 
-    monkeypatch.setattr(humanize_config, "read_humanize", lambda: value)
+    monkeypatch.setattr(humanize_config, "read_humanize", lambda *a, **k: value)
 
 
 def _split_config(monkeypatch, enabled: bool) -> None:
@@ -131,7 +131,7 @@ def _split_config(monkeypatch, enabled: bool) -> None:
     monkeypatch.setattr(
         humanize_config,
         "read_humanize",
-        lambda: humanize_config.HumanizeConfig(proactive_split=enabled),
+        lambda *a, **k: humanize_config.HumanizeConfig(proactive_split=enabled),
     )
 
 
@@ -191,7 +191,7 @@ def test_config_read_exception_defaults_to_off(monkeypatch):
     import main
     from utils import humanize_config
 
-    def _boom():
+    def _boom(*a, **k):
         raise ValueError("配置损坏")
 
     monkeypatch.setattr(humanize_config, "read_humanize", _boom)

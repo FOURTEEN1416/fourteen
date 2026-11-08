@@ -1,7 +1,7 @@
 /**
  * RoleGuard（管理员路由守卫）回归（2026-11-07 对抗验收）。
  *
- * 对抗验收发现：普通用户直访 /settings/proactive 或 /admin/* 时被静默弹回，
+ * 对抗验收发现：普通用户直访 /admin/* 管理员路由时被静默弹回，
  * 落在一个无关页面且不知道原因。钉两件事：
  * 1. 无权限 → 弹「仅管理员可用」提示 + 跳转 fallback，不渲染子组件；
  * 2. 有权限 → 正常渲染，且绝不弹提示。
@@ -34,10 +34,10 @@ function makeUser(role: 'admin' | 'viewer') {
 
 function renderGuard() {
   return render(
-    <MemoryRouter initialEntries={['/settings/proactive']}>
+    <MemoryRouter initialEntries={['/admin/users']}>
       <Routes>
         <Route
-          path="/settings/proactive"
+          path="/admin/users"
           element={
             <RoleGuard roles={['admin'] as const}>
               <div data-testid="ops-content">运维页内容</div>

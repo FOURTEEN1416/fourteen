@@ -273,6 +273,7 @@ def _start_api_service(orchestrator_or_obj, cfg, config_mgr=None, user_manager=N
 from utils.humanize_delivery import (  # noqa: E402, F401
     direct_send_proactive,
     humanize_proactive_split_enabled,
+    proactive_split_enabled,
     segment_sender,
     send_proactive_segmented,
 )
@@ -405,8 +406,12 @@ def _wire_proactive_runtime(
                 # RuntimeError ⇒ 调度器把 wechat 通道置 None、不
                 # `_record_outbound` 不扣配额（与 send_text 返回 False 路径同构）；
                 # 驳回不重试、不回退整段直发（避免重复投递）。
+                # 归因闸与 `direct_send_proactive` 同源：按该 peer 的
+                # 「用户 × 角色」作用域判（2026-11-08 验收修复）——旧无参调用
+                # 只读全局块，「按角色开了主动拆条、全局关」时会把
+                # 「未完整受理」误报成「整段直发被拒」。
                 if (
-                    humanize_proactive_split_enabled()
+                    proactive_split_enabled(connector, peer)
                     and segment_sender(connector) is not None
                 ):
                     raise RuntimeError(f"微信定向投递未完整受理 peer={peer}")

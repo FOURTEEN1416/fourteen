@@ -44,7 +44,7 @@ _ADMIN_ID = 1
 _VIEWER_ID = 2
 
 #: 契约钉死的响应字段全集（GET/POST/PUT 三个方向的 config 形状一致）。
-#: 2026-10-27 G-1 新增 ``user_override_enabled``；P0-B 新增阅读延迟/typing 七字段。
+#: 2026-11-08：per-user 覆盖层退役，``user_override_enabled`` 一并移除。
 _EXPECTED_KEYS = {
     "delay_mode",
     "per_char_ms",
@@ -63,7 +63,6 @@ _EXPECTED_KEYS = {
     "read_delay_channel_cap_ms",
     "typing_enabled",
     "typo_rate",
-    "user_override_enabled",
     "max_segments",
     "delay_mode_label",
 }
@@ -86,7 +85,6 @@ _DEFAULTS = {
     "read_delay_channel_cap_ms": 5000,
     "typing_enabled": True,
     "typo_rate": 0,
-    "user_override_enabled": True,
     "max_segments": 3,
 }
 
@@ -331,7 +329,6 @@ async def test_post_partial_merge_and_sibling_keys_preserved(api, hm_file):
                                    "read_delay_channel_cap_ms": 5000,
                                    "typing_enabled": True,
                                    "typo_rate": 0,
-                                   "user_override_enabled": True,
                                    "max_segments": 3}
     assert on_disk["reply_mode"] == "novel"
     assert on_disk["quiet_hours"] == {"start": 22, "end": 7}
@@ -483,140 +480,3 @@ async def test_off_mode_round_trip(api, hm_file):
     assert config["delay_mode_label"] == "不延时"
     assert config["proactive_split"] is True
     assert _humanize_block(hm_file)["proactive_split"] is True
-
-
-# ═══════════════════════════════════════════════════════════
-# NEW-12（2026-10-29）：user_key 数字 user_id 还原（与 reply-mode 同一还原器）
-# ═══════════════════════════════════════════════════════════
-
-
-async def test_user_key_full_session_key_passthrough(api, hm_file):
-    """含 ':' 的 user_key 视为完整会话键原样使用（脚本/API 直呼契约不变）。"""
-    client, _engine, _app = api
-    r = await client.get("/api/humanize/config", headers=_bearer(_ADMIN_ID),
-                         params={"user_key": "2:peer@im.wechat"})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["scope"] == "user"
-    assert body["user_key"] == "2:peer@im.wechat"
-
-
-async def test_user_key_numeric_unbound_is_400(api, hm_file):
-    """纯数字 user_key 无微信绑定时 400（宁拒绝不猜键，与 reply-mode 同口径）。"""
-    client, _engine, _app = api
-    r = await client.get("/api/humanize/config", headers=_bearer(_ADMIN_ID),
-                         params={"user_key": str(_VIEWER_ID)})
-    assert r.status_code == 400, r.text
-    assert "未绑定" in r.json()["detail"]
-
-
-async def test_post_user_key_numeric_unbound_is_400(api, hm_file):
-    """POST 写入方向同门：无绑定数字 id 拒绝写覆盖行（不写坏键）。"""
-    client, _engine, _app = api
-    r = await client.post("/api/humanize/config", headers=_bearer(_ADMIN_ID),
-                          json={"user_key": str(_VIEWER_ID), "typo_rate": 1})
-    assert r.status_code == 400, r.text
-    assert hm_file.exists() is False or "user_humanize" not in _humanize_block(hm_file)
-
-
-# ═══════════════════════════════════════════════════════════
-# NEW-34（2026-10-29）：用户自助拟人节奏 /api/user/humanize
-# 作用域键服务端从 token 派生（绑定还原，不猜键）；未绑定 → GET 全局视图 / 写 400
-# ═══════════════════════════════════════════════════════════
-
-
-async def test_user_self_unbound_get_global_post_400(api, hm_file):
-    """未绑定微信：GET 回全局视图（scope=global）；写/清 400 宁拒绝不猜键。"""
-    client, _engine, _app = api
-    r = await client.get("/api/user/humanize", headers=_bearer(_VIEWER_ID))
-    assert r.status_code == 200, r.text
-    assert r.json()["scope"] == "global"
-
-    r2 = await client.post("/api/user/humanize", headers=_bearer(_VIEWER_ID),
-                           json={"typo_rate": 5})
-    assert r2.status_code == 400
-    assert "未绑定" in r2.json()["detail"]
-
-    r3 = await client.delete("/api/user/humanize", headers=_bearer(_VIEWER_ID))
-    assert r3.status_code == 400
-
-
-async def test_user_self_bound_write_read_clear(api, hm_file):
-    """已绑定用户全链路：写覆盖 → 合并视图生效 → 清除回落。"""
-    from api.database import WechatBinding
-
-    client, engine, app = api
-    # 给 viewer 补一条微信绑定（_user_session_key_for 按此还原 N:wxid）
-    engine2 = engine
-    from sqlalchemy.ext.asyncio import async_sessionmaker as _sm
-
-    session_factory = _sm(engine2, expire_on_commit=False)
-    async with session_factory() as session:
-        session.add(WechatBinding(user_id=_VIEWER_ID, wxid="wx_selftest", nickname="selftest"))
-        await session.commit()
-
-    r1 = await client.get("/api/user/humanize", headers=_bearer(_VIEWER_ID))
-    assert r1.status_code == 200
-    body = r1.json()
-    assert body["scope"] == "global"  # 无覆盖行 → 合并视图=全局，但键已在
-    assert body["user_key"].startswith(f"{_VIEWER_ID}:")
-
-    r2 = await client.post("/api/user/humanize", headers=_bearer(_VIEWER_ID),
-                           json={"typo_rate": 7})
-    assert r2.status_code == 200, r2.text
-    assert r2.json()["scope"] == "user"
-
-    r3 = await client.get("/api/user/humanize", headers=_bearer(_VIEWER_ID))
-    assert r3.json()["scope"] == "user"
-    assert r3.json()["config"]["typo_rate"] == 7
-    # 真源落在 user_humanize 覆盖库（conftest 沙箱重定向；scheduler_config.json 只放全局块）
-    import sqlite3 as _sq
-
-    from utils import humanize_config as _hc
-
-    conn = _sq.connect(str(_hc._OVERRIDE_DB_PATH))
-    try:
-        row = conn.execute(
-            "SELECT config FROM user_humanize WHERE user_key = ?",
-            (r1.json()["user_key"],),
-        ).fetchone()
-    finally:
-        conn.close()
-    assert row is not None and 'typo_rate' in row[0]
-
-    r4 = await client.delete("/api/user/humanize", headers=_bearer(_VIEWER_ID))
-    assert r4.status_code == 200
-    assert r4.json()["status"] == "ok"
-
-
-async def test_user_self_ignores_client_user_key(api, hm_file):
-    """🔴 安全语义：客户端自报 user_key 一律忽略（不能借自助端点改别人节奏）。"""
-    from sqlalchemy.ext.asyncio import async_sessionmaker as _sm
-
-    from api.database import WechatBinding
-
-    client, engine, _app = api
-    session_factory = _sm(engine, expire_on_commit=False)
-    async with session_factory() as session:
-        session.add(WechatBinding(user_id=_VIEWER_ID, wxid="wx_selftest2", nickname="selftest2"))
-        await session.commit()
-
-    r = await client.post(
-        "/api/user/humanize",
-        headers=_bearer(_VIEWER_ID),
-        json={"typo_rate": 9, "user_key": "1:evil@im.wechat"},
-    )
-    assert r.status_code == 200, r.text
-    # 写入的是自己派生的键，不是客户端报的键（真源 = user_humanize 覆盖库）
-    import sqlite3 as _sq
-
-    from utils import humanize_config as _hc
-
-    conn = _sq.connect(str(_hc._OVERRIDE_DB_PATH))
-    try:
-        rows = dict(conn.execute("SELECT user_key, config FROM user_humanize").fetchall())
-    finally:
-        conn.close()
-    assert "1:evil@im.wechat" not in rows
-    own_key = f"{_VIEWER_ID}:wx_selftest2"
-    assert own_key in rows and "typo_rate" in rows[own_key]

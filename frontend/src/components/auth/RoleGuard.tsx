@@ -27,7 +27,7 @@ export default function RoleGuard({ children, roles, fallback = '/' }: RoleGuard
 
   const denied = Boolean(isInitialized && isAuthenticated && (!user || !user.is_active || !roles.includes(user.role)))
 
-  // 无权限不能静默弹回：直接访问 /settings/proactive 等管理员路由的普通用户
+  // 无权限不能静默弹回：直接访问 /admin/* 等管理员路由的普通用户
   // 会被丢到一个无关页面且不知道为什么（2026-11-07 对抗验收发现）。
   // 放 effect 而不是 render：重定向组件只渲染一次，toast 不会重复刷屏。
   useEffect(() => {

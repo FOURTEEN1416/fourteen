@@ -323,13 +323,18 @@ class ReminderDeliveryTask:
         # （独立复核 #5 条：提醒文案抄了 [定时提醒] 行首标记不剥）。
         from utils.prompt_sanitize import terminal_reply_guard
 
+        # 2026-11-08 D-C：提醒线也按「会话 × 角色」快照解析回复模式
+        # （未设置/缺角色 → 全局默认 → 沉浸式）。
         guarded = terminal_reply_guard(
             cleaned,
             user_msg="",
             character_name=str(resolved_name or ""),
             session_key=str(reminder.get("session_key") or ""),
             character_id=str(character_id or ""),
-            reply_mode=read_reply_mode(),
+            reply_mode=read_reply_mode(
+                str(reminder.get("session_key") or "") or None,
+                str(character_id or "") or None,
+            ),
         )
         return guarded or fallback
 
