@@ -342,6 +342,26 @@ def test_voice_detector_production_utterance():
     assert detect_voice_request("你可以说话吗") is True
 
 
+def test_voice_detector_natural_phrasings():
+    """自然说法矩阵（2026-11-08 生产实测补洞：旧模式漏「想听你的声音」整类）。"""
+    from orchestrator.voice_detector import detect_voice_request
+
+    must_hit = [
+        "给我发个语音", "发语音", "发条语音", "发一条语音", "能不能发段语音",
+        "说句话听听", "我想听你的声音", "听一下你的声音", "想听一下你的声音",
+        "用你的声音说一句", "你发语音给我听听",
+    ]
+    for c in must_hit:
+        assert detect_voice_request(c) is True, f"漏判（用户明确要语音却回文字）: {c}"
+    must_miss = [
+        "你别发语音了，打字就行",   # 明确拒绝
+        "你的声音真好听",         # 夸奖不是点单（防配额浪费）
+        "今天我们吃什么", "听我说完",
+    ]
+    for c in must_miss:
+        assert detect_voice_request(c) is False, f"误触发: {c}"
+
+
 # ═══════════════════════════════════════════════
 # 五、图片历史铁则（reply_mode 指令）
 # ═══════════════════════════════════════════════
