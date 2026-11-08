@@ -431,7 +431,8 @@ def _conn_with_voice(monkeypatch, send_voice_ok: bool):
     conn.token = "test_token"
     conn._last_user_id = "wx_user_1"
     conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
-    conn.send_voice = MagicMock(return_value=send_voice_ok)
+    # 2026-11-08 语音送达批：传输层入口改为 send_voice_clip（形态决策 owner）
+    conn.send_voice_clip = MagicMock(return_value=send_voice_ok)
     return conn
 
 
@@ -448,7 +449,7 @@ def test_voice_only_skips_text_bubble(monkeypatch):
         mock_send.return_value = {"ret": 0}
         mock_call.return_value = _voice_result_dict(voice_only=True)
         conn._handle_message(_text_msg("vo_only_ok"))
-    conn.send_voice.assert_called_once()
+    conn.send_voice_clip.assert_called_once()
     assert mock_send.call_count == 0, "语音轮不得再发文字气泡"
 
 
@@ -465,7 +466,7 @@ def test_voice_only_falls_back_to_text_on_send_failure(monkeypatch):
         mock_send.return_value = {"ret": 0}
         mock_call.return_value = _voice_result_dict(voice_only=True)
         conn._handle_message(_text_msg("vo_only_fail"))
-    conn.send_voice.assert_called_once()
+    conn.send_voice_clip.assert_called_once()
     assert mock_send.call_count >= 1, "语音失败必须回退文字，用户不能什么都收不到"
 
 
@@ -482,7 +483,7 @@ def test_legacy_voice_result_keeps_text_and_voice(monkeypatch):
         mock_send.return_value = {"ret": 0}
         mock_call.return_value = _voice_result_dict(voice_only=False)
         conn._handle_message(_text_msg("vo_legacy"))
-    conn.send_voice.assert_called_once()
+    conn.send_voice_clip.assert_called_once()
     assert mock_send.call_count >= 1
 
 
@@ -514,7 +515,11 @@ def test_send_voice_tool_schema():
 
     fn = SEND_VOICE_TOOL["function"]
     assert fn["name"] == "send_voice"
-    assert "语音条" in fn["description"]
+    # 2026-11-08 语音送达批：投递形态是音频文件卡片（原生语音条平台不渲染），
+    # 描述里不再承诺「语音条」，只承诺「语音」+「本轮不再发明文」。
+    assert "语音" in fn["description"]
+    assert "语音条" not in fn["description"]
+    assert "不再发明文" in fn["description"]
     # 解析：命中 / 未命中 / 空
     assert extract_voice_decision([{"function": {"name": "send_voice", "arguments": "{}"}}]) is True
     assert extract_voice_decision([{"function": {"name": "set_reminder"}}]) is False

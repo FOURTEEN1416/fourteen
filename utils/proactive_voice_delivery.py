@@ -7,7 +7,9 @@
 关键约束（踩过的坑）：
 - TTS 初始化与合成必须在**同一事件循环**（aiohttp client 绑定 loop）→ 由
   调用方经 ``asyncio.to_thread`` 进来，内部 ``asyncio.run`` 一次包完；
-- 微信语音必须 silk（tencent 变体）→ 依赖 ffmpeg + pilk（见 deploy README）；
+- iLink 平台**不渲染机器人出站的原生语音条**（2026-11-08 真机实证，接口仍
+  返回 message_id）→ 默认投递形态是**音频文件卡片**（mp3 原始音频）；silk
+  转码只在 ``WECHAT_NATIVE_VOICE_BUBBLE=1`` 的原生气泡路径发生；
 - iLink 会话窗口 24h：凭据过期就只能文字，``find_wechat_credentials`` 会
   如实返回 age_hours，调用方自行决定是否尝试。
 """
@@ -15,7 +17,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import threading
 import time
@@ -71,10 +72,14 @@ def _reset_tts_manager() -> None:
         _TTS_CFG = None
 
 
-def synthesize_silk(
+def synthesize_audio(
     text: str, character_id: str = "", user_id: int | str | None = None,
 ) -> tuple[bytes, str] | None:
-    """文本 → (silk/amr 字节, fmt)。失败返回 None（调用方回落文字）。"""
+    """文本 → (原始合成音频字节, fmt=mp3/wav)。失败返回 None（调用方回落文字）。
+
+    2026-11-08 语音送达批：投递形态默认是**音频文件卡片**（原生语音条被
+    iLink 平台静默丢弃），文件卡片直接用 TTS 原始音频，不需要 silk 转码。
+    """
     mgr = get_tts_manager()
     if mgr is None:
         return None
@@ -95,16 +100,27 @@ def synthesize_silk(
         audio = asyncio.run(_synth())
     except Exception:  # noqa: BLE001
         return None
-    if not audio:
+    if not audio or not getattr(audio, "data", None):
         return None
+    return audio.data, str(getattr(audio, "fmt", "") or "mp3")
+
+
+def synthesize_silk(
+    text: str, character_id: str = "", user_id: int | str | None = None,
+) -> tuple[bytes, str] | None:
+    """文本 → (silk/amr 字节, fmt)。仅原生气泡路径需要；失败返回 None。"""
+    audio = synthesize_audio(text, character_id, user_id)
+    if audio is None:
+        return None
+    data, source_fmt = audio
     try:
         from voice.audio_converter import AudioFormatConverter
 
         conv = AudioFormatConverter()
-        silk = conv.to_silk(audio.data, audio.fmt)
+        silk = conv.to_silk(data, source_fmt)
         if silk:
             return silk, "silk"
-        amr = conv.to_amr(audio.data, audio.fmt)
+        amr = conv.to_amr(data, source_fmt)
         if amr:
             return amr, "amr"
     except Exception:  # noqa: BLE001
@@ -175,23 +191,24 @@ def send_proactive_voice(
     creds = find_wechat_credentials(owner, peer, max_age_hours=max_age_hours)
     if creds is None:
         return False, "no_credentials"
-    audio = synthesize_silk(text, character_id, owner)
+    audio = synthesize_audio(text, character_id, owner)
     if audio is None:
         return False, "tts_unavailable"
-    silk, fmt = audio
+    data, fmt = audio
     try:
-        from wechat_direct.wechat_connector import _api_ok, _send_voice_message
+        # 2026-11-08 语音送达批：形态决策（音频文件卡片 / 原生气泡）的唯一
+        # owner 在 wechat_connector，主动线不再自己拼 voice item。
+        from wechat_direct.wechat_connector import send_voice_clip_to
 
-        resp = _send_voice_message(
-            to=peer,
-            audio_data_b64=base64.b64encode(silk).decode("ascii"),
-            duration_ms=min(60000, max(1500, len(str(text or "")) * 180)),
+        ok, err = send_voice_clip_to(
+            peer,
+            data,
+            fmt,
             context_token=creds.get("context_token") or "",
             token=creds.get("token") or "",
             base_url=creds.get("base_url") or "",
-            fmt=fmt,
+            duration_ms=min(60000, max(1500, len(str(text or "")) * 180)),
         )
-        ok, err = _api_ok(resp)
         return bool(ok), ("" if ok else str(err or "send_rejected")[:120])
     except Exception as e:  # noqa: BLE001
         return False, f"{type(e).__name__}"

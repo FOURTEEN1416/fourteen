@@ -253,6 +253,27 @@ def voice_item(
     }
 
 
+def file_item(uploaded: UploadedMedia, file_name: str) -> dict[str, Any]:
+    """构造 ``item_list`` 里的 file_item（type=4 + media 引用）。
+
+    2026-11-08 语音投递批：iLink 平台对 bot 方向的**原生 voice item（type=3）
+    静默丢弃**（真机实证：三种编码形态都无气泡，接口却都返回 ``message_id``），
+    音频只能以文件卡片送达，因此语音投递走本构造器。
+    """
+    return {
+        "type": ITEM_TYPE_FILE,
+        "file_item": {
+            "media": {
+                "encrypt_query_param": uploaded.download_encrypted_query_param,
+                "aes_key": _aes_key_field(uploaded.aeskey_hex),
+                "encrypt_type": 1,
+            },
+            "file_name": str(file_name or "voice.mp3"),
+            "len": str(uploaded.file_size),
+        },
+    }
+
+
 def image_item(uploaded: UploadedMedia) -> dict[str, Any]:
     """构造 ``item_list`` 里的 image_item（type=2 + media 引用）。"""
     return {

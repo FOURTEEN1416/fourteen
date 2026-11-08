@@ -990,6 +990,106 @@ def _send_voice_message(to, audio_data_b64, duration_ms, context_token,
     }, token=token, base_url=base_url)
 
 
+# ── 出站语音形态（2026-11-08 语音送达批）──
+# 微信 iLink 平台**不渲染机器人出站的原生语音 item（type=3）**：接口 HTTP 200 +
+# 返回 message_id，客户端静默丢弃（2026-11-08 真机实证：silk 24k/16k、
+# encode_type 4/6 三种形态全部无气泡；腾讯 openclaw-weixin#91 与 weixin-ilink
+# 文档记录同一限制）。因此默认改发**音频文件卡片**（type=4，客户端可下载播放）。
+# 平台将来开放后置 WECHAT_NATIVE_VOICE_BUBBLE=1 即可切回气泡，无需改码。
+NATIVE_VOICE_BUBBLE_ENV = "WECHAT_NATIVE_VOICE_BUBBLE"
+
+
+def native_voice_bubble_enabled() -> bool:
+    """是否尝试原生语音条（默认关：平台静默丢弃，发了等于什么都没发）。"""
+    return os.getenv(NATIVE_VOICE_BUBBLE_ENV, "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _send_audio_file_message(to, audio_data_b64, file_name, context_token,
+                             token="", base_url=DEFAULT_BASE_URL, fmt="mp3"):
+    """发音频文件卡片（语音的可用投递形态）。
+
+    与 ``_send_voice_message`` 的差异：item type=4/FILE + ``file_name``；
+    上传失败向上抛（由 ``send_audio_file`` 记失败并回落文字），不做内联兜底
+    ——内联语音同样被平台丢弃，重试没有意义。
+    """
+    audio_bytes = base64.b64decode(audio_data_b64)
+    if not audio_bytes:
+        raise ValueError("音频内容为空")
+    from . import media_upload
+
+    uploaded = media_upload.upload_bytes(
+        audio_bytes,
+        media_type=media_upload.MEDIA_TYPE_FILE,
+        to_user_id=to,
+        post_api=_post_api,
+        token=token,
+        base_url=base_url,
+        timeout=20.0,
+    )
+    msg = media_upload.build_message(
+        to_user_id=to,
+        item=media_upload.file_item(
+            uploaded, file_name or f"voice.{(fmt or 'mp3').lstrip('.')}"
+        ),
+        context_token=context_token,
+        client_id=uuid.uuid4().hex[:16],
+    )
+    logger.info(
+        "[wx][step=voice_file_upload] target=%s bytes=%d fmt=%s",
+        to, uploaded.file_size, fmt,
+    )
+    return _post_api(
+        "ilink/bot/sendmessage", {"msg": msg}, token=token, base_url=base_url,
+    )
+
+
+def send_voice_clip_to(to, audio_bytes, fmt="mp3", *, context_token="",
+                       token="", base_url=DEFAULT_BASE_URL,
+                       duration_ms=3000) -> tuple[bool, str]:
+    """无连接实例的语音投递（主动线 / 一次性脚本共用唯一入口）。
+
+    与 ``WeChatConnector.send_voice_clip`` 同一套形态决策：默认音频文件卡片，
+    ``WECHAT_NATIVE_VOICE_BUBBLE=1`` 才走原生气泡。返回 ``(ok, reason)``，
+    reason 不含用户隐私。
+    """
+    if not audio_bytes:
+        return False, "empty_audio"
+    try:
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+        if native_voice_bubble_enabled():
+            from voice.audio_converter import AudioFormatConverter
+
+            converter = AudioFormatConverter()
+            silk = converter.to_silk(audio_bytes, fmt)
+            silk_fmt = "silk"
+            if silk is None:
+                silk = converter.to_amr(audio_bytes, fmt)
+                silk_fmt = "amr"
+            if not silk:
+                return False, "transcode_failed"
+            resp = _send_voice_message(
+                to=to,
+                audio_data_b64=base64.b64encode(silk).decode("ascii"),
+                duration_ms=duration_ms,
+                context_token=context_token,
+                token=token, base_url=base_url, fmt=silk_fmt,
+            )
+        else:
+            resp = _send_audio_file_message(
+                to=to,
+                audio_data_b64=audio_b64,
+                file_name=f"voice.{(fmt or 'mp3').lstrip('.')}",
+                context_token=context_token,
+                token=token, base_url=base_url, fmt=fmt,
+            )
+        ok, err = _api_ok(resp)
+        return bool(ok), ("" if ok else str(err or "send_rejected")[:120])
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}"
+
+
 def _send_image_message(to, image_data_b64, context_token,
                         token="", base_url=DEFAULT_BASE_URL, image_type="png"):
     """发图片消息 (message_type=3)"""
@@ -1330,6 +1430,66 @@ class WeChatConnector:
         except Exception as e:  # noqa: BLE001
             logger.warning("语音发送失败: %s", e)
             return False
+
+    def send_audio_file(self, audio_bytes: bytes, to_user: str = "",
+                        fmt: str = "mp3", file_name: str = "") -> bool:
+        """发音频文件卡片——语音的**可用**投递形态（2026-11-08 平台限制）。
+
+        原生 voice item 被平台静默丢弃（见 ``NATIVE_VOICE_BUBBLE_ENV`` 注释），
+        文件卡片是客户端真能收到并播放的形态（生产已验证 mp3 文件可达）。
+        """
+        target = self._resolve_send_target(to_user, "语音")
+        if not target or not self.token or not audio_bytes:
+            logger.warning("发送语音失败: 无目标用户或未登录或无音频数据")
+            return False
+        name = file_name or f"voice.{(fmt or 'mp3').lstrip('.')}"
+        try:
+            context_token = self._get_context_token(target)
+            resp = _send_audio_file_message(
+                to=target,
+                audio_data_b64=base64.b64encode(audio_bytes).decode("utf-8"),
+                file_name=name,
+                context_token=context_token,
+                token=self.token, base_url=self.base_url, fmt=fmt,
+            )
+            ok, errmsg = _api_ok(resp)
+            if not ok:
+                logger.warning(
+                    "语音发送失败: %s | target=%s context_token=%s",
+                    errmsg, target, "有" if context_token else "空",
+                )
+                return False
+            logger.info("语音发送成功: %d bytes, fmt=%s, as=file", len(audio_bytes), fmt)
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.warning("语音发送失败: %s", e)
+            return False
+
+    def send_voice_clip(self, audio_bytes: bytes, source_fmt: str = "mp3",
+                        to_user: str = "", duration_ms: int = 3000) -> bool:
+        """语音投递统一入口：默认音频文件卡片，``WECHAT_NATIVE_VOICE_BUBBLE=1`` 才发气泡。
+
+        调用方只给**原始合成音频**（mp3/wav）：silk 转码只在原生气泡路径发生
+        （文件卡片直接发原始音频，微信内置播放器可直接播 mp3）。
+        """
+        if not audio_bytes:
+            return False
+        if not native_voice_bubble_enabled():
+            return self.send_audio_file(audio_bytes, to_user=to_user, fmt=source_fmt)
+        from voice.audio_converter import AudioFormatConverter
+
+        converter = AudioFormatConverter()
+        silk = converter.to_silk(audio_bytes, source_fmt)
+        fmt = "silk"
+        if silk is None:
+            silk = converter.to_amr(audio_bytes, source_fmt)
+            fmt = "amr"
+        if not silk:
+            logger.warning("语音转码失败，回落文字")
+            return False
+        return bool(self.send_voice(
+            silk, to_user=to_user, duration_ms=duration_ms, fmt=fmt,
+        ))
 
     def send_image(self, image_bytes: bytes, to_user: str = "",
                    image_type: str = "png") -> bool:
@@ -2341,23 +2501,16 @@ class WeChatConnector:
         voice_sent = False
         if voice_result:
             try:
-                # W7：统一音频对象携带实际格式（云端 mp3 / SAPI 兜底 wav），
-                # 转码按真实格式驱动，不再硬编 mp3
-                from voice.audio_converter import AudioFormatConverter
+                # W7：统一音频对象携带实际格式（云端 mp3 / SAPI 兜底 wav）
                 from voice.audio_result import coerce_voice_payload
                 voice_data, voice_fmt = coerce_voice_payload(voice_result)
-                converter = AudioFormatConverter()
-                fmt = "silk"
-                silk_audio = converter.to_silk(voice_data, voice_fmt)
-                if silk_audio is None:
-                    fmt = "amr"
-                    silk_audio = converter.to_amr(voice_data, voice_fmt)
-                if silk_audio:
-                    duration_ms = result.get("voice_duration_ms", 3000)
-                    # send_voice 返回 bool（2026-09-19 起校验业务返回码）：
-                    # 旧实现不接回执，语音静默失败时用户什么都没有。
-                    voice_sent = bool(self.send_voice(silk_audio, to_user=from_user,
-                                                      duration_ms=duration_ms, fmt=fmt))
+                duration_ms = result.get("voice_duration_ms", 3000)
+                # 2026-11-08：原生语音条被平台静默丢弃 → send_voice_clip 默认
+                # 走音频文件卡片；silk 转码只在 WECHAT_NATIVE_VOICE_BUBBLE=1 时做。
+                voice_sent = bool(self.send_voice_clip(
+                    voice_data, voice_fmt,
+                    to_user=from_user, duration_ms=duration_ms,
+                ))
             except Exception as e:  # noqa: BLE001
                 logger.warning("[wx][step=voice_failed] msg_id=%s user=%s error=%s",
                                msg_id, from_user, e)

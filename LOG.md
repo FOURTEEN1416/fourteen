@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-11-08 — 语音投递形态批：iLink 不支持出站原生语音条 → 音频文件卡片（v1.68 · 待部署）
+
+- **用户报障**：「我刚刚让十四发语音给我，她没有给我发」。用户界面 18:34–19:11 期间多次索要语音，一条语音气泡都没出现（只有文字与一张测试图）。
+- **生产取证（`/opt/ai-girlfriend` @ `ed09bb0`）**：`data/app.log` 18:34:26 / 18:34:56 / 18:45:35 / 18:51:58 四次 `[voice][step=synthesized]` + `[voice][step=voice_only]` + `[wx][step=voice_cdn_upload]` + `语音发送成功` + `[wx][step=voice_sent]`；`sendmessage` 原始返回 `{"message_id": …}`（HTTP 200，无 `ret`）。即**平台接受、客户端不渲染**。
+- **根因（两层）**：① 微信 iLink 平台**不渲染机器人出站的原生语音 item（`type=3`）**——真机实证三种编码形态全被静默丢弃：silk 24k `encode_type=6`、silk 16k `encode_type=4`、silk 16k `encode_type=6`；外部佐证：腾讯 `Tencent/openclaw-weixin` issue #91（同一症状「API 成功、客户端收不到」）与 `weixin-ilink` 文档（「出站语音消息：通道静默丢弃，用 send_file 代替」）。② `voice_only`（用户裁决「只发语音条、不发明文」）在平台丢弃时**文字被抑制 + 语音不到 = 完全静默**，用户观感「她根本没发」。
+- **修法**：语音投递形态改为**音频文件卡片**（`item.type=4` + `file_name=voice.mp3` + CDN `media` 引用），真机验证可达（生产 10-31 `测试语音.mp3` 与本次 `voice-fix-check.mp3` 均到达）；原生气泡保留在 `WECHAT_NATIVE_VOICE_BUBBLE=1` 开关后（平台放开后一行切回）。投递失败仍走既有「补发文字」兜底，不静默丢内容。
+- **代码**：`wechat_direct/media_upload.py` 新增 `file_item()`；`wechat_direct/wechat_connector.py` 新增 `NATIVE_VOICE_BUBBLE_ENV` / `native_voice_bubble_enabled()` / `_send_audio_file_message()` / `send_voice_clip_to()`（主动线/脚本共用的无实例入口）/ `send_audio_file()` / `send_voice_clip()`（形态决策唯一 owner），回复链改调 `send_voice_clip`（文件卡片路径**不做 silk 转码**，直接发 TTS 原始 mp3）；`utils/proactive_voice_delivery.py` 新增 `synthesize_audio()`（保留原始音频），主动线改走 `send_voice_clip_to`；`orchestrator/tool_gate.py` 工具描述与 L1 规则「语音条」→「语音」（不向模型承诺做不到的形态）。
+- **探针留痕（真机证据，非推断）**：`getuploadurl` → CDN 上传 200 + `x-encrypted-param`；用 `x-encrypted-param` 回下载 400（服务端不可回读，但**客户端可用**——红方块图片、两个 mp3 卡片均到达）；用 `upload_param` 回下载 200 且 AES 解密逐字节一致（**但客户端不认**：用它发的语音/文件均未到达）。该对照已钉进 `test_file_item_uses_cdn_download_param_not_upload_param`。
+- **验证**：新增 `tests/test_voice_delivery_as_file_20261108.py` **15 例**；`test_media_voice_topic_batch_20261108.py` 三处入口断言改 `send_voice_clip`、工具描述断言改「语音且不承诺语音条」；受影响面（`test_media_upload_cdn` / `test_wechat_connector` / `test_p1_batch5_wechat` / 语音批）共 **97 例全绿**；`ruff` 改动文件 0 错；全量四分块见收口行。
+- **遗留**：① 文件卡片与「语音条」客户端观感不同（需点开下载播放），平台开放后置 `WECHAT_NATIVE_VOICE_BUBBLE=1` 即可；② 部署随用户裁决（本地 `main` 已含未部署的 v1.67 两个提交，是否一并上线需用户定）。
+
+---
+
 ## 2026-11-08 — 「用户 × 角色」偏好快照批（D-A/D-B/D-C）+ 第 2 轮对抗验收修复（v1.67 · 本地完成未部署）
 
 - **批次定位**：用户裁决（逐字见 `docs/DELETION_LOG.md` 2026-11-08 条目）——D-A 个人偏好区从 `/settings/account` 整块删除、能力划归「用户 × 角色」角色设置；D-C 回复模式写进 `my-settings` 快照（仅 `immersive` / `novel`）；本批任务书 item 3 把 `user_proactive_config` per-user 层一并退役。**替代 owner**：`utils/character_settings.py`（`user_character_settings` 全量快照，584 行）+ `GET/PUT/DELETE /api/characters/{id}/my-settings`；运行时解析链统一为「角色快照 → 全局默认 → 内置兜底」（`read_reply_mode` / `read_humanize` / `proactive_config.effective`）。
