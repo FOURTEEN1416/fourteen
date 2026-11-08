@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-11-08 — 三端部署收口：v1.67 + 死组件退役 + v1.68 + v1.69 连续上线 @ `b30987c`
+
+- 用户指令「全仓整理，然后准备推送和部署」→ 依 A 档纪律执行：`git push origin main`（`ae2eb2a..b30987c`，4 提交）→ 生产冷停 → 四库 `.backup` + `integrity_check` 全 ok（`backups/pre-deploy-b30987c-20261108-2035`）→ `git pull --ff-only` 快进（`ed09bb0` → `b30987c`，新文件含 `wechat_direct/binding_sync.py` 等）→ `deploy/remote_deploy.sh` exit 0（pip install -e `.venv-cpu` / npm ci / 前端 701ms 构建 / 服务重启 / nginx reload）。
+- **核验**：冷停实证 `MainPID=0` + `cgroup.procs=0` + 端口无响应；重启后 health ok / ready 200；openapi **207 路径 / 249 操作**（与 v1.67 口径吻合）；重启后 **0 新 ERROR**（存量仅 agnes 429 两条，15:59/19:16 旧日志）；微信通道登录成功、调度器在跑；blob 三端 4/4 一致（`humanize_delivery` / `wechat_connector` / `character_settings` / `binding_sync`）；前端 200。
+- **回填**：`backfill_wechat_bindings.py --apply` → insert 5 + update 1（bindings 10 行，复核幂等全 noop）；`migrate_per_user_prefs_to_my_settings.py` dry-run 发现 0 个 user_key（无存量覆盖需迁）；`backfill_character_settings --dry-run` 0 组合（快照懒物化，随读随建）。
+- **整理**：清 `.ruff_cache` + 51 个 `__pycache__`（`git ls-files` 命中 0 后执行）；`marketing/` 入 `.gitignore`（对外物料含海报/视频大文件，不入仓库）。
+- **状态更新**：上一条 v1.69 条目的「未提交未部署」由本条取代——代码已推送并三端上线；文档收口（`AGENTS.md` 版本头 v1.69 + 修订历史行、`docs/HANDOFF_REPORT.md` 当前状态）随本批提交。
+- **遗留**：① 4 条用户自助主动路由 owner 追认（`DELETION_LOG` 在案）；② `CODE_GRAPH` 规模读数待下轮全量回扫；③ 语音文件卡片形态观感待真机确认。
+
+---
+
 ## 2026-11-08 — 发送链收口批：拟人节奏作用域全链核验 + 主动拆条受理判据上限漂移根治（v1.69 · 本地未提交未部署）
 
 - **触发**：用户引述上一会话诊断——「角色设置页的段间延时/拆条上限/主动消息拆条只是存了值，真实发送链 `wechat_connector.py:693/:1853` 调 `read_humanize()` 不传角色，开关是假的」，裁决「想办法进行修复！！！」。
