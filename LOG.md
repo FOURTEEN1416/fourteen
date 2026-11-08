@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-11-08 — 发送链收口批：拟人节奏作用域全链核验 + 主动拆条受理判据上限漂移根治（v1.69 · 本地未提交未部署）
+
+- **触发**：用户引述上一会话诊断——「角色设置页的段间延时/拆条上限/主动消息拆条只是存了值，真实发送链 `wechat_connector.py:693/:1853` 调 `read_humanize()` 不传角色，开关是假的」，裁决「想办法进行修复！！！」。
+- **核实结论（旧诊断已被代码实况推翻）**：作用域接线**已在 `547b453`（v1.67 D-A）落地并有专测**——`WeChatConnector.humanize_scope`（用户键 + 角色 id，角色由 `utils.character_resolver` 唯一 owner 解析）/ `_humanize_for`（快照 → 全局 → 默认）、`send_reply_segments` 一次解析两处消费（拆条上限 + 段间延时同吃一份快照）、`humanize_delivery.proactive_split_enabled` / `direct_send_proactive`（主动拆条按快照）、`main.py` 归因闸同源。`tests/test_humanize_delivery_scope_20261108.py` 11 例新鲜实跑全绿（含「快照 4 段真发 4 段」「段间延时取快照 off 档零延时」「主动拆条快照开 / 全局关」「多用户多角色不串用」）。旧诊断引用的 `:693/:1853` 是中间态行号；现文件内余下无参 `read_humanize()` 全为有意回落位（`_segment_delay` 的 `humanize=None` fail-soft 分支、无作用域机器面、admin 全局配置页）。**「三个开关是假的」结论作废：自 v1.67 起真实生效。**
+- **本批真缺陷（复核抓出，非用户原报）**：`utils/humanize_delivery.send_proactive_segmented` 的**完整受理判据**用出厂默认上限重算期望分段（`split_reply_for_wechat(msg)`），与发送侧作用域上限漂移——用户把「拆条上限」调成 2（出厂 3）且主动消息为单行超长文（行内切 3 块）时，实际完整发出 2 段却被判「未完整受理」→ `main.py` 抛「微信定向投递未完整受理」、调度器把 wechat 通道置 None、`_record_outbound` 不执行（已送达内容从历史蒸发）。红测先行实证：修前 `direct_send_proactive` 返回 `False` 而两段均已被微信受理。
+- **修法**：新增 `humanize_delivery._scoped_split_cap(connector, peer)`（快照 → 全局 → 默认，读失败回落默认，与连接器 `_split_cap_for` 同判据）；`send_proactive_segmented` 期望分段改用该上限重算，与主链 `publish`（`_split_cap_for(from_user)`）恢复逐字同构。
+- **连带修复（存量死引用）**：`tests/test_humanize_delay_tiers.py::test_max_segments_single_source_across_connector_and_frontend` 仍读 `429f78e` 已整删的 `frontend/src/store/humanizeStore.ts`（HEAD 对照实证：与本批无关的存量失败）→ 前端锚点迁至 `CharacterSettingsPanel.tsx`（选项集 = `SEGMENT_CAP_CHOICES`、缺省回落 = `MAX_SEGMENTS`）。
+- **验证（全部新鲜实跑）**：新增 1 例 `test_proactive_complete_judgement_uses_scoped_cap` **红 → 绿**（突变验红 1/1）；受影响面 6 文件（scope / segmented / main wiring / split cap / delay tiers / directed chain）**95 例全绿**；全仓 `ruff` **0 错**；全量 `--collect-only` **4633**（294 文件 / 45 卡），四分块（第三块因单进程聚合态变慢按 6–8 文件批跑、合计仍为该整块）**1194 + 906 + 1250+1skip + 1281+1skip = 4631 通过 + 2 跳过 / 0 失败**（与收集数精确吻合；2 跳过 = Redis 环境 + golden live_llm）。
+- **遗留**：① 本批仅 3 个文件（`utils/humanize_delivery.py` + 两个测试），**未提交未 push 未部署**（随用户裁决；并行窗 `84e2035` v1.68 语音批也在本地未推送）；② `AGENTS.md` 版本头与 CODE_GRAPH 规模读数本轮未回扫（v1.68 刚由并行窗写入同一文件，避免同文件双写，待主控统一收口）。
+
+---
+
 ## 2026-11-08 — 语音投递形态批：iLink 不支持出站原生语音条 → 音频文件卡片（v1.68 · 待部署）
 
 - **用户报障**：「我刚刚让十四发语音给我，她没有给我发」。用户界面 18:34–19:11 期间多次索要语音，一条语音气泡都没出现（只有文字与一张测试图）。

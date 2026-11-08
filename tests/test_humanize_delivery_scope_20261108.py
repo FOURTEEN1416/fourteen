@@ -198,6 +198,37 @@ def test_proactive_split_helper_uses_same_scope_as_delivery(tmp_path, monkeypatc
     assert proactive_split_enabled(object(), PEER) is False
 
 
+def test_proactive_complete_judgement_uses_scoped_cap(tmp_path, monkeypatch):
+    """完整受理判据必须用与发送侧**相同**的作用域上限重算期望分段。
+
+    缺陷场景（2026-11-08 发送链收口排查）：快照上限=2（出厂默认 3）+
+    单行超长主动消息（行内切 3 块）——发送侧按快照拆 2 段且两段都被微信
+    受理，判据却按默认上限 3 重算期望分段；行内切块按 "\\n" 拼回时段界
+    不同 ⇒ 完整受理被误判「未完整受理」→ 误报投递失败、调度器误杀通道、
+    已送达内容不入历史（用户看到她却说她没说过）。
+    """
+    from utils.humanize_delivery import direct_send_proactive
+
+    humanize_config.write_humanize(max_segments=3, proactive_split=False)
+    character_settings.write(
+        SESSION_KEY, CHARACTER, {"max_segments": 2, "proactive_split": True}
+    )
+
+    conn = _mk_connector(tmp_path, monkeypatch)
+    sent = _record_sends(monkeypatch)
+    monkeypatch.setattr(wc, "_segment_delay", lambda text, **kwargs: 0)
+
+    msg = "一" * 100  # 单行 100 字 ⇒ 行内切 45/45/10 三块
+    ok = direct_send_proactive(conn, PEER, msg)
+
+    assert sent == ["一" * 45, "一" * 55], (
+        "发送侧应按快照上限 2 拆段（首段独立、其余并尾）"
+    )
+    assert ok is True, (
+        "两段都已被微信受理却仍判「未完整受理」——受理判据没按作用域上限重算"
+    )
+
+
 def test_fallback_lines_read_scope_reply_mode(tmp_path, monkeypatch):
     """三处兜底文案按「用户 × 角色」快照读回复模式，不再只读全局默认。
 

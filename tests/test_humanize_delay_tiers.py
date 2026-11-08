@@ -314,8 +314,11 @@ def test_max_segments_single_source_across_connector_and_frontend():
     """``MAX_SEGMENTS`` 的跨文件单一真源（复审 P3「常量镜像」）。
 
     真源 = ``utils/humanize_config.MAX_SEGMENTS``（2026-10-27 Q6 起默认 3）；
-    连接器只许引用别名，``frontend/src/store/humanizeStore.ts`` 的
-    ``HUMANIZE_MAX_SEGMENTS`` 只许等于同一值（无跨语言 import，故以文本约束钉死不漂移）。
+    连接器只许引用别名。前端锚点 2026-11-08 D-B 后迁移：旧
+    ``frontend/src/store/humanizeStore.ts`` 已随 per-user 运维面整删（429f78e），
+    现锚 = ``CharacterSettingsPanel.tsx`` 拆条上限控件 —— 选项集必须等于
+    ``SEGMENT_CAP_CHOICES``、缺省回落字面量必须等于 ``MAX_SEGMENTS``
+    （无跨语言 import，故以文本约束钉死不漂移）。
     """
     from pathlib import Path
 
@@ -327,10 +330,14 @@ def test_max_segments_single_source_across_connector_and_frontend():
     )
     assert hc.MAX_SEGMENTS == 3
 
-    store = (
+    panel = (
         Path(__file__).resolve().parents[1]
-        / "frontend" / "src" / "store" / "humanizeStore.ts"
+        / "frontend" / "src" / "components" / "roles" / "CharacterSettingsPanel.tsx"
     ).read_text(encoding="utf-8")
-    assert f"export const HUMANIZE_MAX_SEGMENTS = {hc.MAX_SEGMENTS}" in store, (
-        "前端 HUMANIZE_MAX_SEGMENTS 与后端 MAX_SEGMENTS 漂移"
+    choices = ", ".join(str(c) for c in sorted(hc.SEGMENT_CAP_CHOICES))
+    assert f"{{[{choices}].map((cap)" in panel, (
+        f"前端拆条上限选项集与后端 SEGMENT_CAP_CHOICES（{choices}）漂移"
+    )
+    assert f"num('max_segments', {hc.MAX_SEGMENTS})" in panel, (
+        "前端拆条上限缺省回落与后端 MAX_SEGMENTS 漂移"
     )

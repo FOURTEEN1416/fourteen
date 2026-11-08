@@ -153,3 +153,6 @@ _quarantine/
 # AOCI agent host integration (machine-bound; do not commit)
 .mcp.json
 .mcp.json.backup.*
+
+# 对外物料工作区（海报/视频/工程文件，大文件不入仓库）
+marketing/

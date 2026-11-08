@@ -96,6 +96,33 @@ def proactive_split_enabled(connector: Any, peer: str) -> bool:
     return humanize_proactive_split_enabled(user_key, character_id)
 
 
+def _scoped_split_cap(connector: Any, peer: str) -> int:
+    """该 peer 的拆条上限（「用户 × 角色」快照 → 全局块 → 出厂默认）。
+
+    `send_proactive_segmented` 的受理判据必须用与发送侧**相同**的上限重算
+    期望分段：发送侧 `WeChatConnector.send_reply_segments` 按作用域快照取
+    上限，此处若按出厂默认重算，快照上限 ≠ 默认且单行超长消息（行内切块）
+    时段界不同 ⇒ 完整受理被误判「未完整受理」（2026-11-08 发送链收口排查
+    实证，钉死于
+    `tests/test_humanize_delivery_scope_20261108.py::test_proactive_complete_judgement_uses_scoped_cap`）。
+
+    连接器不提供作用域（机器面/测试替身）⇒ 读全局块；任何读取异常 ⇒
+    出厂默认 —— 与连接器 `_split_cap_for` 的回落语义一致，判据绝不能把
+    一条已发出的消息误判成失败。
+    """
+    user_key, character_id = _scope_from(connector, peer)
+    from utils import humanize_config
+
+    try:
+        if user_key and character_id:
+            cfg = humanize_config.read_humanize(user_key, character_id)
+        else:
+            cfg = humanize_config.read_humanize()
+        return int(getattr(cfg, "max_segments", humanize_config.MAX_SEGMENTS))
+    except Exception:  # noqa: BLE001
+        return int(humanize_config.MAX_SEGMENTS)
+
+
 def segment_sender(connector: Any):
     """取连接器的「拆条发送」实现；不支持时返回 None。
 
@@ -118,10 +145,13 @@ def send_proactive_segmented(connector: Any, peer: str, msg: str) -> bool | None
       避免误报全失败）
 
     受理判据**复用主链**的 complete 谓词（`WeChatConnector._handle_message_serial`
-    内 `publish` 的 ``accepted == "\\n".join(split_reply_for_wechat(reply))``）——
-    单一真源，不在此另造语义，主动线与主链因此逐字同构。前缀判成功会把用户
-    从未看到的尾句记进历史（`scheduler._deliver` 用原文 `_record_outbound`），
-    故只有完整受理才算成功。
+    内 `publish` 的 ``accepted == "\\n".join(split_reply_for_wechat(reply,
+    max_segments=self._split_cap_for(from_user)))``）——单一真源，不在此另造
+    语义，主动线与主链因此逐字同构：**上限也按同一「用户 × 角色」作用域取**
+    （`_scoped_split_cap`，2026-11-08 收口——旧实现按出厂默认重算，快照上限
+    ≠ 默认时行内切块段界不同 ⇒ 完整受理被误判「未完整受理」）。前缀判成功
+    会把用户从未看到的尾句记进历史（`scheduler._deliver` 用原文
+    `_record_outbound`），故只有完整受理才算成功。
 
     锁：`send_text` 在 `_peer_lock` 内串行同 peer 的生成与发送，而段方法本身
     不持锁（connector 契约）——在此补上同一把锁，防主动消息与主回复对同一
@@ -139,7 +169,10 @@ def send_proactive_segmented(connector: Any, peer: str, msg: str) -> bool | None
             accepted = send(peer, msg)
     else:
         accepted = send(peer, msg)
-    return bool(accepted) and accepted == "\n".join(split_reply_for_wechat(msg))
+    expected = split_reply_for_wechat(
+        msg, max_segments=_scoped_split_cap(connector, peer)
+    )
+    return bool(accepted) and accepted == "\n".join(expected)
 
 
 def direct_send_proactive(connector: Any, peer: str, msg: str) -> bool:
