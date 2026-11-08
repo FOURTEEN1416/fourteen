@@ -1,5 +1,23 @@
 # Code Deletion Log
 
+## [2026-11-08] D-B 死组件退役批：运维页删除后的无挂载点组件/store/前端函数/专测（owner 裁决「没有用就可以删除」）
+
+### 裁决依据
+- 2026-11-08 owner 原话：「没有用就可以删除」（针对 D-B 整机删除 `/settings/proactive` 后失去挂载点的组件与前一条越权追认）。
+- 死因：`/settings/proactive` 运维页整机删除后，仅挂该页的 HumanizeSection / TopicStateSection 成为无挂载点组件；其专属 store、前端 API 函数、专测随之失去全部生产消费方（全仓 grep 实证：组件与 store 仅被彼此及测试引用，`client.ts` 不再 re-export 这些函数）。
+
+### 删除清单（10 文件 + 2 处文件内清理）
+- 组件：`frontend/src/components/admin/HumanizeSection.tsx`、`frontend/src/components/admin/TopicStateSection.tsx`、`frontend/src/components/admin/TopicStateSection.test.tsx`
+- 状态：`frontend/src/store/humanizeStore.ts`、`frontend/src/store/topicStateStore.ts`
+- 专测：`frontend/src/tests/store/humanizeStore.test.ts`、`frontend/src/tests/store/topicStateStore.test.ts`、`frontend/src/tests/components/HumanizeSection.test.tsx`、`frontend/src/tests/api/humanize.test.ts`、`frontend/src/tests/api/topicState.test.ts`
+- 文件内清理① `frontend/src/api/system.ts`：删除 `humanizeGetConfig` / `updateHumanizeConfig` / `topicStateGetConfig` / `updateTopicStateConfig` / `topicStateSnapshot` 五个函数与两个 store 类型 import（后端 admin 端点 `/api/humanize/config`、`/api/topic-state/*` 按 D-B「只保留既有 API」**保留**，运维走 API/配置）；
+- 文件内清理② `frontend/src/tests/components/RoleSettings.test.tsx`：移除 humanizeStore 导入、两个 mock 声明与注册、`beforeEach` 内 15 行防御性复位、`expect(mockHumanizeGetConfig).not.toHaveBeenCalled()` 断言（其意图已由 `queryByText('拟人度')` 覆盖）。
+
+### 功能边界（不误伤）
+- 用户侧拟人节奏（角色设置页①说话节奏，my-settings）与话题引擎（⑤话题引擎）**不动**——死的只是管理员视角的两块管理面板；
+- `DiceGateConfigWrite` 保留（被 `updateProactiveConfig` 的活接口引用）；
+- `agentPlane*` 系列函数保留（RoleSettings 消息 tab 账本回放消费）。
+
 ## [2026-11-08] D-A / D-C：个人偏好区收归「用户 × 角色」——per-user 偏好层整体退役
 
 ### 裁决依据与替代 Owner
@@ -40,9 +58,8 @@
 - `user_reply_mode` / `user_humanize` / `user_proactive_config` **表本身**：数据保留待迁移脚本 `--purge-legacy` 决定；
 - `shisi/memory/legacy/structured_memory.py` 里对 `user_proactive_config` 的删号 purge 登记（`_has_table` 守卫，旧库有残留行时仍会清）——**2026-11-08 验收后补齐**：同为「只写不读」遗留表的 `user_humanize` / `user_reply_mode` 一并进 `purge_owner_data` 与 `count_owner_rows`（同样 `_has_table` 守卫），删号后个人偏好行不再残留（数据隐私/多用户隔离硬约束）。
 
-### ⚠️ 待 owner 追认（越出裁决文范围的删除）
-- 本条目删除的 `/api/user/proactive-config`（GET/POST/DELETE）与 `POST /api/user/proactive/pause` **共 4 条用户自助路由**，依据写的是「本批任务书第 3 条」；但验收依据里给出的裁决文（D-A / D-C）只点名 `reply-mode` 与 `humanize`，D-B 明写「只保留既有 API」。即：**这 4 条属于需要 owner 明确追认的扩权**。
-- 现状与建议：per-user 覆盖层（`user_proactive_config`）已随任务书退役，这 4 条路由若保留则指向已删的读/写函数（必然 500/404），故**代码上无法回到「保留」形态**；建议 owner 追认「随层退役一并删除」，追认前本行不撤。
+### ✅ 已追认（2026-11-08，owner 原话「没有用就可以删除」）
+- ~~⚠️ 待 owner 追认~~：本条目删除的 `/api/user/proactive-config`（GET/POST/DELETE）与 `POST /api/user/proactive/pause` **共 4 条用户自助路由**，曾属越出裁决文（D-A/D-C 只点名 `reply-mode` 与 `humanize`，D-B 明写「只保留既有 API」）的扩权删除；**2026-11-08 owner 当面追认删除有效**，本行留档为审计线索。
 
 ### 跨模块消费者（删除必须同步处理）
 - `api/routers/topic_routes.py:167` 曾 `from api.routers.training_routes import _resolve_admin_target_key` —— 本批把它当「只剩退役层消费者」一并删除，但 `GET /api/topic-state/{session_key}` 的 **admin 分支一直在用**：删后该端点 import 即 `ImportError` → 500（`tests/api/test_topic_state_api.py` 14 例红，2026-11-08 验收实证）。

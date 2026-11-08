@@ -111,49 +111,11 @@ export interface DiceGateConfigWrite {
 // GET/POST/DELETE /api/user/humanize 一并退役；前端改由「我 × 角色」设置面板的
 // my-settings 快照承载（reply_mode 进快照，拟人节奏走既有人格/节奏字段）。
 
-// ── Humanize（拟人度：段间延时 / 主动拆条） ──
-// 真源 = data/scheduler_config.json 的 `humanize` 块（与 reply_mode / quiet_hours /
-// llm_proactive 同一份跨 worker 运行时配置）。后端 api/routers/training_routes.py
-// 的 GET/POST|PUT /api/humanize/config：admin 门 + 纯文件热读（**无** 503，
-// 与 /api/proactive/config 刻意不同：4 worker 里只有 master 持有调度器）。
-//
-// 边界纪律：humanize **不塞进** /api/proactive/config 响应（避免一个配置文件两个
-// owner 的前端投影互相覆盖），前端分别拉取（见 HumanizeSection / humanizeStore）。
-
-/** 段间延时档位（唯一真源在 store/humanizeStore.ts；FF-0007：store 禁止 import API，故反向） */
-export type { HumanizeDelayMode, HumanizeConfigPayload } from '../store/humanizeStore'
-import type { HumanizeConfigPayload } from '../store/humanizeStore'
-
-/** 读**全局默认**拟人度配置（2026-11-08：per-user 覆盖视图已随读层退役） */
-export function humanizeGetConfig() {
-  return client.get('/humanize/config')
-}
-/** partial merge：只传要改的键（后端在 json_state 锁内 merge，未传键保持原值）。
- *  2026-11-08：只剩全局默认一个作用域；用户侧拟人节奏写
- *  `PUT /api/characters/{id}/my-settings`（角色设置面板）。 */
-export function updateHumanizeConfig(cfg: HumanizeConfigPayload) {
-  return client.post('/humanize/config', cfg)
-}
-
-// ── 话题状态机（管理端只读快照 + 配置热读写） ──
-// 真源 = data/scheduler_config.json 的 `topic_state` 块；后端
-// api/routers/topic_routes.py 的三个端点（admin 门，无 503）：
-//   GET  /api/topic-state/config
-//   POST /api/topic-state/config  （partial merge）
-//   GET  /api/topic-state/{session_key}?character_id=...
-import type { TopicStateConfigPayload } from '../store/topicStateStore'
-
-export function topicStateGetConfig() {
-  return client.get('/topic-state/config')
-}
-export function updateTopicStateConfig(cfg: TopicStateConfigPayload) {
-  return client.post('/topic-state/config', cfg)
-}
-export function topicStateSnapshot(sessionKey: string, characterId = 'default') {
-  return client.get(`/topic-state/${encodeURIComponent(sessionKey)}`, {
-    params: { character_id: characterId },
-  })
-}
+// ── Humanize / 话题状态机 管理端前端函数（2026-11-08 已退役） ──
+// 唯一消费方 HumanizeSection / TopicStateSection / humanizeStore / topicStateStore
+// 随 D-B 整机删除的运维页成为无挂载点死组件，经用户裁决「没有用就可以删除」一并
+// 退役（DELETION_LOG 2026-11-08 条目）。后端 admin 端点 `/api/humanize/config`、
+// `/api/topic-state/*` 按 D-B「只保留既有 API 与代码常量」保留，运维走 API/配置。
 
 export function agentPlaneReplay(sessionKey: string, turnId?: string, replyId?: string) {
   return client.get('/agent-plane/replay', { params: { session_key: sessionKey, turn_id: turnId || '', reply_id: replyId || '' } })
