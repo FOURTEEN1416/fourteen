@@ -204,6 +204,22 @@ def _memory_recall_available(components: dict[str, Any] | None) -> bool:
         return False
 
 
+def _voice_reply_ready(user_msg: str, reply: str, voice_mgr: Any) -> bool:
+    """本轮是否走「语音条」通道（2026-11-08 用户裁决：仅发语音条，不发文字气泡）。
+
+    三条件缺一不可：用户明确要语音（`detect_voice_request`）+ 正文够长（≥8 字，
+    短招呼转语音无意义）+ 语音组件**真实可用**（TTS 初始化成功）。判定收在
+    模块级纯函数里，便于确定性测试；合成失败由调用方回落文字（不静默丢内容）。
+    """
+    return (
+        bool(_detect_voice_request(user_msg))
+        and len(str(reply or "")) >= 8
+        and voice_mgr is not None
+        and hasattr(voice_mgr, "synthesize")
+        and bool(getattr(voice_mgr, "enabled", False))
+    )
+
+
 def _voice_sending_available(components: dict[str, Any] | None) -> bool:
     """语音合成组件是否真实可用（能力声明的唯一判定函数，2026-11-08 语音案）。
 
@@ -2321,10 +2337,65 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     # 2026-10-21 R7：本轮模式透传（终裁内不再热读）
                     reply_mode=ctx.get("reply_mode"),
                 )
-                reply = await publish(reply, emotion=emotion_state.to_dict() if emotion_state else None)
+
+                # ── 语音轮（2026-11-08 用户裁决「仅发语音条，不要发文字气泡了」）──
+                # 顺序改为「先合成、后决定发什么」：合成成功 → 不 publish 文字，
+                # 本轮只发语音条；合成失败/不可用 → 照旧发文字（不让用户空等）。
+                # 历史仍记正文（assistant 行=她说过的话，语音只是载体）。
+                # W7：合成按角色语音契约快照（model/voice_id/speed/pitch）。
+                voice_audio = None
+                voice_mgr = self.components.get("voice")
+                if _voice_reply_ready(user_msg, reply, voice_mgr):
+                    try:
+                        # 截取合适长度（微信语音建议 ≤60 字）
+                        voice_text = reply[:200]
+                        # 情感标签与 _after_process 同源（emotion_state 主情绪），
+                        # 旧实现用 after_process 的返回值——现合成先于 after_process，
+                        # 直接取同一真源，避免两处口径分叉。
+                        voice_emotion = (
+                            emotion_state.primary_emotion.value if emotion_state else ""
+                        )
+                        spec = None
+                        cv_mgr = self.components.get("character_voice")
+                        if cv_mgr is not None:
+                            # W14 专属语音门禁：带 user 校验亲和阈值（未解锁
+                            # 回落引擎默认）；无用户上下文不启用门禁（fail-open
+                            # 仅限此场景，契约见 resolve_voice_spec docstring）
+                            spec = cv_mgr.resolve_voice_spec(
+                                character_id,
+                                user_id=str(user_id) if user_id else "",
+                            )
+                        voice_kwargs = spec.synth_kwargs() if spec else {}
+                        voice_audio = await voice_mgr.synthesize(
+                            voice_text, emotion=voice_emotion, **voice_kwargs,
+                        )
+                        if voice_audio:
+                            logger.info(
+                                "[voice][step=synthesized] bytes=%d fmt=%s engine=%s emotion=%s",
+                                len(voice_audio), voice_audio.fmt,
+                                voice_mgr.current_engine, voice_emotion,
+                            )
+                        else:
+                            logger.warning("语音合成返回空, engine=%s", voice_mgr.current_engine)
+                    except Exception as e:
+                        logger.warning("语音合成失败: %s", e)
+
+                if voice_audio:
+                    # 语音轮：不发明文气泡（传输层据 voice_only 只发语音条）
+                    logger.info(
+                        "[voice][step=voice_only] session=%s chars=%d",
+                        session_id, len(reply),
+                    )
+                else:
+                    reply = await publish(
+                        reply,
+                        emotion=emotion_state.to_dict() if emotion_state else None,
+                    )
 
                 # ── 共享后处理（after_chat → ASE → 好感度同步）──
-                emotion_tag = self._after_process(
+                # 返回值 emotion_tag 自 2026-11-08 语音轮改序后不再消费（合成已
+                # 前置并直接用 emotion_state 主情绪同源），保留调用的副作用。
+                _ = self._after_process(
                     user_msg_clean,
                     reply,
                     emotion_state,
@@ -2336,42 +2407,6 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     knowledge_snippets=ctx.get("knowledge_snippets"),
                 )
                 history_finished = True
-
-                # ── 语音合成（用户明确要求时触发；W7：按角色语音契约快照）──
-                voice_audio = None
-                want_voice = _detect_voice_request(user_msg)
-                if want_voice and len(reply) >= 8:
-                    voice_mgr = self.components.get("voice")
-                    if voice_mgr and hasattr(voice_mgr, 'synthesize') and voice_mgr.enabled:
-                        try:
-                            # 截取合适长度（微信语音建议 ≤60 字）
-                            voice_text = reply[:200]
-                            # 角色契约：不可变快照（model/voice_id/speed/pitch），
-                            # 未绑定的会话 kwargs 为空 → 引擎默认
-                            spec = None
-                            cv_mgr = self.components.get("character_voice")
-                            if cv_mgr is not None:
-                                # W14 专属语音门禁：带 user 校验亲和阈值（未解锁
-                                # 回落引擎默认）；无用户上下文不启用门禁（fail-open
-                                # 仅限此场景，契约见 resolve_voice_spec docstring）
-                                spec = cv_mgr.resolve_voice_spec(
-                                    character_id,
-                                    user_id=str(user_id) if user_id else "",
-                                )
-                            voice_kwargs = spec.synth_kwargs() if spec else {}
-                            voice_audio = await voice_mgr.synthesize(
-                                voice_text, emotion=emotion_tag, **voice_kwargs,
-                            )
-                            if voice_audio:
-                                logger.info(
-                                    "语音合成成功: %d bytes fmt=%s engine=%s emotion=%s spec=%s",
-                                    len(voice_audio), voice_audio.fmt,
-                                    voice_mgr.current_engine, emotion_tag, voice_kwargs,
-                                )
-                            else:
-                                logger.warning("语音合成返回空, engine=%s", voice_mgr.current_engine)
-                        except Exception as e:
-                            logger.warning("语音合成失败: %s", e)
 
                 process_time = time.perf_counter() - start_time
 
@@ -2386,6 +2421,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     result["voice"] = voice_result_payload(voice_audio)
                     # 微信 silk: ~2.4KB/s, 按字数估算时长
                     result["voice_duration_ms"] = min(60000, max(1500, len(reply) * 180))
+                    # 2026-11-08：语音轮标记——传输层只发语音条、不发明文；
+                    # 语音发送失败时传输层据 reply 补发文字兜底。
+                    result["voice_only"] = True
                 return result
 
             except asyncio.CancelledError:

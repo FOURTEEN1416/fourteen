@@ -359,3 +359,108 @@ def test_novel_image_history_rule():
 
     assert "[图片]" in _INSTRUCTION_NOVEL
     assert "没收到" in _INSTRUCTION_NOVEL
+
+
+# ═══════════════════════════════════════════════
+# 六、语音轮「仅发语音条，不发文字气泡」（2026-11-08 用户追加裁决）
+# ═══════════════════════════════════════════════
+
+
+def test_voice_reply_ready_matrix():
+    """语音轮前置判定：要语音 + 正文≥8 字 + 组件真实可用，缺一不可。"""
+    from orchestrator.optimized_orchestrator import _voice_reply_ready
+
+    on = SimpleNamespace(enabled=True, synthesize=lambda *a, **k: None)
+    off = SimpleNamespace(enabled=False, synthesize=lambda *a, **k: None)
+    long_reply = "好啊，那我今天就慢慢说给你听，别嫌我啰嗦。"
+    assert _voice_reply_ready("你可以给我发语音吗", long_reply, on) is True
+    assert _voice_reply_ready("你可以给我发语音吗", "嗯嗯", on) is False, "短招呼不转语音"
+    assert _voice_reply_ready("今天吃什么", long_reply, on) is False, "用户没要语音"
+    assert _voice_reply_ready("你可以给我发语音吗", long_reply, off) is False
+    assert _voice_reply_ready("你可以给我发语音吗", long_reply, None) is False
+
+
+def _text_msg(msg_id: str = "vo_1"):
+    return {
+        "message_type": 1,
+        "message_id": msg_id,
+        "from_user_id": "wx_user_1",
+        "context_token": "ctx",
+        "item_list": [{"type": 1, "text_item": {"text": "你可以给我发语音吗"}}],
+    }
+
+
+def _voice_result_dict(voice_only: bool) -> dict:
+    from voice.audio_result import SynthesizedAudio, voice_result_payload
+
+    payload = voice_result_payload(SynthesizedAudio(b"fake-mp3", "mp3"))
+    return {
+        "reply": "好啊，那我今天就慢慢说给你听，别嫌我啰嗦。",
+        "voice": payload,
+        "voice_duration_ms": 2000,
+        "voice_only": voice_only,
+    }
+
+
+def _conn_with_voice(monkeypatch, send_voice_ok: bool):
+    from unittest.mock import MagicMock
+
+    from wechat_direct.wechat_connector import WeChatConnector
+
+    conn = WeChatConnector(MagicMock(), owner_user_id=42)
+    conn.token = "test_token"
+    conn._last_user_id = "wx_user_1"
+    conn._context_tokens = {"wx_user_1": {"token": "ctx", "ts": 0}}
+    conn.send_voice = MagicMock(return_value=send_voice_ok)
+    return conn
+
+
+def test_voice_only_skips_text_bubble(monkeypatch):
+    """语音轮发送成功 → 只发语音条，`_send_text` 零调用（用户裁决）。"""
+    from unittest.mock import patch
+
+    from voice.audio_converter import AudioFormatConverter
+
+    monkeypatch.setattr(AudioFormatConverter, "to_silk", lambda self, data, fmt: b"silk-bytes")
+    conn = _conn_with_voice(monkeypatch, send_voice_ok=True)
+    with patch("wechat_direct.wechat_connector._send_text") as mock_send, \
+            patch("wechat_direct.wechat_connector._call_user_manager") as mock_call:
+        mock_send.return_value = {"ret": 0}
+        mock_call.return_value = _voice_result_dict(voice_only=True)
+        conn._handle_message(_text_msg("vo_only_ok"))
+    conn.send_voice.assert_called_once()
+    assert mock_send.call_count == 0, "语音轮不得再发文字气泡"
+
+
+def test_voice_only_falls_back_to_text_on_send_failure(monkeypatch):
+    """语音发送失败 → 补发文字（内容不凭空消失），不是静默丢。"""
+    from unittest.mock import patch
+
+    from voice.audio_converter import AudioFormatConverter
+
+    monkeypatch.setattr(AudioFormatConverter, "to_silk", lambda self, data, fmt: b"silk-bytes")
+    conn = _conn_with_voice(monkeypatch, send_voice_ok=False)
+    with patch("wechat_direct.wechat_connector._send_text") as mock_send, \
+            patch("wechat_direct.wechat_connector._call_user_manager") as mock_call:
+        mock_send.return_value = {"ret": 0}
+        mock_call.return_value = _voice_result_dict(voice_only=True)
+        conn._handle_message(_text_msg("vo_only_fail"))
+    conn.send_voice.assert_called_once()
+    assert mock_send.call_count >= 1, "语音失败必须回退文字，用户不能什么都收不到"
+
+
+def test_legacy_voice_result_keeps_text_and_voice(monkeypatch):
+    """无 voice_only 标记的旧结果（如 API/旧调用方）→ 文字+语音双发，行为不变。"""
+    from unittest.mock import patch
+
+    from voice.audio_converter import AudioFormatConverter
+
+    monkeypatch.setattr(AudioFormatConverter, "to_silk", lambda self, data, fmt: b"silk-bytes")
+    conn = _conn_with_voice(monkeypatch, send_voice_ok=True)
+    with patch("wechat_direct.wechat_connector._send_text") as mock_send, \
+            patch("wechat_direct.wechat_connector._call_user_manager") as mock_call:
+        mock_send.return_value = {"ret": 0}
+        mock_call.return_value = _voice_result_dict(voice_only=False)
+        conn._handle_message(_text_msg("vo_legacy"))
+    conn.send_voice.assert_called_once()
+    assert mock_send.call_count >= 1

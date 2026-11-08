@@ -2242,16 +2242,23 @@ class WeChatConnector:
                 msg_id, session_key, len(reply), t_elapsed, process_time,
             )
 
-        # 早期拒绝（尚未进入模型）可能未调用发送回调；统一出口只发送一次。
-        if not sent_reply:
-            publish(reply)
-        if not sent_reply.get("complete"):
-            return
-        # 追问链已退役（2026-10-12）：回复后隔多久、要不要再接话，
-        # 唯一 Owner = proactive 决策链（decide_proactive + 节奏双闸冷却）。
-        logger.info("[wx][step=reply_accepted] msg_id=%s session=%s", msg_id, session_key)
-
         voice_result = result.get("voice")
+        # 2026-11-08 用户裁决「仅发语音条，不要发文字气泡了」：语音轮（编排器
+        # 合成成功并打 voice_only）不发明文；只有语音转码/发送失败才回退文字，
+        # 保证本轮内容不凭空消失。历史侧正文已由编排器记录，与气泡无关。
+        voice_only = bool(result.get("voice_only")) and bool(voice_result)
+
+        # 早期拒绝（尚未进入模型）可能未调用发送回调；统一出口只发送一次。
+        if not sent_reply and not voice_only:
+            publish(reply)
+        if not voice_only:
+            if not sent_reply.get("complete"):
+                return
+            # 追问链已退役（2026-10-12）：回复后隔多久、要不要再接话，
+            # 唯一 Owner = proactive 决策链（decide_proactive + 节奏双闸冷却）。
+            logger.info("[wx][step=reply_accepted] msg_id=%s session=%s", msg_id, session_key)
+
+        voice_sent = False
         if voice_result:
             try:
                 # W7：统一音频对象携带实际格式（云端 mp3 / SAPI 兜底 wav），
@@ -2267,11 +2274,23 @@ class WeChatConnector:
                     silk_audio = converter.to_amr(voice_data, voice_fmt)
                 if silk_audio:
                     duration_ms = result.get("voice_duration_ms", 3000)
-                    self.send_voice(silk_audio, to_user=from_user,
-                                    duration_ms=duration_ms, fmt=fmt)
+                    # send_voice 返回 bool（2026-09-19 起校验业务返回码）：
+                    # 旧实现不接回执，语音静默失败时用户什么都没有。
+                    voice_sent = bool(self.send_voice(silk_audio, to_user=from_user,
+                                                      duration_ms=duration_ms, fmt=fmt))
             except Exception as e:  # noqa: BLE001
                 logger.warning("[wx][step=voice_failed] msg_id=%s user=%s error=%s",
                                msg_id, from_user, e)
+
+        if voice_only:
+            if voice_sent:
+                logger.info("[wx][step=voice_sent] msg_id=%s session=%s",
+                            msg_id, session_key)
+            else:
+                # 语音兜底：合成成功但转码/发送失败 → 补发文字（不静默丢内容）
+                logger.info("[wx][step=voice_only_fallback_text] msg_id=%s session=%s",
+                            msg_id, session_key)
+                publish(reply)
 
         sticker_result = result.get("sticker")
         if sticker_result:
