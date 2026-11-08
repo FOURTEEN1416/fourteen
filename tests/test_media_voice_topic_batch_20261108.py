@@ -484,3 +484,72 @@ def test_legacy_voice_result_keeps_text_and_voice(monkeypatch):
         conn._handle_message(_text_msg("vo_legacy"))
     conn.send_voice.assert_called_once()
     assert mock_send.call_count >= 1
+
+
+# ═══════════════════════════════════════════════
+# 七、语音 LLM 决策（2026-11-08 用户裁决：把语音从字段匹配升级为 L1 工具）
+# ═══════════════════════════════════════════════
+
+
+def test_voice_cue_is_voice_desire_only():
+    """隐式语音晋级只收「语音愿望/表达方式」类；纯情绪句不唤醒 L1（成本纪律）。"""
+    from orchestrator.tool_gate import voice_cue
+
+    for t in ["好想听你说话", "陪我聊会嘛", "撒个娇给我听听", "哄哄我", "说点好听的", "语气温柔点"]:
+        assert voice_cue(t) is True, f"语音愿望句应晋级 L1: {t}"
+    for t in ["今天好累啊，也不想动", "今天吃什么", "明天几点开会", "我想你了"]:
+        assert voice_cue(t) is False, f"非语音愿望句不应因语音而晋级: {t}"
+
+
+def test_should_escalate_includes_voice_cue():
+    from orchestrator.tool_gate import should_escalate
+
+    assert should_escalate("好想听你说话") is True
+    assert should_escalate("今天吃什么") is False
+    assert should_escalate("今天好累啊，也不想动") is False
+
+
+def test_send_voice_tool_schema():
+    from orchestrator.tool_gate import SEND_VOICE_TOOL, extract_voice_decision
+
+    fn = SEND_VOICE_TOOL["function"]
+    assert fn["name"] == "send_voice"
+    assert "语音条" in fn["description"]
+    # 解析：命中 / 未命中 / 空
+    assert extract_voice_decision([{"function": {"name": "send_voice", "arguments": "{}"}}]) is True
+    assert extract_voice_decision([{"function": {"name": "set_reminder"}}]) is False
+    assert extract_voice_decision(None) is False
+
+
+def test_review_messages_has_voice_rule():
+    from orchestrator.tool_gate import build_review_messages
+
+    system, _ = build_review_messages("在吗", "角色设定", [])
+    assert "语音裁决" in system and "send_voice" in system
+
+
+def test_voice_auto_cooldown_gate():
+    """LLM 自主语音每会话 10 分钟一次；显式请求不经过此闸。"""
+    from orchestrator.optimized_orchestrator import (
+        _reset_voice_auto_gate,
+        _voice_auto_allowed,
+    )
+
+    _reset_voice_auto_gate()
+    assert _voice_auto_allowed("s1", now=1000.0) is True
+    assert _voice_auto_allowed("s1", now=1001.0) is False
+    assert _voice_auto_allowed("s2", now=1001.0) is True  # 会话独立
+    assert _voice_auto_allowed("s1", now=1000.0 + 601) is True  # 冷却到期
+    _reset_voice_auto_gate()
+
+
+def test_voice_reply_ready_force_for_llm_decision():
+    """LLM 裁决的隐式语音：正文/组件满足即可，不再要求词表命中（force）。"""
+    from orchestrator.optimized_orchestrator import _voice_reply_ready
+
+    on = SimpleNamespace(enabled=True, synthesize=lambda *a, **k: None)
+    short = "嗯嗯"
+    long_reply = "过来吧，我陪你待一会儿，别一个人扛着。"
+    assert _voice_reply_ready("今天吃什么", long_reply, on) is False
+    assert _voice_reply_ready("今天吃什么", long_reply, on, force=True) is True
+    assert _voice_reply_ready("今天吃什么", short, on, force=True) is False

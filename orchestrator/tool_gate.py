@@ -83,6 +83,74 @@ def has_profile_signal(text: str) -> bool:
     return bool(_PROFILE_RE.search((text or "").strip()))
 
 
+# ── 语音裁决（2026-11-08 语音 LLM 化批）────────────────────
+# 用户裁决方向：「让 LLM 决策是否需要调用语音，而不是单纯字段匹配」。
+# 落地形态 = 语音接进既有三级管线（L0 只晋级、L1 LLM 用 function calling 裁决、
+# 执行确定性）——与提醒/天气/记忆同一骨架，不新建机制。
+#
+# 边界（两条轨道，别混）：
+# - **显式请求**（「发语音 / 想听你的声音」…，voice_detector 判定）：硬保证，
+#   不依赖 L1——用户明确点单时让 LLM 改判成文字是 UX 倒退；
+# - **隐式自主**（本条）：情绪/撒娇/想听语境 → L0 晋级 → L1 裁决要不要用声音。
+#   开关 `LLM_VOICE_AUTO_ENABLED` 一行可回退（回退后只剩显式轨道）。
+LLM_VOICE_AUTO_ENABLED = True
+
+# 隐式space信号只收「**语音愿望/表达方式**」类（想听、陪我说话、撒娇哄我、
+# 要语气）——**不收纯情绪词**（好累/难过/想哭）。理由：纯情绪句晋级会让 L1
+# 每轮都跑（成本与延迟回归，且 test_memory_probe/test_reminder 成本纪律钉死
+# 了「闲聊情绪句不唤醒工具闸」）；情绪场景的语音由**已因其他原因跑起来的
+# L1** 顺带裁决（review 规则里含「氛围适合」判据）。
+_VOICE_CUE_PATTERNS = (
+    r"想听你(说|唱|说话)",
+    r"陪我(说说话|聊会|待会)",
+    r"撒(个)?娇|哄我|哄哄我|抱抱|亲亲",
+    r"温柔(一)?点|说点好听|语气(温柔|软)",
+)
+_VOICE_CUE_RE = re.compile("|".join(_VOICE_CUE_PATTERNS))
+
+
+def voice_cue(text: str) -> bool:
+    """隐式语音语境信号（L0 只负责晋级，是否真发语音由 L1 LLM 裁决）。"""
+    if not LLM_VOICE_AUTO_ENABLED:
+        return False
+    return bool(_VOICE_CUE_RE.search((text or "").strip()))
+
+
+#: 语音裁决伪工具（与 ask_user 同型：只做决策、无副作用执行体）。
+#: 由编排器在 L1 工具列表里与注册表工具一并下发；被调用时置位本轮
+#: voice 决策，不进入 tools.dispatch（无对应 registry 实例）。
+SEND_VOICE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "send_voice",
+        "description": (
+            "用**语音条**回复对方（系统会把你要说的话转成语音发出，本轮不再发明文）。"
+            "当对方明确想听你的声音/让你发语音，或此刻用声音回应明显更贴"
+            "（深夜情绪浓、撒娇、想听你说话）时调用；纯文字就够、或对方没这个意愿时不调用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "一句话说明为什么这轮适合用语音（内部记录）",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+
+def extract_voice_decision(tool_calls: list | None) -> bool:
+    """L1 返回的 tool_calls 里是否点了 send_voice（纯函数，便于测试）。"""
+    for tc in tool_calls or []:
+        fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+        if isinstance(fn, dict) and fn.get("name") == "send_voice":
+            return True
+    return False
+
+
 def should_escalate(query: str, has_pending_intent: bool = False) -> bool:
     """L0 晋级判定。
 
@@ -90,6 +158,9 @@ def should_escalate(query: str, has_pending_intent: bool = False) -> bool:
         query: 用户消息原文。
         has_pending_intent: 该会话是否存在待澄清任务——存在则无论新消息
             说什么都晋级（用户的回答要和旧槽位合并判断）。
+
+    2026-11-08：新增隐式语音语境晋级（`voice_cue`）——只负责叫醒 L1，
+    发不发语音由 LLM 裁决（`SEND_VOICE_TOOL`）。
     """
     if has_pending_intent:
         return True
@@ -101,6 +172,7 @@ def should_escalate(query: str, has_pending_intent: bool = False) -> bool:
         or _COMMAND_RE.search(text)
         or _QUERY_RE.search(text)
         or _PROFILE_RE.search(text)
+        or voice_cue(text)
     )
 
 
@@ -192,6 +264,12 @@ def build_review_messages(
         "（action=cancel/reschedule + reminder_id，编号先由 query_reminders 拿到）；"
         "改期只改这一条，**不要再 set_reminder 新增一条**（同一天被叫两次）。",
         "- 信息不全（典型：缺具体时间）→ 调用 ask_user 问一句，不要猜、不要闲聊、不要空口答应。",
+        # 2026-11-08 语音 LLM 化批：语音不再是词表匹配，由本跳裁决。
+        "- 【语音裁决】对方明确想听你的声音 / 让你发语音 → 调用 **send_voice**；"
+        "对方没提语音，但此刻用声音回应明显更贴（深夜情绪浓、撒娇、想听你说话、"
+        "明显低落需要安抚）→ 也可以调用 send_voice。纯文字就够、或对方在说正事 → 不调。"
+        "send_voice 一发就是语音条、本轮不再发明文，不要滥用；"
+        "对方明确拒绝过语音（别发语音/打字就行）则不要调用。",
         "- 只是闲聊、没有任何托付 → 一个工具都不调，正常聊天。",
         "- 【硬约束】没有 tool_calls 时，**禁止输出任何承诺句**",
         "  （好的/收到/听到啦/我会提醒你/包在我身上/交给我等）。",

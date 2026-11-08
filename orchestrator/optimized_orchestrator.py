@@ -204,20 +204,50 @@ def _memory_recall_available(components: dict[str, Any] | None) -> bool:
         return False
 
 
-def _voice_reply_ready(user_msg: str, reply: str, voice_mgr: Any) -> bool:
+def _voice_reply_ready(
+    user_msg: str, reply: str, voice_mgr: Any, *, force: bool = False
+) -> bool:
     """本轮是否走「语音条」通道（2026-11-08 用户裁决：仅发语音条，不发文字气泡）。
 
-    三条件缺一不可：用户明确要语音（`detect_voice_request`）+ 正文够长（≥8 字，
-    短招呼转语音无意义）+ 语音组件**真实可用**（TTS 初始化成功）。判定收在
-    模块级纯函数里，便于确定性测试；合成失败由调用方回落文字（不静默丢内容）。
+    三条件缺一不可：要语音（显式词表命中，或 `force=True` 表示 L1 LLM 已裁决）
+    + 正文够长（≥8 字，短招呼转语音无意义）+ 语音组件**真实可用**（TTS 初始化
+    成功）。判定收在模块级纯函数里，便于确定性测试；合成失败由调用方回落文字
+    （不静默丢内容）。
     """
     return (
-        bool(_detect_voice_request(user_msg))
+        (force or bool(_detect_voice_request(user_msg)))
         and len(str(reply or "")) >= 8
         and voice_mgr is not None
         and hasattr(voice_mgr, "synthesize")
         and bool(getattr(voice_mgr, "enabled", False))
     )
+
+
+#: LLM 自主语音冷却（2026-11-08 语音 LLM 化批）：隐式语境命中且 L1 判同意时，
+#: 同一会话 window 秒内只发一次——防「每轮都判该用声音」烧额度。显式请求不受限。
+_VOICE_AUTO_COOLDOWN_SECONDS = 600.0
+_voice_auto_last: dict[str, float] = {}
+_voice_auto_lock = threading.Lock()
+
+
+def _voice_auto_allowed(session_id: str, *, now: float | None = None) -> bool:
+    """LLM 自主语音的会话级冷却闸（放行即记账；原子）。"""
+    key = str(session_id or "")
+    if not key:
+        return False
+    ts = time.monotonic() if now is None else float(now)
+    with _voice_auto_lock:
+        last = _voice_auto_last.get(key)
+        if last is not None and ts - last < _VOICE_AUTO_COOLDOWN_SECONDS:
+            return False
+        _voice_auto_last[key] = ts
+        return True
+
+
+def _reset_voice_auto_gate() -> None:
+    """测试用：清空自主语音冷却账。"""
+    with _voice_auto_lock:
+        _voice_auto_last.clear()
 
 
 def _voice_sending_available(components: dict[str, Any] | None) -> bool:
@@ -510,6 +540,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         turn_id: str = "",
         character_id: str = "",
         llm_deadline: float | None = None,
+        voice_decision: dict[str, Any] | None = None,
     ) -> tuple[str, str]:
         """三级意图管线：L0 零成本晋级线 → L1 LLM 终审（function calling）
         → 工具执行。
@@ -603,6 +634,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     tools=[
                         *tools.registry.get_tools_by_permission(affinity_level),
                         tool_gate.ASK_USER_TOOL,
+                        # 2026-11-08 语音 LLM 化批：语音裁决伪工具（与 ask_user
+                        # 同型，无 registry 执行体；命中时置位本轮 voice 决策）。
+                        tool_gate.SEND_VOICE_TOOL,
                     ],
                     temperature=0.3,
                     max_tokens=1024,
@@ -675,6 +709,23 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 args = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
             except (TypeError, ValueError, json.JSONDecodeError):
                 args = {}
+            # 2026-11-08 语音 LLM 化批：send_voice 是决策伪工具（无 registry 执行体）——
+            # 置位本轮 voice 决策后直接返回成功回执，**不进 tools.dispatch**
+            # （否则会因「未知工具」被记一次失败）。真正发不发由编排器音色门与
+            # 传输层保证；回执只用于工具循环收口。
+            if name == "send_voice":
+                if isinstance(voice_decision, dict):
+                    voice_decision["requested"] = True
+                    voice_decision["reason"] = str(args.get("reason") or "")
+                logger.info(
+                    "[tool_gate] L1 判决 session=%s verdict=send_voice", session_key,
+                )
+                return {
+                    "tool": name,
+                    "success": True,
+                    "result": "已安排用语音条回复（系统会把你的话转成语音发出）。",
+                    "call_id": call_id,
+                }
             # 服务端注入调用归属（仅声明需要的工具；不由 LLM 决定归属）
             tool_inst = (
                 tools.registry.get(name)
@@ -1599,6 +1650,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         # 工具调用（三级意图管线；direct_reply 为澄清提问，直接作为本轮回复）
         affinity_level = self._get_affinity_level(emotion_state)
         llm = current_llm(self.components.get("llm"))
+        # 2026-11-08 语音 LLM 化批：L1 的 send_voice 决策落到本轮 out 参数
+        # （不引入 self 属性——orchestrator 跨会话共享，逐轮状态走局部变量）。
+        voice_decision: dict[str, Any] = {}
         tool_results, direct_reply = await self._run_tools_if_needed(
             llm,
             user_msg_clean,
@@ -1610,6 +1664,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             turn_id=ax_turn_id,
             character_id=str(character_id or ""),
             llm_deadline=llm_deadline,
+            voice_decision=voice_decision,
         )
         if tool_results:
             # C 正式位次：工具结果插入「对话历史之后 / 扮演规则之前」
@@ -1725,6 +1780,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             # 2026-10-21 R7：本轮回复模式（单次解析）——下游终裁/兜底/流式透传，
             # 禁止再次热读（同一轮内模式必须一致）。
             "reply_mode": turn_reply_mode,
+            # 2026-11-08 语音 LLM 化批：L1 send_voice 裁决结果（逐轮局部状态，
+            # 经 ctx 透传给 process_message 的语音块——不进 self，orchestrator
+            # 跨会话共享，实例属性会串台）。
+            "voice_decision": voice_decision,
         }
 
     def _enqueue_profile_sync(self, session_id, user_msg, reply, llm, *, character_id="", turn_id=""):
@@ -2345,7 +2404,22 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 # W7：合成按角色语音契约快照（model/voice_id/speed/pitch）。
                 voice_audio = None
                 voice_mgr = self.components.get("voice")
-                if _voice_reply_ready(user_msg, reply, voice_mgr):
+                # 双轨：显式请求=硬保证（词表兜底，不让用户点单落空）；
+                # 隐式=LLM 裁决（L1 send_voice）+ 冷却，防自主语音过频烧额度。
+                explicit_voice = _detect_voice_request(user_msg)
+                voice_decision = ctx.get("voice_decision") or {}
+                llm_voice = bool(voice_decision.get("requested"))
+                if llm_voice and not explicit_voice:
+                    llm_voice = _voice_auto_allowed(session_id)
+                logger.info(
+                    "[voice][step=decision] session=%s explicit=%s llm=%s reason=%s",
+                    session_id, explicit_voice, llm_voice,
+                    str(voice_decision.get("reason") or "")[:80],
+                )
+                want_voice_now = explicit_voice or llm_voice
+                if want_voice_now and _voice_reply_ready(
+                    user_msg, reply, voice_mgr, force=llm_voice
+                ):
                     try:
                         # 截取合适长度（微信语音建议 ≤60 字）
                         voice_text = reply[:200]
