@@ -269,9 +269,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="每个用户之间的间隔秒数（防限流）")
     ap.add_argument("--limit", type=int, default=0, help="最多处理几个用户（0=全部）")
     ap.add_argument("--text", default="", help="固定文案（跳过 LLM，便于验证）")
+    ap.add_argument("--user", type=int, action="append", default=[],
+                    help="只处理指定 user_id（可重复，便于定向验证）")
     args = ap.parse_args(argv)
 
     targets = collect_targets(max_age_hours=args.max_age_hours)
+    if args.user:
+        targets = [t for t in targets if t["user_id"] in set(args.user)]
     if not targets:
         print("没有可投递目标（data/wechat_sessions 下无凭据/无 context_token）")
         return 1
