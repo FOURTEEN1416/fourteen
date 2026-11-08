@@ -704,3 +704,74 @@ def test_tools_inline_flag_and_capability_line():
     assert "可以直接调用" not in capability_block(tools_inline=False)
     # 静态条不得再出现「你不能自己调用」的过时断言（主链已能调）
     assert "不能自己调用" not in capability_block(tools_inline=True)
+
+
+# ═══════════════════════════════════════════════
+# 九、主动语音广播脚本（2026-11-08 催动批）
+# ═══════════════════════════════════════════════
+
+
+def test_collect_targets_freshness_and_binding(tmp_path):
+    """目标枚举：24h 窗口新鲜度 + 绑定角色 + 凭据解析（不泄露 token）。"""
+    import json
+    import sqlite3
+    import time as _t
+
+    from scripts.broadcast_proactive_voice import collect_targets
+
+    sessions = tmp_path / "sessions"
+    slot = sessions / "2" / "slot0"
+    slot.mkdir(parents=True)
+    (slot / "credentials.json").write_text(
+        json.dumps({"token": "t-secret-123", "base_url": "https://x"}), encoding="utf-8"
+    )
+    (slot / "context_tokens.json").write_text(
+        json.dumps({
+            "peer-fresh": {"token": "ctx1", "ts": _t.time() - 3600},
+            "peer-stale": {"token": "ctx2", "ts": _t.time() - 48 * 3600},
+        }),
+        encoding="utf-8",
+    )
+    # 未绑定用户（user 3）→ 角色回落 default（不猜）
+    slot3 = sessions / "3" / "slot0"
+    slot3.mkdir(parents=True)
+    (slot3 / "credentials.json").write_text(
+        json.dumps({"token": "t3", "base_url": "https://x"}), encoding="utf-8"
+    )
+    (slot3 / "context_tokens.json").write_text(
+        json.dumps({"peer-unbound": {"token": "ctx3", "ts": _t.time() - 600}}),
+        encoding="utf-8",
+    )
+    db = tmp_path / "users.db"
+    conn = sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE wechat_bindings (id INTEGER PRIMARY KEY, user_id INTEGER, "
+        "wxid TEXT, character_card_id TEXT, bound_at TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO wechat_bindings (user_id, wxid, character_card_id, bound_at) "
+        "VALUES (2, 'peer-fresh', 'abc12345', '2026-11-08')"
+    )
+    conn.commit()
+    conn.close()
+
+    targets = collect_targets(sessions_dir=sessions, users_db=db, max_age_hours=24)
+    by_peer = {t["peer"]: t for t in targets}
+    assert by_peer["peer-fresh"]["fresh"] is True
+    assert by_peer["peer-stale"]["fresh"] is False
+    # 绑定是**按用户**的：同一用户的多个 peer 都是该角色
+    assert by_peer["peer-fresh"]["character_id"] == "abc12345"
+    assert by_peer["peer-stale"]["character_id"] == "abc12345"
+    # 未绑定用户回落 default（不猜）
+    assert by_peer["peer-unbound"]["character_id"] == "default"
+    assert by_peer["peer-fresh"]["token"] == "t-secret-123"
+
+
+def test_broadcast_helpers_mask_and_fallback_line():
+    from scripts.broadcast_proactive_voice import _LINE_FALLBACK, _mask
+    from utils.fallback_lines import is_machine_sentinel_line
+
+    assert _mask("o9cq80-_yMyfY247BTeFL5JvNgoI@im.wechat") == "o9cq80-_…"
+    assert _mask("short") == "short"
+    # 兜底句必须是「能被存库窄口径接受」的真实台词（不是系统哨兵）
+    assert is_machine_sentinel_line(_LINE_FALLBACK) is False
