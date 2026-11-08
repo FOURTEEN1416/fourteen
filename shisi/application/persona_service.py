@@ -57,8 +57,8 @@ CAPABILITY_DECLARATION = (
     "# 你的能力（下面每一条都是真实接通的）\n"
     "- 你**有**长期记忆：系统会在你开口前把「我记得的 / 我对你的观察 / 相关回忆 / "
     "用户画像」放进上下文，直接自然使用即可。\n"
-    "- 提醒、天气、搜索网页、看日历这些事，由别的系统在你开口前处理完；"
-    "你不需要、也不能自己调用它们。用户托付了这些事，就按处理结果自然回应。\n"
+    "- 提醒、天气、搜索网页、看日历、查记忆这些事由**真实工具**完成："
+    "处理结果会作为参考材料出现在上下文里；用户托付了这些事，就按处理结果自然回应。\n"
     "- 你的画像与偏好由系统自动维护：用户说过什么值得记住的事，系统会在回复后自动记下。"
     "你可以自然地提到「记着你说的」，但不要说自己正在记录、也不要复述过程。\n"
 )
@@ -83,7 +83,20 @@ CAPABILITY_VOICE_LINE = (
 )
 
 
-def capability_block(memory_recall: bool = True, voice_enabled: bool = False) -> str:
+#: 条件行：主链工具循环开放时追加（2026-11-08 主链 agent 化批）。
+#: 与上面「由真实工具完成」的静态条互补：静态条不撒谎（两种模式都真），
+#: 这一条只在主链真能直接调工具时说明「本轮你也可以自己调用」。
+CAPABILITY_TOOLS_INLINE_LINE = (
+    "- 本轮工具也已开放给你：需要时可以直接调用（结果会回喂给你继续回答），"
+    "不需要就正常聊天；不要为了用工具而用工具。\n"
+)
+
+
+def capability_block(
+    memory_recall: bool = True,
+    voice_enabled: bool = False,
+    tools_inline: bool = False,
+) -> str:
     """按真实可用性拼能力声明段。
 
     Args:
@@ -94,6 +107,8 @@ def capability_block(memory_recall: bool = True, voice_enabled: bool = False) ->
         voice_enabled: 语音合成组件是否真实可用（2026-11-08 语音案）。缺省
             False——声明一个发不出去的语音等于教模型说谎；只有 TTS 初始化成功
             的部署才渲染该行。
+        tools_inline: 主链工具循环是否开放（2026-11-08 主链 agent 化批）。
+            仅当 registry 真有工具且 agent 模式开启时渲染「你可以自己调用」行。
 
     Returns:
         以 ``# 你的能力`` 开头的段落；段落**恒非空**（静态部分全是既成事实）。
@@ -101,6 +116,8 @@ def capability_block(memory_recall: bool = True, voice_enabled: bool = False) ->
     block = CAPABILITY_DECLARATION + (CAPABILITY_RECALL_LINE if memory_recall else "")
     if voice_enabled:
         block += CAPABILITY_VOICE_LINE
+    if tools_inline:
+        block += CAPABILITY_TOOLS_INLINE_LINE
     return block
 
 
@@ -357,10 +374,12 @@ class PersonaService:
         _flags = capability_flags if isinstance(capability_flags, dict) else {}
         _memory_recall = _flags.get("memory_recall")
         _voice_enabled = bool(_flags.get("voice_enabled"))
+        _tools_inline = bool(_flags.get("tools_inline"))
         injection_parts.append(
             capability_block(
                 True if _memory_recall is None else bool(_memory_recall),
                 voice_enabled=_voice_enabled,
+                tools_inline=_tools_inline,
             ).strip()
         )
         # 话题续聊（2026-10-27 话题状态机 Q2 B+C）：

@@ -250,6 +250,40 @@ def _reset_voice_auto_gate() -> None:
         _voice_auto_last.clear()
 
 
+# ── 主链 agent 化（2026-11-08 用户裁决）──────────────────────────────
+# 用户原话：能力不能停在字段匹配，要 LLM 自己决定调不调工具。落地=主链
+# 本轮直接带 registry 工具 + send_voice，LLM 命中即服务端执行、结果回喂、
+# 重新生成（≤MAX_ROUNDS 跳）。回滚一行：MAIN_CHAIN_AGENT_ENABLED=False。
+#
+# 与 L1 工具闸的分工（同一条链上的两道闸，别重复执行）：
+#   - L0 晋级 → L1 终审：预处理（澄清 ask_user / 落库类副作用），结果随
+#     system 注入主链（既有行为不变）；
+#   - L1 未产出工具结果时 → 主链 agent 循环补上「边聊边调」的能力；
+#   - 有附件（图片）的轮不走循环：多模态消息与工具回喂的消息形态在部分供应商
+#     上不兼容，图片轮保持单次生成（rollback 语义也更好）。
+MAIN_CHAIN_AGENT_ENABLED = True
+MAIN_CHAIN_AGENT_MAX_ROUNDS = 2
+#: 主链单跳读预算（每跳都从轮次剩余预算里取小，不会突破 TOTAL_TURN_LLM_BUDGET）。
+MAIN_CHAIN_AGENT_ROUND_TIMEOUT_SECONDS = 45.0
+
+
+def _tools_inline_available(components: dict[str, Any] | None) -> bool:
+    """主链是否真能直接调工具（能力声明的唯一判定函数）。"""
+    try:
+        if not MAIN_CHAIN_AGENT_ENABLED:
+            return False
+        tools = (components or {}).get("tools")
+        registry = getattr(tools, "registry", None)
+        if registry is None:
+            return False
+        getter = getattr(registry, "get_tools_by_permission", None)
+        if not callable(getter):
+            return False
+        return bool(list(getter(0)))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _voice_sending_available(components: dict[str, Any] | None) -> bool:
     """语音合成组件是否真实可用（能力声明的唯一判定函数，2026-11-08 语音案）。
 
@@ -528,6 +562,244 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
     # （旧 _tool_intent_names 关键词裁决已删除：关键词从"裁决"降级为"晋级"，
     #  规则 owner 迁至 orchestrator/tool_gate.should_escalate —— 2026-09-20）
 
+    async def _dispatch_tool_call(
+        self,
+        tc: dict[str, Any],
+        *,
+        tools: Any,
+        affinity_level: int = 0,
+        session_key: str = "",
+        user_id: int | None = None,
+        turn_id: str = "",
+        character_id: str = "",
+        voice_decision: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """执行一次工具调用（L1 终审与主链 agent 循环的唯一 owner）。
+
+        2026-11-08 主链 agent 化批：从 `_run_tools_if_needed` 的闭包里抽出——
+        同一份归属注入、send_voice 伪工具拦截、异常兜底与调用入账，禁止两处各写
+        一套（否则「主链能调但账本不记」这类漂移会静默发生）。
+        """
+        import uuid as _uuid
+
+        fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+        name = fn.get("name", "") if isinstance(fn, dict) else ""
+        args_raw = fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
+        call_id = str(tc.get("id") or _uuid.uuid4().hex[:12])
+        try:
+            args = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            args = {}
+        # 语音裁决伪工具（无 registry 执行体）：置位本轮决策后返回回执，
+        # 不进 tools.dispatch（否则会因「未知工具」被记一次失败）。
+        if name == "send_voice":
+            if isinstance(voice_decision, dict):
+                voice_decision["requested"] = True
+                voice_decision["reason"] = str(args.get("reason") or "")
+            logger.info("[tool_gate] L1 判决 session=%s verdict=send_voice", session_key)
+            return {
+                "name": name,
+                "tool": name,
+                "success": True,
+                "result": "已安排用语音条回复（系统会把你的话转成语音发出）。",
+                "call_id": call_id,
+            }
+        # 服务端注入调用归属（仅声明需要的工具；不由 LLM 决定归属）
+        tool_inst = (
+            tools.registry.get(name)
+            if tools is not None and hasattr(tools.registry, "get") else None
+        )
+        if tool_inst is not None and getattr(tool_inst, "wants_call_context", False):
+            # turn_id：事实/画像写入口的来源水位与回执归属（W4 缺陷 B）
+            # message_id：入站消息身份（缺陷 I）——副作用幂等的去重键成分，
+            # 服务端注入，LLM 不可决定。
+            args["_meta"] = {
+                "session_key": session_key, "user_id": user_id,
+                "turn_id": str(turn_id or ""),
+                "message_id": current_message_id(),
+                "call_id": call_id,
+            }
+        success = False
+        error = ""
+        try:
+            result = await asyncio.to_thread(
+                tools.dispatch, name, args,
+                affinity_level=affinity_level,
+                caller_id=str(user_id or session_key or ""),
+            )
+            rd = result.to_dict()
+            success = bool(rd.get("success", True)) and not rd.get("error")
+            error = str(rd.get("error") or "")
+        except Exception as e:  # noqa: BLE001
+            logger.debug("工具 %s 执行异常: %s", name, e)
+            result = ToolResult(False, error="tool_execution_failed")
+            rd = result.to_dict()
+            error = "tool_execution_failed"
+        # 缺陷 I：逐调用入账（call_id/结果状态/关联轮），回放可定位失败调用
+        try:
+            from shisi.agent_plane.runtime import append_tool_call_event
+
+            append_tool_call_event(
+                session_key=str(session_key or ""),
+                tool_name=name,
+                call_id=call_id,
+                provider="builtin",
+                success=success,
+                error=error,
+                turn_id=str(turn_id or ""),
+                character_id=str(character_id or ""),
+                args_preview=str(args_raw)[:200],
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("tool call ledger failed: %s", e)
+        return {"name": name, "result": rd, "call_id": call_id, "success": success}
+
+    async def _main_chain_tool_loop(
+        self,
+        llm: Any,
+        *,
+        query: str,
+        system_prompt: str,
+        history: list | None,
+        attachments: list | None = None,
+        affinity_level: int = 0,
+        session_key: str = "",
+        user_id: int | None = None,
+        turn_id: str = "",
+        character_id: str = "",
+        llm_deadline: float | None = None,
+        voice_decision: dict[str, Any] | None = None,
+        temperature: float = 0.85,
+        max_tokens: int = 2048,
+    ) -> tuple[str, bool]:
+        """主链 agent 循环：LLM 本轮自主调工具 → 结果回喂 → 重新生成。
+
+        返回 ``(reply, ran)``：``ran=False`` 表示未启用/无工具/首次调用即失败 ——
+        调用方走旧的主链单跳路径（fail-open）。``ran=True`` 表示本轮生成已由
+        本循环完成（无工具调用时也在首跳返回正文，**不得再调一次主链**），
+        此时 ``reply`` 为空属极端情况（超轮次且收尾失败）→ 调用方兜底。
+
+        预算纪律：每跳超时 = min(单跳上限, 轮次剩余预算)，与 L1/主链同一阶梯，
+        不吃后面的额度；工具调用全部走 `_dispatch_tool_call`（唯一 owner，
+        归属注入/入账/send_voice 拦截与 L1 完全一致）。
+        """
+        if not MAIN_CHAIN_AGENT_ENABLED or llm is None:
+            return "", False
+        tools = self.components.get("tools")
+        if tools is None or not getattr(tools, "registry", None):
+            return "", False
+        try:
+            tool_list = list(tools.registry.get_tools_by_permission(affinity_level))
+        except Exception:  # noqa: BLE001
+            return "", False
+        if not tool_list:
+            return "", False
+        # 语音裁决伪工具同样开放给主链（让 LLM 自己决定用声音回）
+        try:
+            from orchestrator import tool_gate as _tg
+
+            tool_list.append(_tg.SEND_VOICE_TOOL)
+        except Exception:  # noqa: BLE001
+            pass
+
+        built_messages: list | None = None
+        used = False
+        content = ""
+        for _round in range(max(1, MAIN_CHAIN_AGENT_MAX_ROUNDS)):
+            timeout_s = MAIN_CHAIN_AGENT_ROUND_TIMEOUT_SECONDS
+            if llm_deadline is not None:
+                timeout_s = max(1.0, min(timeout_s, remaining_turn_llm_budget(llm_deadline)))
+            kwargs: dict[str, Any] = dict(
+                query=query,
+                system_prompt=system_prompt,
+                history=history,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                tools=tool_list,
+            )
+            if built_messages is None:
+                kwargs["attachments"] = attachments
+            else:
+                kwargs["messages"] = built_messages
+            resp = await asyncio.wait_for(llm.chat_with_tools(**kwargs), timeout=timeout_s)
+            if not isinstance(resp, dict):
+                return "", False
+            # 首跳成功即认为「本轮生成已由 agent 路径完成」——否则调用方会在
+            # 无工具调用的常规轮里再调一次 LLM（每轮双倍调用+双倍延迟，
+            # 2026-11-08 自查发现）。
+            used = True
+            tool_calls = resp.get("tool_calls") or []
+            content = str(resp.get("content") or "").strip()
+            if not tool_calls:
+                return content, used
+            results = []
+            for tc in tool_calls:
+                results.append(
+                    await self._dispatch_tool_call(
+                        tc,
+                        tools=tools,
+                        affinity_level=affinity_level,
+                        session_key=session_key,
+                        user_id=user_id,
+                        turn_id=turn_id,
+                        character_id=character_id,
+                        voice_decision=voice_decision,
+                    )
+                )
+            logger.info(
+                "[agent][step=tool_round] session=%s round=%d tools=%s",
+                session_key, _round + 1,
+                [str(r.get("name") or "") for r in results],
+            )
+            # 回喂：整包 messages（system + history + user + assistant(tool_calls) + tool 结果）
+            built_messages = []
+            if system_prompt:
+                built_messages.append({"role": "system", "content": system_prompt})
+            for row in history or []:
+                built_messages.append(row)
+            built_messages.append({"role": "user", "content": query})
+            built_messages.append(
+                {
+                    "role": "assistant",
+                    "content": str(resp.get("content") or ""),
+                    "tool_calls": tool_calls,
+                }
+            )
+            for tc, r in zip(tool_calls, results, strict=False):
+                call_id = str(tc.get("id") or r.get("call_id") or "")
+                payload = json.dumps(r.get("result"), ensure_ascii=False, default=str)
+                built_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": payload[:4000],
+                    }
+                )
+
+        # 轮次用尽仍无正文：去掉工具再要一次纯文本（保证有回复，不吃无限跳）
+        if not content and built_messages is not None:
+            try:
+                timeout_s = MAIN_CHAIN_AGENT_ROUND_TIMEOUT_SECONDS
+                if llm_deadline is not None:
+                    timeout_s = max(1.0, min(timeout_s, remaining_turn_llm_budget(llm_deadline)))
+                resp = await asyncio.wait_for(
+                    llm.chat_with_tools(
+                        messages=built_messages,
+                        system_prompt="",
+                        history=None,
+                        query="",
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        tools=None,
+                    ),
+                    timeout=timeout_s,
+                )
+                if isinstance(resp, dict):
+                    content = str(resp.get("content") or "").strip()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[agent] 收尾纯文本生成失败（交给调用方兜底）: %s", e)
+        return content, used
+
     async def _run_tools_if_needed(
         self,
         llm: Any,
@@ -699,82 +971,18 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             tool_calls = resp.get("tool_calls") or []
 
         async def _dispatch(tc: dict[str, Any]) -> dict[str, Any]:
-            import uuid as _uuid
-
-            fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-            name = fn.get("name", "") if isinstance(fn, dict) else ""
-            args_raw = fn.get("arguments", "{}") if isinstance(fn, dict) else "{}"
-            call_id = str(tc.get("id") or _uuid.uuid4().hex[:12])
-            try:
-                args = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
-            except (TypeError, ValueError, json.JSONDecodeError):
-                args = {}
-            # 2026-11-08 语音 LLM 化批：send_voice 是决策伪工具（无 registry 执行体）——
-            # 置位本轮 voice 决策后直接返回成功回执，**不进 tools.dispatch**
-            # （否则会因「未知工具」被记一次失败）。真正发不发由编排器音色门与
-            # 传输层保证；回执只用于工具循环收口。
-            if name == "send_voice":
-                if isinstance(voice_decision, dict):
-                    voice_decision["requested"] = True
-                    voice_decision["reason"] = str(args.get("reason") or "")
-                logger.info(
-                    "[tool_gate] L1 判决 session=%s verdict=send_voice", session_key,
-                )
-                return {
-                    "tool": name,
-                    "success": True,
-                    "result": "已安排用语音条回复（系统会把你的话转成语音发出）。",
-                    "call_id": call_id,
-                }
-            # 服务端注入调用归属（仅声明需要的工具；不由 LLM 决定归属）
-            tool_inst = (
-                tools.registry.get(name)
-                if hasattr(tools.registry, "get") else None
+            # 2026-11-08 主链 agent 化批：执行逻辑抽到 `_dispatch_tool_call`，
+            # L1 与主链工具循环共用唯一 owner（避免两份 dispatch 漂移）。
+            return await self._dispatch_tool_call(
+                tc,
+                tools=tools,
+                affinity_level=affinity_level,
+                session_key=session_key,
+                user_id=user_id,
+                turn_id=turn_id,
+                character_id=character_id,
+                voice_decision=voice_decision,
             )
-            if tool_inst is not None and getattr(tool_inst, "wants_call_context", False):
-                # turn_id：事实/画像写入口的来源水位与回执归属（W4 缺陷 B）
-                # message_id：入站消息身份（缺陷 I）——副作用幂等的去重键成分，
-                # 服务端注入，LLM 不可决定。
-                args["_meta"] = {
-                    "session_key": session_key, "user_id": user_id,
-                    "turn_id": str(turn_id or ""),
-                    "message_id": current_message_id(),
-                    "call_id": call_id,
-                }
-            success = False
-            error = ""
-            try:
-                result = await asyncio.to_thread(
-                    tools.dispatch, name, args,
-                    affinity_level=affinity_level,
-                    caller_id=str(user_id or session_key or ""),
-                )
-                rd = result.to_dict()
-                success = bool(rd.get("success", True)) and not rd.get("error")
-                error = str(rd.get("error") or "")
-            except Exception as e:  # noqa: BLE001
-                logger.debug("工具 %s 执行异常: %s", name, e)
-                result = ToolResult(False, error="tool_execution_failed")
-                rd = result.to_dict()
-                error = "tool_execution_failed"
-            # 缺陷 I：逐调用入账（call_id/结果状态/关联轮），回放可定位失败调用
-            try:
-                from shisi.agent_plane.runtime import append_tool_call_event
-
-                append_tool_call_event(
-                    session_key=str(session_key or ""),
-                    tool_name=name,
-                    call_id=call_id,
-                    provider="builtin",
-                    success=success,
-                    error=error,
-                    turn_id=str(turn_id or ""),
-                    character_id=str(character_id or ""),
-                    args_preview=str(args_raw)[:200],
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.debug("tool call ledger failed: %s", e)
-            return {"name": name, "result": rd, "call_id": call_id, "success": success}
 
         # 分支一：ask_user 澄清（只有 ask_user、无真工具时才走这里）
         ask = tool_gate.extract_ask_user(tool_calls)
@@ -1632,6 +1840,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             capability_flags={
                 "memory_recall": _memory_recall_available(self.components),
                 "voice_enabled": _voice_sending_available(self.components),
+                # 2026-11-08 主链 agent 化：主链真能直调工具时才声明
+                "tools_inline": _tools_inline_available(self.components),
             },
             # 2026-10-21 R7：本轮模式单次解析结果透传（mes_example/creator_notes/
             # 知识槽剥离开关）——旧实现 persona_service 内部再热读一次。
@@ -1784,6 +1994,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             # 经 ctx 透传给 process_message 的语音块——不进 self，orchestrator
             # 跨会话共享，实例属性会串台）。
             "voice_decision": voice_decision,
+            # 2026-11-08 主链 agent 化：L1 已产出的工具结果（非空则主链不再跑
+            # 工具循环，避免同一托付被执行两次）。
+            "tool_results": tool_results,
         }
 
     def _enqueue_profile_sync(self, session_id, user_msg, reply, llm, *, character_id="", turn_id=""):
@@ -2309,21 +2522,55 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     # 与工具闸/供应商读预算构成可断言的阶梯（见模块顶不变量）。
                     # 2026-10-21 FIX-3：再与**轮次剩余预算**取小 —— 前面几跳（工具闸/
                     # 并行准备段）花掉的时间会从这里扣，整轮不再无上限。
-                    try:
-                        reply = await asyncio.wait_for(
-                            request_llm.chat(
+                    # ── 主链 agent 循环（2026-11-08 用户裁决：能力不能停在
+                    # 字段匹配）──L1 未产出工具结果且无附件时，本轮直接带工具
+                    # 生成：LLM 命中工具 → 服务端执行 → 结果回喂 → 重新生成。
+                    # 失败/未启用回退旧单跳路径（fail-open）；有附件不跑循环
+                    #（多模态消息与 tool 回喂形态在部分供应商不兼容）。
+                    _agent_reply, _agent_ran = "", False
+                    if not (ctx.get("tool_results") or "").strip() and not attachments:
+                        try:
+                            _agent_reply, _agent_ran = await self._main_chain_tool_loop(
+                                request_llm,
                                 query=user_msg_clean,
                                 system_prompt=system_prompt,
                                 history=chat_history,
+                                attachments=attachments,
+                                affinity_level=int(ctx.get("affinity_level") or 0),
+                                session_key=session_id,
+                                user_id=user_id,
+                                turn_id=str(ctx.get("ax_turn_id") or ""),
+                                character_id=str(character_id or ""),
+                                llm_deadline=llm_deadline,
+                                voice_decision=ctx.get("voice_decision"),
                                 temperature=0.85,
                                 max_tokens=2048,
-                                attachments=attachments,
-                            ),
-                            timeout=min(
-                                MAIN_CHAIN_LLM_TIMEOUT_SECONDS,
-                                remaining_turn_llm_budget(llm_deadline),
-                            ),
-                        )
+                            )
+                        except Exception as _agent_err:  # noqa: BLE001
+                            # agent 化是增强不是必需品：任何异常都退回单跳
+                            logger.warning(
+                                "[agent] 主链工具循环失败，回退单跳 session=%s err=%s",
+                                session_id, _agent_err,
+                            )
+                            _agent_reply, _agent_ran = "", False
+                    try:
+                        if _agent_ran and _agent_reply:
+                            reply = _agent_reply
+                        else:
+                            reply = await asyncio.wait_for(
+                                request_llm.chat(
+                                    query=user_msg_clean,
+                                    system_prompt=system_prompt,
+                                    history=chat_history,
+                                    temperature=0.85,
+                                    max_tokens=2048,
+                                    attachments=attachments,
+                                ),
+                                timeout=min(
+                                    MAIN_CHAIN_LLM_TIMEOUT_SECONDS,
+                                    remaining_turn_llm_budget(llm_deadline),
+                                ),
+                            )
                     except asyncio.TimeoutError:
                         logger.warning("LLM 调用超时 (60s), session=%s", session_id)
                         from utils.fallback_lines import get_fallback_line

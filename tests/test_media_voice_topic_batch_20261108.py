@@ -553,3 +553,154 @@ def test_voice_reply_ready_force_for_llm_decision():
     assert _voice_reply_ready("今天吃什么", long_reply, on) is False
     assert _voice_reply_ready("今天吃什么", long_reply, on, force=True) is True
     assert _voice_reply_ready("今天吃什么", short, on, force=True) is False
+
+
+# ═══════════════════════════════════════════════
+# 八、主链 agent 化（2026-11-08 用户裁决：能力不能停在字段匹配）
+# ═══════════════════════════════════════════════
+
+
+class _FakeToolResult:
+    def to_dict(self):
+        return {"success": True, "result": "记忆里的事实：喜欢咖啡"}
+
+
+class _FakeTools:
+    def __init__(self, lines=None):
+        self.dispatched = []
+        self.registry = SimpleNamespace(
+            get_tools_by_permission=lambda level: [
+                {"type": "function", "function": {"name": "memory"}}
+            ] if lines is None else lines,
+            get=lambda name: None,
+        )
+
+    def dispatch(self, name, args, affinity_level=0, caller_id=""):
+        self.dispatched.append(name)
+        return _FakeToolResult()
+
+
+class _FakeLLM:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def chat_with_tools(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.responses.pop(0)
+
+
+def _bare_orchestrator(tools):
+    from orchestrator.optimized_orchestrator import OptimizedOrchestrator
+
+    obj = object.__new__(OptimizedOrchestrator)
+    obj.components = {"tools": tools}
+    return obj
+
+
+def test_main_chain_tool_loop_dispatches_and_regenerates():
+    """主链 agent：LLM 调工具 → dispatch → 结果回喂 → 重生成终稿。"""
+    import asyncio
+
+    tools = _FakeTools()
+    llm = _FakeLLM([
+        {"content": "", "tool_calls": [
+            {"id": "c1", "function": {"name": "memory", "arguments": "{}"}},
+        ]},
+        {"content": "喜欢咖啡呀，我记得。", "tool_calls": []},
+    ])
+    orch = _bare_orchestrator(tools)
+    reply, ran = asyncio.run(orch._main_chain_tool_loop(
+        llm, query="你还记得我喜欢什么吗", system_prompt="人设",
+        history=[{"role": "user", "content": "在吗"}],
+        session_key="s", user_id=1,
+    ))
+    assert ran is True
+    assert reply == "喜欢咖啡呀，我记得。"
+    assert tools.dispatched == ["memory"], "主链工具必须真执行一次"
+    assert len(llm.calls) == 2, "工具后必须重新生成"
+    msgs = llm.calls[1]["messages"]
+    assert any(m.get("role") == "tool" and m.get("tool_call_id") == "c1" for m in msgs), (
+        "工具结果必须按 tool_call_id 回喂（否则模型拿不到结果）"
+    )
+    assert any(m.get("role") == "system" for m in msgs)
+
+
+def test_main_chain_tool_loop_no_tools_returns_plain():
+    """无工具调用：单跳返回正文且 ran=True —— 调用方不得再调一次主链。
+
+    2026-11-08 自查缺陷回归：旧语义 ran=False 会让调用方丢掉正文再调 `chat()`，
+    常规轮（大多数）变成双倍 LLM 调用 + 双倍延迟。
+    """
+    import asyncio
+
+    tools = _FakeTools()
+    llm = _FakeLLM([{"content": "今天挺忙的。", "tool_calls": []}])
+    orch = _bare_orchestrator(tools)
+    reply, ran = asyncio.run(orch._main_chain_tool_loop(
+        llm, query="在忙吗", system_prompt="人设", history=[],
+    ))
+    assert (reply, ran) == ("今天挺忙的。", True), "首跳成功=生成已完成，不得二次调用"
+    assert len(llm.calls) == 1
+    assert tools.dispatched == []
+
+
+def test_main_chain_tool_loop_rounds_exhausted_final_text():
+    """轮次用尽仍要说话：去工具收尾一次纯文本（不允许空回复）。"""
+    import asyncio
+
+    tools = _FakeTools()
+    tc = {"id": "c1", "function": {"name": "memory", "arguments": "{}"}}
+    llm = _FakeLLM([
+        {"content": "", "tool_calls": [tc]},
+        {"content": "", "tool_calls": [tc]},
+        {"content": "我这边有点卡，但我记得你在。", "tool_calls": []},
+    ])
+    orch = _bare_orchestrator(tools)
+    reply, ran = asyncio.run(orch._main_chain_tool_loop(
+        llm, query="你还记得吗", system_prompt="人设", history=[],
+    ))
+    assert ran is True
+    assert reply == "我这边有点卡，但我记得你在。"
+    assert llm.calls[-1]["tools"] is None, "收尾跳必须去掉工具，逼出正文"
+
+
+def test_main_chain_tool_loop_disabled_and_no_registry():
+    """回滚开关/无注册表：返回 ('', False)，调用方走旧单跳（fail-open）。"""
+    import asyncio
+
+    from orchestrator import optimized_orchestrator as mod
+
+    tools = _FakeTools()
+    llm = _FakeLLM([])
+    orch = _bare_orchestrator(tools)
+    old = mod.MAIN_CHAIN_AGENT_ENABLED
+    try:
+        mod.MAIN_CHAIN_AGENT_ENABLED = False
+        assert asyncio.run(orch._main_chain_tool_loop(
+            llm, query="q", system_prompt="s", history=[]
+        )) == ("", False)
+    finally:
+        mod.MAIN_CHAIN_AGENT_ENABLED = old
+    empty = _bare_orchestrator(SimpleNamespace(registry=SimpleNamespace(
+        get_tools_by_permission=lambda level: [], get=lambda name: None)))
+    assert asyncio.run(empty._main_chain_tool_loop(
+        llm, query="q", system_prompt="s", history=[]
+    )) == ("", False)
+
+
+def test_tools_inline_flag_and_capability_line():
+    from orchestrator.optimized_orchestrator import _tools_inline_available
+    from shisi.application.persona_service import capability_block
+
+    on = {"tools": SimpleNamespace(registry=SimpleNamespace(
+        get_tools_by_permission=lambda level: [{"type": "function"}]))}
+    off = {"tools": SimpleNamespace(registry=SimpleNamespace(
+        get_tools_by_permission=lambda level: []))}
+    assert _tools_inline_available(on) is True
+    assert _tools_inline_available(off) is False
+    assert _tools_inline_available({}) is False
+    assert "可以直接调用" in capability_block(tools_inline=True)
+    assert "可以直接调用" not in capability_block(tools_inline=False)
+    # 静态条不得再出现「你不能自己调用」的过时断言（主链已能调）
+    assert "不能自己调用" not in capability_block(tools_inline=True)
