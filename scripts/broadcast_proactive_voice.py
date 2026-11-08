@@ -150,72 +150,6 @@ def generate_line(llm, character_id: str) -> str:
     return _LINE_FALLBACK
 
 
-def _synthesize(text: str, character_id: str, user_id: int, voice_cfg: dict) -> tuple[bytes, str] | None:
-    """TTS → (silk/amr 字节, fmt)；失败返回 None。"""
-    try:
-        from voice import TTSManager
-
-        mgr = TTSManager()
-        kwargs: dict = {}
-        try:
-            from shisi.voice.character_voice import CharacterVoiceManager
-
-            spec = CharacterVoiceManager().resolve_voice_spec(character_id, str(user_id))
-            if spec is not None:
-                kwargs = spec.synth_kwargs()
-        except Exception:  # noqa: BLE001
-            pass
-
-        async def _synth():
-            await mgr.initialize(voice_cfg)
-            if not mgr.enabled:
-                return None
-            return await mgr.synthesize(text[:200], **kwargs)
-
-        # initialize 与 synthesize 必须同一事件循环（aiohttp client 绑定 loop）
-        audio = asyncio.run(_synth())
-        if not mgr.enabled:
-            print("  ! TTS 未启用（检查 MIMO_API_KEY）")
-            return None
-        if not audio:
-            print("  ! 语音合成返回空")
-            return None
-        from voice.audio_converter import AudioFormatConverter
-
-        conv = AudioFormatConverter()
-        fmt = "silk"
-        silk = conv.to_silk(audio.data, audio.fmt)
-        if silk is None:
-            fmt = "amr"
-            silk = conv.to_amr(audio.data, audio.fmt)
-        if silk is None:
-            print("  ! 转码失败（silk/amr）")
-            return None
-        return silk, fmt
-    except Exception as e:  # noqa: BLE001
-        print(f"  ! 合成异常 {type(e).__name__}: {e}")
-        return None
-
-
-def _send(peer: str, silk: bytes, fmt: str, text_len: int, tgt: dict) -> tuple[bool, str]:
-    from wechat_direct.wechat_connector import _api_ok, _send_voice_message
-
-    try:
-        resp = _send_voice_message(
-            to=peer,
-            audio_data_b64=base64.b64encode(silk).decode("ascii"),
-            duration_ms=min(60000, max(1500, text_len * 180)),
-            context_token=tgt.get("context_token") or "",
-            token=tgt.get("token") or "",
-            base_url=tgt.get("base_url") or "",
-            fmt=fmt,
-        )
-        ok, err = _api_ok(resp)
-        return bool(ok), str(err or "")
-    except Exception as e:  # noqa: BLE001
-        return False, f"{type(e).__name__}: {e}"
-
-
 def _record_outbound(text: str, tgt: dict) -> None:
     """语音内容回写对话历史（下一轮聊天她记得自己主动发过）。"""
     try:
@@ -233,13 +167,6 @@ def _record_outbound(text: str, tgt: dict) -> None:
             sm.close()
     except Exception as e:  # noqa: BLE001
         print(f"  ! 历史回写失败（不影响投递）: {type(e).__name__}")
-
-
-def _load_voice_cfg() -> dict:
-    from observability.config_manager import ConfigManager
-
-    cfg = ConfigManager(config_dir="config").config
-    return cfg.voice.model_dump(by_alias=True)
 
 
 def _load_llm():
@@ -298,7 +225,6 @@ def main(argv: list[str] | None = None) -> int:
         print("没有窗口内用户可发；过期用户需用户先发一条消息激活 24h 窗口。")
         return 2
 
-    voice_cfg = _load_voice_cfg()
     llm = _load_llm() if not args.text else None
     ok_n = fail_n = skip_n = 0
     for i, tgt in enumerate(sendable):
@@ -308,16 +234,15 @@ def main(argv: list[str] | None = None) -> int:
             continue
         text = args.text or (generate_line(llm, tgt["character_id"]) if llm else _LINE_FALLBACK)
         print(f"  文案 {len(text)} 字")
-        audio = _synthesize(text, tgt["character_id"], tgt["user_id"], voice_cfg)
-        if audio is None:
-            fail_n += 1
-            continue
-        silk, fmt = audio
-        ok, err = _send(tgt["peer"], silk, fmt, len(text), tgt)
+        # 合成+发送统一走共享模块（与常驻主动线同一 owner）
+        from utils.proactive_voice_delivery import send_proactive_voice
+
+        session_key = f"{tgt['user_id']}:{tgt['peer']}@im.wechat"
+        ok, err = send_proactive_voice(session_key, text, tgt["character_id"])
         if ok:
             ok_n += 1
             _record_outbound(text, tgt)
-            print(f"  ✓ 已发送 fmt={fmt} {len(silk)}B")
+            print("  ✓ 语音条已发送")
         else:
             fail_n += 1
             print(f"  ✗ 发送失败: {err}")

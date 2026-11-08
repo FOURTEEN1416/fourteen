@@ -293,6 +293,7 @@ class ProactiveScheduler:
 
     def _record_outbound(
         self, message: str, session_key: str | None, character_id: str | None = None,
+        channel: str = "proactive",
     ) -> None:
         """定向投递成功后把这句写进该会话历史（无会话键的广播无法归属，不写）。
 
@@ -311,7 +312,7 @@ class ProactiveScheduler:
                 message=message,
                 session_id=str(session_key),
                 character_id=self._resolve_character_id(str(session_key)) if character_id is None else character_id,
-                channel="proactive",
+                channel=str(channel or "proactive"),
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("主动消息回写历史失败 session=%s: %s", session_key, e)
@@ -2240,6 +2241,11 @@ class ProactiveScheduler:
         _deliver_kwargs: dict[str, Any] = {}
         if _quiet_window is not None:
             _deliver_kwargs["quiet_hours"] = _quiet_window
+        # 2026-11-08：决策器自定语音/文字（voice 字段严格 True 才发语音条）。
+        # 只在 True 时才传该 kwarg —— 与 quiet_hours 同惯例：大量测试替身按
+        # 三参定义 `_deliver`，无脑多传一个 kw 会把整片主动线测试打断。
+        if bool(decision.get("voice")):
+            _deliver_kwargs["voice"] = True
         if self._deliver(
             message, session_key=user_key, character_id=char_id, **_deliver_kwargs,
         ):
@@ -2361,7 +2367,7 @@ class ProactiveScheduler:
 
     def _deliver(
         self, message: str, session_key: str | None = None, character_id: str | None = None,
-        quiet_hours: tuple[int, int] | None = None,
+        quiet_hours: tuple[int, int] | None = None, *, voice: bool = False,
     ) -> bool:
         """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。
 
@@ -2477,24 +2483,45 @@ class ProactiveScheduler:
                 return False
             character_id = current_character
         try:
+            # voice=False 时不传该 kwarg（旧调用形态；同 quiet_hours 惯例）。
             if quiet_hours is None:
-                delivered = bool(
-                    self._run_blocking(lambda: self._send_targeted(message, session_key))
-                )
-            else:
-                delivered = bool(
-                    self._run_blocking(
-                        lambda: self._send_targeted(
-                            message, session_key, quiet_hours=quiet_hours,
+                if voice:
+                    delivered = bool(
+                        self._run_blocking(
+                            lambda: self._send_targeted(message, session_key, voice=True)
                         )
                     )
-                )
+                else:
+                    delivered = bool(
+                        self._run_blocking(lambda: self._send_targeted(message, session_key))
+                    )
+            else:
+                if voice:
+                    delivered = bool(
+                        self._run_blocking(
+                            lambda: self._send_targeted(
+                                message, session_key, quiet_hours=quiet_hours, voice=True,
+                            )
+                        )
+                    )
+                else:
+                    delivered = bool(
+                        self._run_blocking(
+                            lambda: self._send_targeted(
+                                message, session_key, quiet_hours=quiet_hours,
+                            )
+                        )
+                    )
         except Exception as e:  # noqa: BLE001
             logger.error("主动消息投递失败（不记账、不扣配额）: %s", e)
             return False
         if delivered:
             # API 受理后只记录发起发送时的身份，不把已发送文字改归新角色。
-            self._record_outbound(message, session_key, character_id=character_id)
+            # 2026-11-08：语音轮记 channel=proactive_voice（她是"说"过这句）。
+            self._record_outbound(
+                message, session_key, character_id=character_id,
+                channel="proactive_voice" if voice else "proactive",
+            )
         return delivered
 
     @staticmethod
@@ -2510,7 +2537,7 @@ class ProactiveScheduler:
 
     async def _send_targeted(
         self, message: str, session_key: str | None = None,
-        quiet_hours: tuple[int, int] | None = None,
+        quiet_hours: tuple[int, int] | None = None, *, voice: bool = False,
     ) -> bool:
         # 投递失败分类（2026-10-17 批）：每次尝试先清零，失败分支各自落短因，
         # 供调用方账本分类（deliver_failed_backoff_XXm|<class>）——旧实现失败
@@ -2561,6 +2588,38 @@ class ProactiveScheduler:
                     "web 会话定向投递未成功（通道不可用），不回退广播: session=%s", session_key
                 )
                 return False
+
+            # 2026-11-08 用户裁决「让她拥有并且会驱动语音」：决策器判了
+            # voice=true 就先试语音条；任何失败（TTS/转码/平台窗口）自动回落
+            # 文字——主动消息本身不能因为"想用声音"而丢。
+            if voice:
+                try:
+                    from utils.proactive_voice_delivery import send_proactive_voice
+
+                    _voice_char = ""
+                    try:
+                        _voice_char = str(self._resolve_character_id(str(session_key or "")) or "")
+                    except Exception:  # noqa: BLE001
+                        _voice_char = ""
+                    v_ok, v_reason = await asyncio.to_thread(
+                        send_proactive_voice,
+                        str(session_key or ""),
+                        message,
+                        _voice_char,
+                    )
+                    if v_ok:
+                        logger.info(
+                            "[主动消息] 语音条已投递 session=%s chars=%d",
+                            session_key, len(message),
+                        )
+                        return True
+                    logger.info(
+                        "[主动消息] 语音投递失败，回落文字 session=%s reason=%s",
+                        session_key, v_reason,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[主动消息] 语音投递异常，回落文字 session=%s: %s",
+                                   session_key, e)
 
             sender = self._channel_instances.get("wechat")
             if sender is not None:

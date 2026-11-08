@@ -132,7 +132,8 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
 2. 字段：should_contact（bool）、wait_minutes（int|null）、message（str）、
    reason（str）、candidates（可选：string 数组，最多 2 条备选开场，每条
    用不同的由头角度——多候选竞争，最优者放 message）、
-   next_topic（str，≤40 字，可空）、next_intent（str，≤120 字，可空）。
+   next_topic（str，≤40 字，可空）、next_intent（str，≤120 字，可空）、
+   voice（bool，可选，默认 false：这一条是否用**语音**发）。
 3. **时机由你综合判断**：上次互动、时间、关系、画像、人设、控制台参数；不要机械套固定小时数。
 4. 控制台参数是**行为倾向**（风格/力度/请尊重免打扰），不是你必须遵守的死表；
    但 respect_quiet_hours=true 且当前落在免打扰时段时，**原则上不要 should_contact=true**
@@ -191,6 +192,12 @@ DECISION_SYSTEM = """你是伴侣角色的**主动消息决策器**。
 16.【之前没聊完的事】只在距上次话题 ≥6 小时且自然衔接时复提；closed 话题
    永不主动复提（上下文不会给 closed）。复提必须具体到当时说过的细节，不能
    只说「上次那个事」；用户已经明确翻篇/解决的事不要重提。
+
+17.【语音或文字，2026-11-08 用户裁决：你自己决定】如果这条消息用**声音**
+   说给对方听明显更贴（深夜、情绪浓、亲密时刻、想在耳边说句真心话），把
+   JSON 的 voice 设为 true——系统会把 message 转成**语音条**发出去（本轮不再
+   发明文）。日常闲聊、说正事、需要对方回看的内容 → voice=false。宁可少用，
+   不要滥用；拿不准就 false。
 """
 
 
@@ -1081,6 +1088,9 @@ def parse_decision(raw: str) -> dict[str, Any]:
         "candidates": candidates,
         # 下一步计划（2026-10-27 话题状态机 Q3/Q4）：should_contact=false 时
         # 也要有字段；空串表示模型确实没有下一步。长度上限与 topic_plan 表一致。
+        # 2026-11-08 用户裁决：语音/文字由决策器自定。严格 True 才算
+        # （字符串 "true"/1 之类一律按文字处理——宁可不发语音，不可误发）。
+        "voice": data.get("voice") is True,
         "next_topic": str(data.get("next_topic") or "").strip()[:40],
         "next_intent": str(data.get("next_intent") or "").strip()[:120],
     }

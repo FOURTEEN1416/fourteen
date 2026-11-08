@@ -775,3 +775,71 @@ def test_broadcast_helpers_mask_and_fallback_line():
     assert _mask("short") == "short"
     # 兜底句必须是「能被存库窄口径接受」的真实台词（不是系统哨兵）
     assert is_machine_sentinel_line(_LINE_FALLBACK) is False
+
+# ═══════════════════════════════════════════════
+# 十、常驻主动线语音（2026-11-08 用户裁决：让她拥有并驱动语音）
+# ═══════════════════════════════════════════════
+
+
+def test_parse_decision_voice_strict_true():
+    """决策契约：voice 严格 True 才算（字符串/数字一律按文字）。"""
+    import json as _json
+
+    from proactive.llm_proactive import parse_decision
+
+    def _raw(obj):
+        return "前缀说明 " + _json.dumps(obj, ensure_ascii=False)
+
+    assert parse_decision(_raw({
+        "should_contact": True, "message": "在吗", "voice": True,
+    }))["voice"] is True
+    assert parse_decision(_raw({
+        "should_contact": True, "message": "在吗", "voice": "true",
+    }))["voice"] is False
+    assert parse_decision(_raw({
+        "should_contact": True, "message": "在吗",
+    }))["voice"] is False
+    # should=False 时字段同样存在（调用方无需 .get 兜底）
+    assert parse_decision(_raw({"should_contact": False}))["voice"] is False
+
+
+def test_find_wechat_credentials_prefers_fresh(tmp_path, monkeypatch):
+    """凭据定位：多 slot 时优先窗口内那份；过期也返回（由调用方决定是否尝试）。"""
+    import json as _json
+    import time as _t
+
+    from utils import proactive_voice_delivery as pvd
+
+    monkeypatch.setattr(pvd, "SESSIONS_DIR", tmp_path)
+    (tmp_path / "2" / "slot0").mkdir(parents=True)
+    (tmp_path / "2" / "slot1").mkdir(parents=True)
+    (tmp_path / "2" / "slot0" / "credentials.json").write_text(
+        _json.dumps({"token": "old", "base_url": "u"}), encoding="utf-8")
+    (tmp_path / "2" / "slot0" / "context_tokens.json").write_text(
+        _json.dumps({"p1": {"token": "c-old", "ts": _t.time() - 48 * 3600}}), encoding="utf-8")
+    (tmp_path / "2" / "slot1" / "credentials.json").write_text(
+        _json.dumps({"token": "new", "base_url": "u"}), encoding="utf-8")
+    (tmp_path / "2" / "slot1" / "context_tokens.json").write_text(
+        _json.dumps({"p1": {"token": "c-new", "ts": _t.time() - 600}}), encoding="utf-8")
+
+    creds = pvd.find_wechat_credentials(2, "p1")
+    assert creds is not None and creds["fresh"] is True
+    assert creds["context_token"] == "c-new" and creds["token"] == "new"
+
+    # 只有过期：仍返回，如实标记 fresh=False
+    monkeypatch.setattr(pvd, "SESSIONS_DIR", tmp_path)
+    (tmp_path / "2" / "slot1" / "context_tokens.json").write_text(
+        _json.dumps({"p1": {"token": "c-new", "ts": _t.time() - 99 * 3600}}), encoding="utf-8")
+    stale = pvd.find_wechat_credentials(2, "p1")
+    assert stale is not None and stale["fresh"] is False
+
+
+def test_send_proactive_voice_rejects_non_wechat_and_missing_creds(tmp_path, monkeypatch):
+    """失败路径：非微信键/无凭据 → (False, 原因)，绝不抛异常（主动线要能回落文字）。"""
+    from utils import proactive_voice_delivery as pvd
+
+    monkeypatch.setattr(pvd, "SESSIONS_DIR", tmp_path)
+    ok, reason = pvd.send_proactive_voice("2:web:abc", "在吗")
+    assert ok is False and reason == "not_wechat"
+    ok2, reason2 = pvd.send_proactive_voice("2:p1@im.wechat", "在吗")
+    assert ok2 is False and reason2 == "no_credentials"
