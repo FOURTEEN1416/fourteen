@@ -17,6 +17,7 @@
 
 ---
 
+## 2026-11-08 — CI 三连红根治批：fastapi 路由包装 + UTC 宿主时钟错位 + E2E 产品变更测试债（v1.65.3 · run 42403179359 全绿）
 
 - **批次定位**：用户指令「ci 报错处理一下」。v1.63~v1.65.2 共 14 提交首次 push（`94594b8`/`55df4dd`/`9df80cc` 三条 run 全红，失败面恒为 backend+frontend 两域）。三个独立根因逐一实证闭环：① backend=fastapi 依赖漂移破坏路由枚举；② backend=UTC 宿主时钟错位（两个提交分两轮暴露）；③ frontend=E2E 测试债（产品变更 + 内置默认卡打破空库 skip 掩护）。与 v1.66 批（并行窗）共享主检出，其 `79784b0` 建立在我的 `48a8310` 之上，最终全绿 run 含两批代码。
 - **根因①（run 42395306164 backend @43%）fastapi≥0.137 `_IncludedRouter` 包装**：CI pip 全新解析 fastapi 0.138.2（旧上限 `<0.139` 太松）——0.137.0 起 `include_router` 子路由被包成 `_IncludedRouter`（path/methods=None，真实路由移至 `original_router.routes`），`test_p4_character_write_gates._find_route` 裸扫 `app.routes` 把 PUT persona「判丢」。**一次性 venv 定界实证：0.136.3 平铺 / 0.137.2 + 0.138.2 包装，starlette 1.7/1.10 均不改变该行为（边界由 fastapi 主导）**。修法双保险：pyproject 上限 `<0.139`→`<0.137`（平铺枚举语义=测试/健康检查既定依赖，沿 `9a5fd67` 同一政策）+ `_find_route` 补 `original_router` 递归平铺（与 `test_api_routes._flatten_app_routes` 同款；仓内 test_consent/test_ops_lifecycle 早已兼容，test_invite_codes 实测不在包装面）。
@@ -50,6 +51,15 @@
   - ⚠️ **操作事故与恢复（自记）**：调试突变时误执行 `git checkout -- orchestrator/optimized_orchestrator.py`，把**未提交的 agent 改动与并行窗口在该文件的在制品**一起回退；从 pre-commit 自动 stash 补丁（`~/.cache/pre-commit/patch*`，含该文件 post-image `ed0998f`）中**精确恢复**并行窗口编辑（`git apply --include` 单文件反打），再重放自有 hunk；教训：**任何 `git checkout --/restore` 前先确认该文件是否有未提交改动（含他人）**，多窗口树下等于删除他人工作；pre-commit 的 stash 补丁是最后一道可恢复来源。
 - **语音触发补洞（同日 · `d43be0a` 已部署）**：生产实测发现「我想听你的声音 / 听一下你的声音 / 发条语音 / 发一条语音」整类漏判（旧欲望模式只认「听到/听见你的声音」）——用户明确要语音却回文字=能力静默降级。补命令词 2 条 + 欲望模式 `想?听(一|一下)?你的声音`；误伤对照钉死（夸奖「你的声音真好听」、否定「别发语音」不触发）；测试 +1（11 命中 + 4 不命中矩阵）+ 四分块全量 **4610 通过 + 2 跳过 / 0 失败 / 收集 4612**、ruff 0、生产检测器复验 True/True/False。
 
+
+## 2026-11-08 — 主动线语音（用户裁决：让她拥有并驱动语音功能）
+
+- **批次定位**：用户明确「当然需要啊，就是需要让其拥有并且会驱动语音功能」——语音不能只在被动回复里，**常驻主动线也要能用声音**，且**由她自己决定**这条主动消息用语音还是文字。
+- **决策契约（零额外调用）**：`DECISION_SYSTEM` 追加规则 17（**追加而非重编号**——规则 13 被 `test_proactive_topic_recall` 钉死）：深夜/情绪浓/亲密/想在耳边说真心话 → `voice=true`，日常闲聊 → false，「拿不准就 false」；`parse_decision` 输出恒含 `voice`（**严格 `is True`**：字符串/数字一律按文字，宁可不发语音不可误发）。
+- **投递**：`_deliver`/`_send_targeted` 增 voice 分支——语音条成功则历史记 `channel=proactive_voice`；TTS/转码/平台窗口任一失败**自动回落文字**（主动消息不因"想用声音"而丢）。兼容纪律：`voice` 只在 True 时作为 kwarg 传（与 `quiet_hours` 同惯例，旧测试替身三参定义不被打断）。
+- **唯一 owner**：新增 `utils/proactive_voice_delivery.py`（TTS 进程单例 / 角色音色契约 / 合成 / silk / 凭据定位 `find_wechat_credentials`（多 slot 优先窗口内）/ 发送），**初始化与合成同事件循环**（aiohttp client 绑 loop）；广播脚本改为复用它，脚本与常驻线不再各写一份。
+- **验证**：测试 +3（voice 严格性/凭据新鲜度优先/非微信与无凭据失败路径）；主动域定向 **429 绿**；净树（HEAD+仅本批 hunk，并行窗口在制品已隔离）四分块 **4626 通过 + 2 跳过 / 0 失败 / 收集 4628**、ruff 0；生产冒烟：规则 17 在场、voice 严格 True/字符串按文字、TTS 单例 `mimo-tts`（带 .env）、非微信键拒绝、服务进程环境含 `MIMO_API_KEY`、ready 绿。**已三端部署 @ `ed09bb0`**。
+- **行为预告**：此后她的主动消息可能**自己选择**用语音条发出（决策器判定），频率受既有主动节奏/静默窗/去重/后审四道闸约束；如觉得语音偏多，调规则 17 的措辞或加全局比例闸即可（后续可加 `voice` 概率上限）。
 
 ## 2026-11-08 — 主动语音广播催动（用户裁决：给每个用户发一条语音主动消息）
 
