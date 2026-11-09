@@ -2675,8 +2675,12 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     user_msg, reply, voice_mgr, force=llm_voice
                 ):
                     try:
-                        # 截取合适长度（微信语音建议 ≤60 字）
-                        voice_text = reply[:200]
+                        # 朗读稿：剥动作括号/Markdown/链接/注入元数据，按文本自带
+                        # 标点断句（**不插语气词、不凭空造停顿**）；截断发生在
+                        # 剥除之后，避免长度预算浪费在不会念的符号上。
+                        from voice.voice_script import to_spoken_script
+
+                        voice_text = to_spoken_script(reply, max_chars=200)
                         # 情感标签与 _after_process 同源（emotion_state 主情绪），
                         # 旧实现用 after_process 的返回值——现合成先于 after_process，
                         # 直接取同一真源，避免两处口径分叉。
@@ -2694,16 +2698,24 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                                 user_id=str(user_id) if user_id else "",
                             )
                         voice_kwargs = spec.synth_kwargs() if spec else {}
-                        voice_audio = await voice_mgr.synthesize(
-                            voice_text, emotion=voice_emotion, **voice_kwargs,
-                        )
+                        if not voice_text:
+                            # 整条回复只有动作/标记/符号时没有可朗读内容：
+                            # 不发空语音，走文字兜底（不消耗一次 TTS 调用）。
+                            logger.info(
+                                "[voice][step=script_empty] session=%s 原文无可朗读内容",
+                                session_id,
+                            )
+                        else:
+                            voice_audio = await voice_mgr.synthesize(
+                                voice_text, emotion=voice_emotion, **voice_kwargs,
+                            )
                         if voice_audio:
                             logger.info(
                                 "[voice][step=synthesized] bytes=%d fmt=%s engine=%s emotion=%s",
                                 len(voice_audio), voice_audio.fmt,
                                 voice_mgr.current_engine, voice_emotion,
                             )
-                        else:
+                        elif voice_text:
                             logger.warning("语音合成返回空, engine=%s", voice_mgr.current_engine)
                     except Exception as e:
                         logger.warning("语音合成失败: %s", e)

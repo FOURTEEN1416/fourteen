@@ -93,8 +93,16 @@ def synthesize_audio(
     except Exception:  # noqa: BLE001
         kwargs = {}
 
+    # 朗读稿与对话链同一 owner（voice.voice_script）：主动线历史上也是
+    # ``text[:200]`` 原样送 TTS，会把 ``[主动]`` 标记和动作括号念出来。
+    from voice.voice_script import to_spoken_script
+
+    script = to_spoken_script(text, max_chars=200)
+    if not script:
+        return None
+
     async def _synth():
-        return await mgr.synthesize(str(text or "")[:200], **kwargs)
+        return await mgr.synthesize(script, **kwargs)
 
     try:
         audio = asyncio.run(_synth())

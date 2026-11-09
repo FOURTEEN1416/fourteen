@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-11-09 — 语音真人感根治批（v1.70）
+
+- **用户报障**：「语音的真人感还是太弱」。先取证再动手，生产 `data/app.log` **48 条语音事件 `emotion=平常` 48/48**；两个活跃会话（user 2 / user 4）**无任何角色音色绑定** ⇒ 实际用 `mimo_default`；`data/character_voices.json` 唯一绑定是 `{mimo_model: mimo-v2.5-tts-voicedesign, voice_id: "苏打"}`；`data/voice_samples/` 三个样本分别是 3/9/9 字节（克隆从未真正用过）。
+- **试听实证（用户耳测，比声学测量更权威）**：① 预置音色排序 = 冰糖 > 苏打 > 茉莉（茉莉「像才学会说话」），苏打「又催」读成「又吹」；② 我上一版「口语稿」在「我才不是」后插逗号 + 「嗯…」，把语义块切成两个孤儿短语 → 用户听感「停顿很怪」，**该缺陷覆盖了全部 V_* 样音**，故「Mia 停顿怪」不是 Mia 的问题；③ **A/B/C 三种送法用户听感「差不多」** ⇒ 韵律微调（2.94→2.33 字/秒）**不可感知**，不能当主要收益；④ **设计声线（D/E）「都不那么 AI」** ⇒ 音色身份才是决定项；⑤ D 的「想你了」出超低气泡音 = 我的设计描述写了「偏低 + 略带气声」，已回退该措辞。
+- **根因（四条，均已取到证据）**：① 语气层空转——`emotion` 恒「平常」+ 三档情绪（吃醋/调皮/疲惫）在 `EMOTION_MAPPING`/`EMOTION_STYLE_HINTS` 里**缺项**，静默回落「平常」；② 文本层把聊天气泡当台词念——`voice_text = reply[:200]` 原样送 TTS，`[主动]` 标记/换行/Markdown/链接/表情/小说模式括号动作全被念出；③ 音色层无绑定 + voicedesign 把**预置音色名**当设计描述（「苏打」两个字就是全部描述，每次合成都现场重设计 ⇒ 同一角色音色必然漂）；④ 投递层：iLink 平台静默丢弃出站原生气泡，只能发文件卡片（**平台限制，代码修不了**，已如实告知用户，不承诺做不到的事）。
+- **实施（本批代码）**：新增 `voice/voice_script.py`（唯一 owner，**只做减法**：剥注入元数据/动作括号/加粗/链接/表情/代码块，换行按「上一行是否已自带停顿标点」决定并接与否，**禁插语气词与额外逗号**；剥除复用 `prompt_sanitize._strip_system_markers` + `reply_mode.strip_stage_directions` 既有真源）；对话链与主动线统一走它（`orchestrator` 的 `reply[:200]` 与 `proactive_voice_delivery` 的 `text[:200]` 双点拆除），全文只剩符号/动作时**不合成空语音**、走文字兜底；`mimo_tts_provider._resolve_design_prompt` 修「预置名当描述」（回落 `DEFAULT_DESIGN_PROMPT` + WARNING）；补齐 3 个缺失情绪映射；新增 `scripts/pin_character_voice.py`（design → 落样本 → catalog 登记 kind=clone → 角色绑定 voiceclone，默认 dry-run，`--apply` 才写）。
+- **测试**：新增 `tests/test_voice_script.py`（20 例，含「不得凭空插语气词」回归）与 `tests/test_voice_design_prompt.py`（11 例，含「情绪引擎每个值都要有映射」守卫）；语音受影响面 **292 例全绿**；全量四分块 **1180 + 920 + 1244(+1 跳过) + 1333(+1 跳过) = 4677 通过 + 2 跳过 / 收集 4679**（与 `--collect-only` 精确吻合，本批 +31）；`ruff check .` 全仓 0 错。
+- **未决（需用户裁决）**：最终声线未定（S1 松弛日常 / S2 清亮偏软 / S3 微哑鼻音 / S4 温柔带笑 / 冰糖 / Chloe 方言感），定后跑 `pin_character_voice.py --apply` 固定到角色；**音频后期（压缩+限带+房间感）本批不做**——A/B/C 用户听感「差不多」已证明此类微调不可感知，不引入无收益复杂度。
+
+---
+
+
 ## 2026-11-08 — 待办清零批（v1.69.1 · 零代码变更）
 
 - **用户指令「消除待办」**（引用两条：4 条路由 owner 追认、CODE_GRAPH 规模读数）。核实：① 追认**早已完成**——`docs/DELETION_LOG.md` 2026-11-08 条目已标 `✅ 已追认`（owner 原话「没有用就可以删除」，当面追认 4 条 `user/proactive-config`×3 + `user/proactive/pause`），本次只清除 AGENTS v1.67/v1.69 行与 HANDOFF 中的陈旧「待追认」引用；② CODE_GRAPH 升级 **v3.8.40** 全量回扫（端点仍 249/207；Python tracked 633 文件 / 177,041 行；测试 295 文件 / 4646+2 / 收集 4648 / 0 失败；前端 283/42 + tsc 0；徽章 4930；卡 45 / 公式 2×45+13=103；utils 30 / wechat_direct 6 / api 52 / frontend/src 147；页面 18 / API 模块 18 / store 4；sqlite 42 表 / users 14 表；orchestrator 5,667 行 / main.py 578 行）。

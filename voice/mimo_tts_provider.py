@@ -83,6 +83,11 @@ class MiMoTTSProvider(TTSProviderBase):
         "害怕": {"emotion": "fearful", "speed": 1.1, "pitch": 1.15},
         "害羞": {"emotion": "shy", "speed": 0.9, "pitch": 1.05},
         "傲娇": {"emotion": "tsundere", "speed": 1.0, "pitch": 1.0},
+        # 2026-11-09：补齐情绪引擎实际会产出的三个值（吃醋/调皮/疲惫）。
+        # 缺项会静默回落到「平常」——听感上一律平铺，等于情绪层空转。
+        "吃醋": {"emotion": "jealous", "speed": 1.0, "pitch": 1.05},
+        "调皮": {"emotion": "playful", "speed": 1.1, "pitch": 1.08},
+        "疲惫": {"emotion": "tired", "speed": 0.85, "pitch": 0.92},
         "平常": {"emotion": "neutral", "speed": 1.0, "pitch": 1.0},
     }
 
@@ -149,6 +154,10 @@ class MiMoTTSProvider(TTSProviderBase):
         "害怕": "语气紧张、怯弱，声音略颤。",
         "害羞": "语气害羞、腼腆，声音轻。",
         "傲娇": "语气傲娇，表面强硬但带一点别扭。",
+        # 补齐情绪引擎实际产出的三个值（缺项=静默回落「平常」）
+        "吃醋": "语气有点吃醋、别扭，句子短，尾音往下压。",
+        "调皮": "语气调皮、轻快，带一点坏笑。",
+        "疲惫": "语气疲惫、没力气，语速慢，尾音收不住。",
         "平常": "语气自然、口语化，像真人日常说话。",
     }
 
@@ -197,11 +206,30 @@ class MiMoTTSProvider(TTSProviderBase):
             logger.warning("解析克隆音色失败: %s", e)
         return ""
 
+    #: voicedesign 缺省描述（没有可用描述时使用；也用于「误传预置名」回落）
+    DEFAULT_DESIGN_PROMPT = "自然、温柔的年轻女声，普通话标准，语速适中。"
+
     def _resolve_design_prompt(self, voice: str) -> str:
-        """voicedesign 的 user 消息：catalog 条目 description 或调用方直接给的描述。"""
+        """voicedesign 的 user 消息：catalog 条目 description 或调用方直接给的描述。
+
+        ⚠️ 2026-11-09 生产实证的坑：角色绑定把**预置音色名**写进了
+        ``voice_id``（`data/character_voices.json` 里
+        ``{"mimo_model": "mimo-v2.5-tts-voicedesign", "voice_id": "苏打"}``），
+        旧实现直接把「苏打」两个字当设计描述交给模型 —— 等于每次合成都让模型
+        「按苏打这个词现场设计一个音色」，同一角色前后音色不可能稳定。
+        预置名不是描述：这里显式回落默认描述并告警，不再静默当描述用。
+        """
         voice = (voice or "").strip()
         if not voice:
-            return "自然、温柔的年轻女声，普通话标准，语速适中。"
+            return self.DEFAULT_DESIGN_PROMPT
+        preset = self.LEGACY_VOICE_ALIASES.get(voice, voice)
+        if preset in self.PRESET_VOICES or voice in self.LEGACY_VOICE_ALIASES:
+            logger.warning(
+                "voicedesign 收到预置音色名 %r（不是音色描述），回落默认设计描述；"
+                "要固定角色音色请绑定 voiceclone 条目",
+                voice,
+            )
+            return self.DEFAULT_DESIGN_PROMPT
         try:
             from voice.voice_catalog import get_voice_catalog
 
