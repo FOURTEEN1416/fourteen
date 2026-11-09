@@ -261,7 +261,13 @@ test.describe.serial('W11 · 主动面板作用域（D4）', () => {
       // 角色页消息 tab 对 admin 也只渲染「我 × 角色」面板（未绑微信=同一 409 门），
       // 不再承载全局运维
       await page.goto(`/roles/${encodeURIComponent(roleId)}/settings/message`)
-      await expect(page.getByRole('heading', { name: '本角色设置' })).toBeVisible()
+      // 断言**两种合法终态之一**：已绑微信 → 出现「我 × 角色」面板的分区；
+      // 未绑微信 → 出现 409 门的引导文案。旧断言用的是 `<h3>本角色设置</h3>`，
+      // 而该标题只存在于 loading / loadFailure 分支（成功分支渲染 ①…⑥ 六块，
+      // 没有这个标题）——admin 一旦加载成功就必然断言失败（2026-11-09 修）。
+      await expect(
+        page.getByText(/① 回复模式（这个角色怎么回你）|尚未绑定微信通道/),
+      ).toBeVisible()
       await expect(page.getByText('保存频率配置')).toHaveCount(0)
       await expect(page.getByText('零 token 骰子闸（dsh-speak-up）')).toHaveCount(0)
     } finally {

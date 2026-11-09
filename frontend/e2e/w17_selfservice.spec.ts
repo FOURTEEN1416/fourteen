@@ -84,7 +84,9 @@ test.describe.serial('W17 · 自服务面（账号与数据）', () => {
     await uiLogin(page, VIEWER)
     await page.goto('/settings/account')
 
-    await expect(page.getByText('协议与同意')).toBeVisible()
+    // 只认页面标题：侧栏导航项副描述也含「协议与同意、数据导出、账号注销」，
+    // 裸 getByText 在 strict mode 下会命中两个元素而报错（存量红，2026-11-09 修）
+    await expect(page.getByRole('heading', { name: '协议与同意' })).toBeVisible()
     // 真实状态来自 GET /api/auth/consent/status（协议门已同意 → granted + 服务端版本）
     await expect(page.getByText(/已同意 v\d/)).toBeVisible()
     await expect(page.getByText('无法加载账号数据')).toHaveCount(0)
