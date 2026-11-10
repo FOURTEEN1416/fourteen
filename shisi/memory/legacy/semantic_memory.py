@@ -218,8 +218,22 @@ class SemanticMemory:
                 # （语义安全，只是失去"下推"性能收益）——不能因替身签名不同
                 # 就整条向量通道报错。
                 try:
-                    _ret = self._vm._search("user_facts", query, top_k, where=_where)
+                    if user_key is None:
+                        # 2026-11-10 B2①：user_key=None 是本方法文档化的全局
+                        # 模式——向量层单点守卫要求归属键，显式声明
+                        # scope="global" 放行（结果集不变，附 WARNING 留痕）。
+                        _ret = self._vm._search(
+                            "user_facts", query, top_k, where=_where, scope="global",
+                        )
+                    else:
+                        # scoped 是向量层默认值，刻意不显式传：替身签名兼容面
+                        # 最小（test_block_e_hardening 的 _search 替身只收
+                        # where；显式传 scope 会 TypeError 回退丢掉下推）。
+                        # _where 已含 user_key / $or 归属组，守卫放行且内容不变。
+                        _ret = self._vm._search("user_facts", query, top_k, where=_where)
                 except TypeError:
+                    # 替身签名不带 where/scope：回退无过滤调用（勿传 scope，
+                    # 同步保持与替身契约兼容），由下方 Python 侧过滤兜底。
                     _ret = self._vm._search("user_facts", query, top_k)
                 # `_search` 在真实现里是 async（需过桥）；测试替身可能是同步
                 # 返回列表。两者都要正确处理 —— 旧实现直接当同步用，遇 async

@@ -1233,7 +1233,10 @@ def test_no_override_means_zero_engine_writes(scope_sched):
 
     assert hub.get(keys[0]).apply_calls == []
     assert hub.get(keys[1]).apply_calls == []
-    assert [c["session_key"] for c in spy.contexts] == keys
+    # N 规模批（2026-11-10）A1：两用户在默认并发宽度下走并行 fan-out，跨用户
+    # 执行顺序不定——本断言只约束「每用户恰决策一次」，不约束顺序（原 == keys
+    # 钉的是串行实现的偶然产物；裁决 2026-11-11 workflow escalate 授权适配）。
+    assert sorted(c["session_key"] for c in spy.contexts) == sorted(keys)
 
 
 def _real_adaptive_engine(tmp_path):
@@ -1375,7 +1378,12 @@ def test_global_pause_and_switch_override_character_snapshots(scope_sched):
 
     sched._paused = True
     _tick(sched)
-    assert [e["session_key"] for e in events if e.get("reason") == "paused"] == list(keys)
+    # N 规模批（2026-11-10）A1：两用户并行 fan-out 下跨用户 paused 事件落账
+    # 顺序不定——本断言只约束「每个 key 的 paused 事件恰一次」，不约束顺序
+    # （裁决 2026-11-11 workflow escalate 授权适配，同 test_no_override 注）。
+    assert sorted(
+        e["session_key"] for e in events if e.get("reason") == "paused"
+    ) == sorted(keys)
     assert spy.contexts == []
 
     sched._paused = False

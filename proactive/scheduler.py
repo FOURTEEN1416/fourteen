@@ -12,11 +12,15 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
+import contextvars
 import json
 import logging
 import math
+import os
 import random
+import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -93,6 +97,20 @@ def _classify_deliver_error(err: str) -> str:
     if "quiet_hours" in e:
         return "|quiet_hours"
     return "|send_error"
+
+# ── N 规模批（2026-11-10）模块级常量 ─────────────────────
+#: A1：每拍 LLM 决策的有界并发默认宽度（env `PROACTIVE_TICK_CONCURRENCY`
+#: 可覆盖；≤1 钳到 1 = 原串行内联路径，非法值回落本默认）。
+_TICK_CONCURRENCY_DEFAULT = 4
+#: A4：账本驱逐 TTL（秒）——next_ok 与退避盖章 sidecar 共用 7 天，与
+#: topic_plan 的 7 天 TTL 对齐；超期条目的 window_expired 消费路径（迟到
+#: >7 天）被放弃，残余为可观测性微损（非投递语义变化）。
+_LEDGER_TTL_SECONDS = 7 * 86400.0
+#: A4：judge stash 上限——正常消费路径是 `_deliver` 投递时 pop（pop-at-
+#: deliver，在飞 ≤ tick workers），上限远大于任何真实并发即可兜底残留。
+_JUDGE_STASH_CAP = 64
+#: A4：账本驱逐总开关（env `SCHEDULER_LEDGER_EVICT=0` 一行回滚）。
+_LEDGER_EVICT_DISABLED = {"0", "false", "off", "no"}
 
 # 成就兜底重算的角色库目录。锚定项目根而非 CWD（从非仓库根启动时
 # CWD 相对路径会扫到空目录，导致成就兜底静默失效）；
@@ -214,6 +232,27 @@ class ProactiveScheduler:
         self._gate_skip_event_day: dict[str, str] = {}
         # 投递失败最近一次底层原因（供账本分类入账；_send_targeted 写入）。
         self._last_deliver_error: str = ""
+        # ── N 规模批（2026-11-10）：并发化三件套 ─────────────
+        # A2：账本互斥锁。tick 并发化（A1）后，LLM 决策/投递/账本写点跨线程
+        # 并发，persist 快照与写点竞争会炸 "dict changed size during
+        # iteration"（被 persist 的 except 吞掉 = 落盘丢失，R10 红测实证
+        # 254/300 次）。🔴 锁序纪律：**锁内只动内存 dict，绝不调用
+        # _persist_throttle_ledger / json_state.update_json** —— persist 的
+        # 结构是「锁内快照 → 锁外 flock 写盘」，flock 与本锁禁止交叉获取
+        # （交叉 = 死锁）。写点一律 `with self._ledger_scope(): 写`、锁外
+        # persist；读点单键 get/pop 为 GIL 原子，不落锁（与旧串行语义一致）。
+        self._ledger_lock = threading.Lock()
+        # A3：投递失败原因 per-session 镜像（键 = str(session_key or "")）。
+        # 旧实现只有 `_last_deliver_error` 标量——并发下 A 用户的失败原因会
+        # 被串到 B 用户的账本事件 reason 后缀上（祝福线/手动线/tick worker
+        # 跨线程共享标量，今天就在竞争）。镜像不进 persist 快照（内存瞬态，
+        # GIL 原子写足够），读侧 pop 即消费、miss 回落旧标量（旧替身契约）。
+        self._last_deliver_errors: dict[str, str] = {}
+        # A4：`_deliver_fail_counts` 的盖章 sidecar（键集与 fail_counts 对应，
+        # 计数自增时盖章）。本体**不做目标外驱逐**——P1-22 契约要求不可达
+        # 用户的退避阶梯跨重启保留（test_p1_batch4_proactive_hub）；驱逐仅按
+        # 盖章超 7 天 TTL 成对删除。缺章（旧数据/回填失败）= 永不驱逐。
+        self._deliver_fail_seen: dict[str, float] = {}
 
         self._scheduler: Any = None
         self._active_tasks: dict[str, bool] = {}
@@ -394,8 +433,14 @@ class ProactiveScheduler:
         degraded_day = getattr(self, "_model_degraded_event_day", None)
         if degraded_day is None:
             degraded_day = self._model_degraded_event_day = {}
-        if degraded_day.get(str(user_key)) != today_m:
-            degraded_day[str(user_key)] = today_m
+        # A2：判定与写入在锁内完成；append（agent_plane IO）与 persist 在锁外
+        # ——「当日首条」语义与串行等价（同拍并发只有一线程拿到 _first_today）。
+        _first_today = False
+        with self._ledger_scope():
+            if degraded_day.get(str(user_key)) != today_m:
+                degraded_day[str(user_key)] = today_m
+                _first_today = True
+        if _first_today:
             from shisi.agent_plane.runtime import append_proactive_event
 
             append_proactive_event(
@@ -431,10 +476,15 @@ class ProactiveScheduler:
         day_map = getattr(self, "_gate_skip_event_day", None)
         if day_map is None:
             day_map = self._gate_skip_event_day = {}
-        if day_map.get(dedup_key) == today_s:
+        # A2：判定与写入在锁内；append/persist 在锁外（锁序纪律）
+        _first_today = False
+        with self._ledger_scope():
+            if day_map.get(dedup_key) != today_s:
+                day_map[dedup_key] = today_s
+                _first_today = True
+        if not _first_today:
             logger.debug("proactive 确定性闸命中（当日已落账，降噪跳过）user=%s reason=%s", user_key, reason)
             return False
-        day_map[dedup_key] = today_s
         from shisi.agent_plane.runtime import append_proactive_event
 
         append_proactive_event(
@@ -1364,11 +1414,120 @@ class ProactiveScheduler:
         except Exception as e:  # noqa: BLE001
             logger.error("ASE check failed: %s", e)
 
+    def _ledger_scope(self):
+        """A2：返回账本锁的 with 作用域（`__new__` stub 缺锁属性时退化 nullcontext）。
+
+        用法：``with self._ledger_scope(): self._xxx[k] = v``；写完在**锁外**
+        再 `_persist_throttle_ledger()`（锁内禁 update_json，锁序纪律见
+        `__init__` 的 `_ledger_lock` 注）。nullcontext 回退与
+        `_record_model_degraded` 的 getattr 防御同理：既有测试以 `__new__`
+        构造 stub 只补部分属性，真实实例 `__init__` 必有锁。
+        """
+        lock = getattr(self, "_ledger_lock", None)
+        return lock if lock is not None else contextlib.nullcontext()
+
+    def _tick_concurrency(self) -> int:
+        """A1：每拍 LLM 决策的有界并发宽度。
+
+        env ``PROACTIVE_TICK_CONCURRENCY``（默认 4，≤1 钳到 1，非法值回落
+        默认）。=1 时 `_check_ase_per_user` 走原串行内联路径（行为逐字等于
+        旧实现），是事故一行回滚开关。
+        """
+        raw = str(os.environ.get("PROACTIVE_TICK_CONCURRENCY", "") or "").strip()
+        try:
+            width = int(raw)
+        except ValueError:
+            width = _TICK_CONCURRENCY_DEFAULT
+        return max(1, width)
+
+    def _trim_judge_stash(self) -> None:
+        """A4 ④：judge stash 超 `_JUDGE_STASH_CAP` 弹最旧键（dict 保插入序）。
+
+        正常消费路径是 `_deliver` 投递时 pop（pop-at-deliver，在飞 ≤ tick
+        workers）；投递被闸拦住的 stash 会残留——无界增长治理。调用方须已
+        持 `_ledger_scope()`（本方法自身不取锁，供锁内复用）。
+        """
+        for name in ("_judge_recent", "_judge_topic"):
+            stash = getattr(self, name, None)
+            if isinstance(stash, dict):
+                while len(stash) > _JUDGE_STASH_CAP:
+                    stash.pop(next(iter(stash)))
+
+    def _evict_stale_ledger_entries(self) -> None:
+        """A4：每拍 tick 前清理「闸位比较必忽略」的账本条目（单线程、fan-out 前）。
+
+        只删语义等价条目，行为零变化：day dict 删 value≠今天（闸位只判
+        ``== today``）；next_ok 删超 7 天 TTL（topic_plan 本身 7 天 TTL 自愈）；
+        fail_counts 仅按 sidecar 盖章成对驱逐（本体不驱逐，P1-22 契约）。
+        🔴 审阅 Q1：本方法异常必须自降级为 debug——驱逐是优化，绝不许经
+        `_check_ase` 的 "ASE check failed" 把整拍**所有用户**炸掉（今天不
+        存在的故障模式）。开关 ``SCHEDULER_LEDGER_EVICT=0`` 一行回滚。
+        """
+        try:
+            if str(os.environ.get("SCHEDULER_LEDGER_EVICT", "1") or "").strip().lower() in (
+                _LEDGER_EVICT_DISABLED
+            ):
+                return
+            import time as _time
+
+            today = _local_now().date().isoformat()
+            removed = 0
+            with self._ledger_scope():
+                # ① 五个 day dict：删 value≠今天（键含 "user|reason" 复合键）
+                for name in (
+                    "_disabled_event_day",
+                    "_quiet_event_day",
+                    "_wait_window_event_day",
+                    "_model_degraded_event_day",
+                    "_gate_skip_event_day",
+                ):
+                    day_map = getattr(self, name, None)
+                    if isinstance(day_map, dict):
+                        stale = [k for k, v in day_map.items() if str(v or "") != today]
+                        for k in stale:
+                            day_map.pop(k, None)
+                            removed += 1
+                # ② next_ok：7 天 TTL（ts 非有限数一并清——load 侧已钳，
+                # 此处对运行期脏值兜底）
+                cutoff = _time.time() - _LEDGER_TTL_SECONDS
+                next_ok = getattr(self, "_llm_proactive_next_ok", None)
+                if isinstance(next_ok, dict):
+                    stale = [
+                        k for k, ts in next_ok.items()
+                        if not isinstance(ts, (int, float)) or float(ts) <= cutoff
+                    ]
+                    for k in stale:
+                        next_ok.pop(k, None)
+                        removed += 1
+                # ③ fail_counts + 盖章 sidecar 成对驱逐（缺章永不驱逐）
+                counts = getattr(self, "_deliver_fail_counts", None)
+                seen = getattr(self, "_deliver_fail_seen", None)
+                if isinstance(counts, dict) and isinstance(seen, dict):
+                    stale_seen = [
+                        k for k, ts in seen.items()
+                        if isinstance(ts, (int, float)) and float(ts) <= cutoff
+                    ]
+                    for k in stale_seen:
+                        seen.pop(k, None)
+                        if counts.pop(k, None) is not None:
+                            removed += 1
+                # ④ judge stash 裁剪到上限（弹最旧）
+                self._trim_judge_stash()
+            if removed:
+                # 锁外落盘（persist 自身再取锁做快照——锁序纪律）
+                self._persist_throttle_ledger()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("账本驱逐失败（跳过本拍，不影响 tick）: %s", e)
+
     def _check_ase_per_user(self) -> None:
         """P1：主动消息由 **LLM 判断**是否开口、说什么（用户裁决：无策略闸）。
 
         系统仅保证投递正确性：LLM=false 不发；**投递成功才记账**。
         urgency 仅作上下文信号，不作为发送硬闸。
+
+        A1（2026-11-10 N 规模批）：多用户时按 `_tick_concurrency()` 有界并发
+        fan-out（tick 总时长 N×最慢 → ceil(N/w)×最慢）；单用户或 workers=1
+        走原串行内联路径（代码字面不变，N=1 零变化）。
         """
         from proactive.ase_hub import ASEHub
 
@@ -1378,15 +1537,44 @@ class ProactiveScheduler:
             logger.info("ASE tick: 无用户目标，跳过（hub_known=%s）", hub.known_user_keys())
             return
         logger.info("proactive LLM tick per-user: targets=%d %s", len(user_keys), user_keys[:8])
+        # A4：账本驱逐在 fan-out 前、单线程执行（自身已 try/except 降级 debug）
+        self._evict_stale_ledger_entries()
         # 引擎级全局值每拍只算一次（读 yaml + scheduler_config.json）：4 worker 下
         # admin 保存只落到一个 worker 的引擎/`_replay`，其余 worker 靠本函数把
         # **持久化全局值**对齐到自己的引擎（2026-10-30 二轮复核 medium）。
         engine_globals = self._global_engine_values(hub)
-        for user_key in user_keys:
-            try:
-                self._llm_proactive_one_user(hub, user_key, engine_globals=engine_globals)
-            except Exception as e:  # noqa: BLE001
-                logger.warning("proactive LLM tick failed user=%s: %s", user_key, e)
+        workers = self._tick_concurrency()
+        if workers <= 1 or len(user_keys) == 1:
+            # N=1 / 单 worker 回滚路径：原串行内联代码（字面不变，同线程执行；
+            # R4/R5 钉线程同一性与峰值=1）
+            for user_key in user_keys:
+                try:
+                    self._llm_proactive_one_user(hub, user_key, engine_globals=engine_globals)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("proactive LLM tick failed user=%s: %s", user_key, e)
+            return
+        # A1 有界并发 fan-out：with 包裹 = try/finally shutdown(wait=True)
+        # （审阅 A1 生命周期要求：禁裸建不关，防 idle worker 随 tick 数累积；
+        # 收 result 循环结束时任务已全完成，shutdown 立即返回，无线程泄漏）。
+        # 每次 submit 各自 copy_context() 传播上下文（对齐 memory_pipeline.py:679
+        # 先例；共享同一 Context 并发 run 会抛 "already entered"，故逐 submit
+        # 拷贝）。按提交顺序收结果，单用户异常隔离 + 日志与串行逐字同型。
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="ase-tick",
+        ) as pool:
+            futures = [
+                pool.submit(
+                    contextvars.copy_context().run,
+                    self._llm_proactive_one_user, hub, key,
+                    engine_globals=engine_globals,
+                )
+                for key in user_keys
+            ]
+            for key, fut in zip(user_keys, futures, strict=True):
+                try:
+                    fut.result()
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("proactive LLM tick failed user=%s: %s", key, e)
 
     def _vital_tick_for_user(self, user_key: str, character_id: str = "") -> None:
         """D12-L：把生理读数接进既有 per-user 拍（不新建第二条调度器）。
@@ -1653,8 +1841,13 @@ class ProactiveScheduler:
             # P1-51：关闭态账本事件每用户每日至多一条（旧实现每 tick 写一行，
             # enabled=false 反而让 agent_plane.db 涨得最快）
             today = _local_now().date().isoformat()
-            if self._disabled_event_day.get(str(user_key)) != today:
-                self._disabled_event_day[str(user_key)] = today
+            # A2：判定与写入在锁内；append/persist 在锁外
+            _first_today = False
+            with self._ledger_scope():
+                if self._disabled_event_day.get(str(user_key)) != today:
+                    self._disabled_event_day[str(user_key)] = today
+                    _first_today = True
+            if _first_today:
                 append_proactive_event(session_key=user_key, sent=False, reason="web_disabled")
                 # 块E：账本变更即落盘（否则重启当日再写一行）
                 self._persist_throttle_ledger()
@@ -1667,8 +1860,13 @@ class ProactiveScheduler:
             # skip 账本治理（2026-10-12）：静默闸此前只 debug 不落账，决策
             # 链整夜不可观测；补每用户每日一条（与 llm_wait_window 同口径）。
             today_q = _local_now().date().isoformat()
-            if self._quiet_event_day.get(str(user_key)) != today_q:
-                self._quiet_event_day[str(user_key)] = today_q
+            # A2：判定与写入在锁内；append/persist 在锁外
+            _first_today = False
+            with self._ledger_scope():
+                if self._quiet_event_day.get(str(user_key)) != today_q:
+                    self._quiet_event_day[str(user_key)] = today_q
+                    _first_today = True
+            if _first_today:
                 append_proactive_event(session_key=user_key, sent=False, reason="quiet_hours")
                 self._persist_throttle_ledger()
             logger.debug("proactive LLM 前置静默闸命中 user=%s，跳过决策", user_key)
@@ -1726,8 +1924,13 @@ class ProactiveScheduler:
             # P1-51 同款每用户每日至多一条（2026-10-12 账本治理）：等待窗内
             # 每 5 分钟 tick 写一行曾是 96% 的账本噪声（生产 4165/4348 行）。
             today_w = _local_now().date().isoformat()
-            if self._wait_window_event_day.get(str(user_key)) != today_w:
-                self._wait_window_event_day[str(user_key)] = today_w
+            # A2：判定与写入在锁内；append/persist 在锁外
+            _first_today = False
+            with self._ledger_scope():
+                if self._wait_window_event_day.get(str(user_key)) != today_w:
+                    self._wait_window_event_day[str(user_key)] = today_w
+                    _first_today = True
+            if _first_today:
                 append_proactive_event(
                     session_key=user_key,
                     sent=False,
@@ -1749,7 +1952,10 @@ class ProactiveScheduler:
                 _late_min = int((_now - _next_ok) // 60)
                 # 出账使本条 pending 不再复活：下一拍走全新 LLM 决策（过期不补 ≠
                 # 永久静音）。账本变更即落盘（块E 纪律：重启不重置出账状态）。
-                self._llm_proactive_next_ok.pop(str(user_key), None)
+                # A2：pop 在锁内（GIL 原子但与 sweep 快照同纪律）；后续
+                # topic_state/append/persist 在锁外。
+                with self._ledger_scope():
+                    self._llm_proactive_next_ok.pop(str(user_key), None)
                 # 2026-10-27 话题状态机 Q4：window_expired 消费旧计划（过期不补），
                 # 防止陈旧计划在下一拍被重新注入（next_at 早于 now 仍视为到期）。
                 try:
@@ -1838,7 +2044,8 @@ class ProactiveScheduler:
                 _allow, _dice = True, None
             if not _allow:
                 _wait = max(1, int(getattr(eng, "_min_interval_minutes", 30) or 30))
-                self._llm_proactive_next_ok[str(user_key)] = _time.time() + _wait * 60.0
+                with self._ledger_scope():
+                    self._llm_proactive_next_ok[str(user_key)] = _time.time() + _wait * 60.0
                 self._persist_throttle_ledger()
                 logger.info(
                     "proactive dice gate skip user=%s wait=%dmin line=%.1f roll=%.1f streak=%d",
@@ -2049,9 +2256,10 @@ class ProactiveScheduler:
             # T-4（2026-10-27 仿真人机制）：模型给出的等待窗加随机抖动，
             # 避免「精确到分钟」的机器节奏；jitter_seconds=0 时行为不变。
             _jitter = self.get_proactive_jitter_seconds()
-            self._llm_proactive_next_ok[str(user_key)] = apply_wait_jitter(
-                _now, wait_m, _jitter,
-            )
+            with self._ledger_scope():
+                self._llm_proactive_next_ok[str(user_key)] = apply_wait_jitter(
+                    _now, wait_m, _jitter,
+                )
             if _jitter > 0:
                 logger.debug(
                     "proactive wait jitter user=%s max=%.0fs", user_key, _jitter,
@@ -2098,9 +2306,10 @@ class ProactiveScheduler:
             if is_contract_rejection(_false_reason) and not (
                 isinstance(wait_m, int) and wait_m > 0
             ):
-                self._llm_proactive_next_ok[str(user_key)] = (
-                    _now + float(CONTRACT_REJECT_BACKOFF_MINUTES) * 60.0
-                )
+                with self._ledger_scope():
+                    self._llm_proactive_next_ok[str(user_key)] = (
+                        _now + float(CONTRACT_REJECT_BACKOFF_MINUTES) * 60.0
+                    )
                 self._persist_throttle_ledger()
             append_proactive_event(
                 session_key=user_key,
@@ -2168,7 +2377,8 @@ class ProactiveScheduler:
                 character_id=char_id,
             )
             # 拦截即退避 5 分钟：同义变体不会因为立刻重试而变得不同
-            self._llm_proactive_next_ok[str(user_key)] = _time.time() + 5 * 60.0
+            with self._ledger_scope():
+                self._llm_proactive_next_ok[str(user_key)] = _time.time() + 5 * 60.0
             # 等待窗随写随落盘（与块4/块E 纪律一致，重启不重置）
             self._persist_throttle_ledger()
             logger.info("proactive LLM duplicate_suppressed user=%s msg=%s", user_key, message[:40])
@@ -2180,14 +2390,18 @@ class ProactiveScheduler:
                 str(row.get("content") or "") for row in (scrubbed_recent or [])
                 if isinstance(row, dict) and row.get("content")
             ][-5:]
-            if not isinstance(getattr(self, "_judge_recent", None), dict):
-                self._judge_recent = {}
-            self._judge_recent[str(user_key)] = _recent_texts
-            # parked 复提的「更早聊过的话题」也 stash：judge 规则 3 需要例外，
-            # 否则候选天然不在最近 5 条 → 第三闸永远过不了。
-            if not isinstance(getattr(self, "_judge_topic", None), dict):
-                self._judge_topic = {}
-            self._judge_topic[str(user_key)] = _recall.judge_context
+            # A2：stash 与裁剪都在锁内（消费侧 `_deliver` 的 pop 跨线程）
+            with self._ledger_scope():
+                if not isinstance(getattr(self, "_judge_recent", None), dict):
+                    self._judge_recent = {}
+                self._judge_recent[str(user_key)] = _recent_texts
+                # parked 复提的「更早聊过的话题」也 stash：judge 规则 3 需要例外，
+                # 否则候选天然不在最近 5 条 → 第三闸永远过不了。
+                if not isinstance(getattr(self, "_judge_topic", None), dict):
+                    self._judge_topic = {}
+                self._judge_topic[str(user_key)] = _recall.judge_context
+                # A4 ④：stash 上限裁剪（弹最旧），防投递被闸拦住的残留无界
+                self._trim_judge_stash()
         except Exception:  # noqa: BLE001
             pass
         # 2026-10-30 D20：投递层也按该会话的静默窗口判（否则用户把窗口改窄后
@@ -2259,17 +2473,32 @@ class ProactiveScheduler:
                 character_id=char_id,
             )
             logger.info("proactive LLM delivered user=%s %s", user_key, message[:40])
-            if self._deliver_fail_counts.pop(str(user_key), None) is not None:
+            _cleared = False
+            with self._ledger_scope():
+                _cleared = self._deliver_fail_counts.pop(str(user_key), None) is not None
+                if _cleared:
+                    # A4 ③：sidecar 成对清（缺章残留无意义）
+                    seen = getattr(self, "_deliver_fail_seen", None)
+                    if isinstance(seen, dict):
+                        seen.pop(str(user_key), None)
+            if _cleared:
                 # 块E：成功送达清零退避（仅当确实有计数时落盘）
                 self._persist_throttle_ledger()
         else:
             # P1-22：投递失败指数退避（5m→15m→45m→2h 封顶），成功送达即清零。
             # 旧实现失败侧无任何 backoff：不可达用户每 5 分钟「生成→失败→再生成」，
             # 一天 288 次 LLM 零投递（v1.13 把记账移到投递后是对的，但没补退避）。
-            fails = self._deliver_fail_counts.get(str(user_key), 0) + 1
-            self._deliver_fail_counts[str(user_key)] = fails
-            backoff_min = min(5 * (3 ** (fails - 1)), 120)
-            self._llm_proactive_next_ok[str(user_key)] = _time.time() + backoff_min * 60.0
+            # A2：计数、退避时刻与 sidecar 盖章在同一临界区内一次算好。
+            with self._ledger_scope():
+                fails = self._deliver_fail_counts.get(str(user_key), 0) + 1
+                self._deliver_fail_counts[str(user_key)] = fails
+                backoff_min = min(5 * (3 ** (fails - 1)), 120)
+                self._llm_proactive_next_ok[str(user_key)] = _time.time() + backoff_min * 60.0
+                # A4 ③：sidecar 盖章（随 throttle 段持久化；缺章=驱逐时不碰）
+                seen = getattr(self, "_deliver_fail_seen", None)
+                if seen is None:
+                    seen = self._deliver_fail_seen = {}
+                seen[str(user_key)] = _time.time()
             # 块E：退避阶梯与下一次可试时刻一并落盘 —— 重启不重置阶梯，
             # 否则 5m 永远重新开始、永远升不到 120m 封顶。
             self._persist_throttle_ledger()
@@ -2281,9 +2510,16 @@ class ProactiveScheduler:
             # 种病——生产实证连续 11 次失败全是「平台窗口拒收」，账本此前
             # 只写 backoff 看不出病型（_last_deliver_error 由 _send_targeted
             # 失败分支写入；分类真源=_classify_deliver_error）。
-            _err_class = _classify_deliver_error(
-                str(getattr(self, "_last_deliver_error", "") or "")
+            # A3（2026-11-10）：优先读 per-session 镜像（pop 即消费）——并发下
+            # 标量刚被别的线程（祝福线/别的用户）覆写会把他人错误类串进本
+            # 账本事件；镜像 miss（旧替身只写标量，test_proactive_user_scope
+            # 契约）回落旧标量，行为兼容。
+            _err_raw = str(
+                getattr(self, "_last_deliver_errors", {}).pop(str(user_key), "") or ""
             )
+            if not _err_raw:
+                _err_raw = str(getattr(self, "_last_deliver_error", "") or "")
+            _err_class = _classify_deliver_error(_err_raw)
             append_proactive_event(
                 session_key=user_key,
                 sent=False,
@@ -2374,7 +2610,10 @@ class ProactiveScheduler:
         try:
             _stash = getattr(self, "_judge_recent", None)
             if isinstance(_stash, dict):
-                recent_for_judge = _stash.pop(str(session_key or ""), []) or []
+                # A2：pop 与决策线 stash/裁剪跨线程（本方法有 4 个调用方跨 3 类
+                # 线程：tick worker / 手动 API / 祝福 job / 提醒 job），同锁互斥
+                with self._ledger_scope():
+                    recent_for_judge = _stash.pop(str(session_key or ""), []) or []
         except Exception:  # noqa: BLE001
             recent_for_judge = []
         # 2026-10-27 Q3：parked 复提的「更早聊过的话题」由决策线 stash；
@@ -2383,7 +2622,8 @@ class ProactiveScheduler:
         try:
             _topic_stash = getattr(self, "_judge_topic", None)
             if isinstance(_topic_stash, dict):
-                topic_context = str(_topic_stash.pop(str(session_key or ""), "") or "")
+                with self._ledger_scope():
+                    topic_context = str(_topic_stash.pop(str(session_key or ""), "") or "")
         except Exception:  # noqa: BLE001
             topic_context = ""
         try:
@@ -2502,6 +2742,23 @@ class ProactiveScheduler:
         # 供调用方账本分类（deliver_failed_backoff_XXm|<class>）——旧实现失败
         # 只有 warning 日志，账本看不出「窗口拒收」与「通道掉线」是两种病。
         self._last_deliver_error = ""
+        # A3（2026-11-10）：per-session 错误镜像与标量同写同清。键 =
+        # str(session_key or "")（广播判静默时为空串键，不与任何用户冲突）。
+        # 🔴 复位必须同步 pop 镜像：web 通道失败路径（下方 websocket 分支）
+        # 既不写标量也不写镜像，若不同步清，同用户上一轮的错误类会泄漏进
+        # 本轮分类（R12 钉死）。
+        _err_key = str(session_key or "")
+        _errors = getattr(self, "_last_deliver_errors", None)
+        if _errors is None:  # __new__ stub 兼容（同 _record_model_degraded 先例）
+            _errors = self._last_deliver_errors = {}
+        _errors.pop(_err_key, None)
+
+        def _mark_deliver_error(reason: str) -> None:
+            """A3：标量（既有契约）+ per-session 镜像同写（tick worker 并发下
+            A 用户的失败类不再串进 B 用户的账本 reason 后缀，R11 钉死）。"""
+            self._last_deliver_error = reason
+            _errors[_err_key] = reason
+
         if quiet_hours is None:
             # 同 `_send_to_all`：无 per-user 窗口时保持旧判据（`_is_quiet_hours`），
             # 不新增对 `self._quiet_hours` 字段的硬依赖。
@@ -2511,7 +2768,7 @@ class ProactiveScheduler:
             blocked = self._quiet_hours_contains(quiet_hours)
             window = quiet_hours
         if blocked:
-            self._last_deliver_error = "quiet_hours"
+            _mark_deliver_error("quiet_hours")
             logger.warning(
                 "免打扰时段(%s-%s)：消息未投递（无紧急旁路），内容不计数不扣配额",
                 window[0], window[1],
@@ -2593,21 +2850,21 @@ class ProactiveScheduler:
                     # P1-21：通道不收 session_key（旧签名）——定向消息**绝不**
                     # 静默转广播（A 的私信发给全员 = 跨用户泄漏），直接判失败。
                     # 旧实现此处回退 sender(message) 广播并记「定向投递成功」。
-                    self._last_deliver_error = f"session_key_unsupported: {e}"
+                    _mark_deliver_error(f"session_key_unsupported: {e}")
                     logger.warning(
                         "wechat 通道不接受 session_key，定向消息拒绝降级为广播: session=%s %s",
                         session_key, e,
                     )
                     return False
                 except Exception as e:  # noqa: BLE001
-                    self._last_deliver_error = str(e)[:200]
+                    _mark_deliver_error(str(e)[:200])
                     logger.warning("定向投递失败 session=%s: %s", session_key, e)
                     self._channel_instances["wechat"] = None
             # P1-21：微信会话键在 wechat 通道缺失/失败时直接返回 False。
             # 旧实现落到 _send_to_all —— instance=None 时整段跳过（微信形态
             # 零送达却继续白烧 LLM），有实例时变跨用户广播 + 记「定向成功」。
             if not self._last_deliver_error:
-                self._last_deliver_error = "channel_unavailable"
+                _mark_deliver_error("channel_unavailable")
             logger.warning("微信定向投递未成功（通道不可用），不回退广播: session=%s", session_key)
             return False
 
@@ -2871,7 +3128,11 @@ class ProactiveScheduler:
             return
         logger.info("[重要日期] 命中 %s（user=%s），定向发送祝福", names, user_key)
         if self._deliver(message, session_key=user_key, character_id=char_id):
-            self._important_dates_sent.add(dedup_key)
+            # A2：add 与 persist 快照的迭代竞态（祝福 job 线程 vs tick worker 的
+            # persist）——R10 红测实证 "Set changed size during iteration"，
+            # add 落锁后快照恒一致
+            with self._ledger_scope():
+                self._important_dates_sent.add(dedup_key)
             # 块E：当日幂等记录落盘（否则重启当日重复发同一祝福）
             self._persist_throttle_ledger()
             logger.info("[重要日期] 祝福已送达: %s user=%s", names, user_key)
@@ -3013,6 +3274,21 @@ class ProactiveScheduler:
                     loaded_f[str(k)] = iv
             self._deliver_fail_counts = loaded_f
 
+        # A4 ③：退避盖章 sidecar 回填（2026-11-10 N 规模批）。缺该字段
+        # （旧版落盘）→ 不回填 = 永不驱逐（P1-22：不可达用户退避阶梯跨重启
+        # 保留，宁可不驱逐也不错杀）。
+        seen_ts = raw.get("deliver_fail_counts_ts")
+        if isinstance(seen_ts, dict):
+            loaded_seen: dict[str, float] = {}
+            for k, v in seen_ts.items():
+                try:
+                    fv = float(v)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(fv) and fv > 0:
+                    loaded_seen[str(k)] = fv
+            self._deliver_fail_seen = loaded_seen
+
         disabled = raw.get("disabled_event_day")
         if isinstance(disabled, dict):
             self._disabled_event_day = {
@@ -3047,34 +3323,65 @@ class ProactiveScheduler:
         if isinstance(sent, list):
             self._important_dates_sent = {str(x) for x in sent if str(x or "")}
 
+    def _ledger_snapshot(self) -> dict[str, Any]:
+        """A2：取全部账本的一致性快照（**调用方须已持 `_ledger_scope()`**）。
+
+        🔴 锁序禁令：本方法必须在 `_ledger_lock` 内被调用，且内部不得触碰
+        `update_json`/flock——persist 的结构是「锁内快照 → 锁外 flock 写盘」，
+        交叉获取即死锁。快照完成后 flock 写盘期间另一线程的写点不再竞争迭代
+        （R10 红测：现行 254/300 次 "Set/Dict changed size during iteration"
+        告警 → 锁内快照后 0）。快照与写盘之间仍可能有并发写未被本盘收进
+        ——内存为准、下次 persist 自愈（残余为瞬时陈旧，非崩溃、非丢失）。
+        """
+        return {
+            "llm_proactive_next_ok": {
+                k: float(v) for k, v in self._llm_proactive_next_ok.items()
+            },
+            "deliver_fail_counts": {
+                k: int(v) for k, v in self._deliver_fail_counts.items()
+            },
+            # A4 ③：退避盖章 sidecar（缺 `_deliver_fail_seen` 属性的 __new__
+            # stub → 空段；load 侧缺该字段=不驱逐）
+            "deliver_fail_counts_ts": {
+                k: float(v) for k, v in getattr(self, "_deliver_fail_seen", {}).items()
+            },
+            "disabled_event_day": dict(self._disabled_event_day),
+            # skip 账本治理（2026-10-12）：等待窗/静默闸的每日去重键
+            "wait_window_event_day": dict(self._wait_window_event_day),
+            "quiet_event_day": dict(self._quiet_event_day),
+            # 模型闸（2026-10-15）：getattr 防御——既有测试以 __new__ 构造
+            # stub 且只补部分账本属性，真实实例 __init__ 必然有该键。
+            "model_degraded_event_day": dict(getattr(self, "_model_degraded_event_day", {})),
+            # 确定性节奏闸每日降噪账本（2026-10-17）：键为 "user|reason"，
+            # 与模型闸同 getattr 防御。
+            "gate_skip_event_day": dict(getattr(self, "_gate_skip_event_day", {})),
+            # 只保留最近 7 天（防无界增长；口径与 dedup_key 的日期前缀一致）
+            "important_dates_sent": sorted(self._important_dates_sent)[-200:],
+        }
+
     def _persist_throttle_ledger(self) -> None:
-        """把四个账本原子落盘；失败仅告警不阻断（内存态仍然生效）。
+        """把全部账本原子落盘；失败仅告警不阻断（内存态仍然生效）。
 
         只在**账本真的变化**时调用（见各处调用点注释）——本函数每次都全量覆写
         该段，若挂到热路径上会造成无谓的磁盘写。
+
+        A2（2026-11-10）：并发化后快照必须在 `_ledger_lock` 内取（迭代真实
+        容器与写点/祝福线 add 竞争会炸），flock 写盘在锁外（🔴 锁序禁令：
+        `_ledger_lock` 与 flock 禁止交叉获取）。`__new__` stub 缺锁属性时
+        （getattr 防御，同 `_record_model_degraded` 先例）退化为无锁快照
+        （stub 场景单线程，语义不变）。
         """
         try:
+            lock = getattr(self, "_ledger_lock", None)
+            if lock is not None:
+                with lock:
+                    snapshot = self._ledger_snapshot()
+            else:
+                snapshot = self._ledger_snapshot()
+
             def _mutate(data: dict[str, Any]) -> None:
-                data[self._THROTTLE_KEY] = {
-                    "llm_proactive_next_ok": {
-                        k: float(v) for k, v in self._llm_proactive_next_ok.items()
-                    },
-                    "deliver_fail_counts": {
-                        k: int(v) for k, v in self._deliver_fail_counts.items()
-                    },
-                    "disabled_event_day": dict(self._disabled_event_day),
-                    # skip 账本治理（2026-10-12）：等待窗/静默闸的每日去重键
-                    "wait_window_event_day": dict(self._wait_window_event_day),
-                    "quiet_event_day": dict(self._quiet_event_day),
-                    # 模型闸（2026-10-15）：getattr 防御——既有测试以 __new__ 构造
-                    # stub 且只补部分账本属性，真实实例 __init__ 必然有该键。
-                    "model_degraded_event_day": dict(getattr(self, "_model_degraded_event_day", {})),
-                    # 确定性节奏闸每日降噪账本（2026-10-17）：键为 "user|reason"，
-                    # 与模型闸同 getattr 防御。
-                    "gate_skip_event_day": dict(getattr(self, "_gate_skip_event_day", {})),
-                    # 只保留最近 7 天（防无界增长；口径与 dedup_key 的日期前缀一致）
-                    "important_dates_sent": sorted(self._important_dates_sent)[-200:],
-                }
+                # A2：闭包只读锁内取好的快照（不迭代真实账本容器）
+                data[self._THROTTLE_KEY] = snapshot
 
             json_state.update_json(self._CONFIG_PATH, _mutate)
         except Exception as e:  # noqa: BLE001
@@ -3105,41 +3412,52 @@ class ProactiveScheduler:
             return entry.partition("|")[2].partition("|")[0]
 
         removed = 0
-        for ledger in (
-            self._llm_proactive_next_ok,
-            self._deliver_fail_counts,
-            self._disabled_event_day,
-            # skip 账本治理（2026-10-12）新增的每日去重账本：漏这里会让已删
-            # 账号条目残留并随 _persist 复活（与上方 docstring 的自设纪律一致）
-            self._wait_window_event_day,
-            self._quiet_event_day,
-            # 模型闸（2026-10-15）新增每日去重账本：漏这里会让已删账号条目
-            # 残留并随 _persist 复活；getattr 防御见 _persist_throttle_ledger 注。
-            getattr(self, "_model_degraded_event_day", {}),
-        ):
-            victims = [k for k in list(ledger) if _owned(str(k))]
-            for k in victims:
-                ledger.pop(k, None)
-                removed += 1
-        # 确定性闸每日降噪账本（2026-10-17）：键形为 "{user_key}|{reason}"，
-        # 归属判定须先剥 reason 尾段再走 _owned（直接整键过 owner_of 会把
-        # "|unanswered_limit" 当成键的一部分误判）。
-        gate_skip_map = getattr(self, "_gate_skip_event_day", None)
-        if isinstance(gate_skip_map, dict):
-            victims = [
-                k for k in list(gate_skip_map)
-                if _owned(str(k).rpartition("|")[0])
+        # A2（2026-11-10）：六账本迭代 + pop 在 `_ledger_lock` 内一次完成——
+        # 本方法跑在 W9 账号生命周期 API 线程，与 tick worker 的写点/persist
+        # 快照跨线程；锁内无 IO（_owned 纯函数、list() 预拷贝），persist 在
+        # 锁外调用（锁序纪律）。
+        with self._ledger_scope():
+            for ledger in (
+                self._llm_proactive_next_ok,
+                self._deliver_fail_counts,
+                self._disabled_event_day,
+                # skip 账本治理（2026-10-12）新增的每日去重账本：漏这里会让已删
+                # 账号条目残留并随 _persist 复活（与上方 docstring 的自设纪律一致）
+                self._wait_window_event_day,
+                self._quiet_event_day,
+                # 模型闸（2026-10-15）新增每日去重账本：漏这里会让已删账号条目
+                # 残留并随 _persist 复活；getattr 防御见 _persist_throttle_ledger 注。
+                getattr(self, "_model_degraded_event_day", {}),
+            ):
+                victims = [k for k in list(ledger) if _owned(str(k))]
+                for k in victims:
+                    ledger.pop(k, None)
+                    removed += 1
+            # 确定性闸每日降噪账本（2026-10-17）：键形为 "{user_key}|{reason}"，
+            # 归属判定须先剥 reason 尾段再走 _owned（直接整键过 owner_of 会把
+            # "|unanswered_limit" 当成键的一部分误判）。
+            gate_skip_map = getattr(self, "_gate_skip_event_day", None)
+            if isinstance(gate_skip_map, dict):
+                victims = [
+                    k for k in list(gate_skip_map)
+                    if _owned(str(k).rpartition("|")[0])
+                ]
+                for k in victims:
+                    gate_skip_map.pop(k, None)
+                    removed += 1
+            # A4 ③：盖章 sidecar 与 fail_counts 同键成对清（漏了会随 _persist
+            # 复活一枚无计数孤儿章；孤儿章无害但留脏）
+            seen = getattr(self, "_deliver_fail_seen", None)
+            if isinstance(seen, dict):
+                for k in [k for k in list(seen) if _owned(str(k))]:
+                    seen.pop(k, None)
+            date_victims = [
+                x for x in list(self._important_dates_sent)
+                if _owned(_dedup_user_key(str(x)))
             ]
-            for k in victims:
-                gate_skip_map.pop(k, None)
+            for x in date_victims:
+                self._important_dates_sent.discard(x)
                 removed += 1
-        date_victims = [
-            x for x in list(self._important_dates_sent)
-            if _owned(_dedup_user_key(str(x)))
-        ]
-        for x in date_victims:
-            self._important_dates_sent.discard(x)
-            removed += 1
         if removed:
             self._persist_throttle_ledger()
         return removed

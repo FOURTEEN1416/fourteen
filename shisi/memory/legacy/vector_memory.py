@@ -26,6 +26,46 @@ from typing import Any
 
 logger = logging.getLogger("vector_memory")
 
+
+class VectorScopeError(Exception):
+    """B1 单点守卫：scoped 向量检索缺归属键（user_key/session_id）时抛出。"""
+
+
+# 归属元数据键分两级：强归属键（user_key/session_id）缺一即拒；
+# character_id 不是用户边界（D16：多用户可绑同一角色卡），仅作附加过滤条件。
+_SCOPE_OWNER_KEYS = {"user_key", "session_id"}
+_SCOPE_META_KEYS = {"user_key", "session_id", "character_id"}
+
+
+def _scope_guard_enabled() -> bool:
+    """守卫开关：VECTOR_SCOPE_GUARD=0/false/off 回滚到旧的无守卫行为。
+
+    每次调用读 env（不模块级缓存），保证运行期改 env / 测试 monkeypatch 即时生效。
+    """
+    return os.environ.get("VECTOR_SCOPE_GUARD", "1").strip().lower() not in (
+        "0", "false", "off",
+    )
+
+
+def _where_has_owner_key(where: Any) -> bool:
+    """递归判定 where 是否命中强归属键（user_key/session_id 至少其一）。
+
+    - 顶层直接命中 → 成立；
+    - ``$and``：任一子句命中即整体收窄成立（AND 下带归属键的子句收窄全量）；
+    - ``$or``：全部分支命中才成立（任一分支无归属即向外泄漏非归属范围）。
+    """
+    if not isinstance(where, dict):
+        return False
+    for key, value in where.items():
+        if key in _SCOPE_OWNER_KEYS:
+            return True
+        if key in ("$and", "$or") and isinstance(value, list):
+            hits = [_where_has_owner_key(sub) for sub in value if isinstance(sub, dict)]
+            if hits and (any(hits) if key == "$and" else all(hits)):
+                return True
+    return False
+
+
 try:
     import chromadb
     from chromadb.api.models.Collection import Collection
@@ -280,6 +320,9 @@ class VectorMemory:
         return _run_async(self.search_facts(query, top_k))  # type: ignore[no-any-return]
 
     async def get_all_facts(self) -> list[str]:
+        # ⚠️ 全量读无归属过滤，不经过 _search 单点守卫（B1 守卫只覆盖检索路径）。
+        # 2026-11-10 grep 实证全仓零调用者（仅本定义与 *_sync 包装），属死路径；
+        # 接入前必须自带归属过滤，禁止直接喂 prompt。
         coll = self._collections.get("user_facts")
         if coll is None:
             return []
@@ -318,6 +361,8 @@ class VectorMemory:
         return _run_async(self.store_emotion_log(emotion, intensity, trigger))  # type: ignore[no-any-return]
 
     async def get_recent_emotions(self, n: int = 10) -> list[dict[str, Any]]:
+        # ⚠️ 全量读无归属过滤，不经过 _search 单点守卫（同 get_all_facts）。
+        # 2026-11-10 grep 实证全仓零调用者，属死路径；接入前必须自带归属过滤。
         coll = self._collections.get("emotion_logs")
         if coll is None:
             return []
@@ -341,10 +386,27 @@ class VectorMemory:
     async def _search(
         self, collection_name: str, query: str, top_k: int,
         where: dict | None = None,
+        *, scope: str = "scoped",
     ) -> list[dict[str, Any]]:
         coll = self._collections.get(collection_name)
         if coll is None:
             return []
+        # B1 单点守卫（2026-11-10）：必须留在 try 之外——VectorScopeError 要
+        # 响亮上抛给调用方降级/告警，一旦落进下方 except Exception 会被吞成
+        # 空结果 + 通用 warning，守卫整体退化回「静默跨用户变静默空」。
+        # scoped（默认）要求 where 命中强归属键（user_key/session_id 至少
+        # 其一）；合法全局检索必须显式传 scope="global"（放行 + WARNING 留痕）。
+        if scope == "global":
+            logger.warning(
+                "vector global search (explicit): collection=%s top_k=%s",
+                collection_name, top_k,
+            )
+        elif _scope_guard_enabled() and not _where_has_owner_key(where):
+            raise VectorScopeError(
+                f"scoped 向量检索缺归属键: collection={collection_name}, "
+                f"原因={'where 为空' if not where else 'where 未命中 user_key/session_id'}；"
+                f"合法全局检索请显式传 scope='global'（回滚开关 VECTOR_SCOPE_GUARD=0）"
+            )
         try:
             kwargs: dict[str, Any] = {"query_texts": [query], "n_results": top_k}
             if where:
