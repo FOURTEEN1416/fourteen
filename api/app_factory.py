@@ -239,6 +239,17 @@ def create_api_app(
         logger.warning("Production environment detected without API_KEY set - authentication is enabled but no key configured")
     configure_auth(enabled=_api_key_enabled, api_key=_api_key)
 
+    # 开关一致性校验（B-2，2026-11-11）：与 orchestrator/_init_mixin.initialize
+    # 共用同一个实现（utils.speaker_switches，幂等、纯读环境变量），禁止第二份
+    # 判定。--no-api 入口由 initialize 覆盖，这里只管 API 入口；校验异常
+    # fail-open —— 开关一致性是运维可观测项，不能成为启动硬门。
+    try:
+        from utils.speaker_switches import validate_speaker_switches
+
+        logger.info("启动开关校验: %s", validate_speaker_switches())
+    except Exception as exc:  # noqa: BLE001 —— 配置校验不得阻塞启动
+        logger.warning("启动开关校验失败（忽略）: %s", exc)
+
     # ═══════════════════════════════════════════════════
     # 注入依赖
     # ═══════════════════════════════════════════════════

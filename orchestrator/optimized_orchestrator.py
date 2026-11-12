@@ -619,6 +619,34 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 "message_id": current_message_id(),
                 "call_id": call_id,
             }
+        # ── agent_core 影子账本（B-1，2026-11-11）：模型请求的这次调用 ──
+        # 锚点在 send_voice 提前 return 之后（伪工具不是 registry 工具，不进账本）。
+        # 轮次身份**必须** turn_key()：形参 turn_id 来自 ctx['ax_turn_id']，
+        # process_message 调 _prepare_context 未传 turn_id ⇒ 实得随机 UUID，
+        # 拿它当轮次会与入站/出站对不上（replay 永远拼不出完整一轮）。
+        try:
+            from agent_core import events as _ac_events
+
+            _ac_turn = _ac_events.turn_key()
+            _ac_events.record_event(
+                "tool_call",
+                session_key=str(session_key or ""),
+                character_id=str(character_id or ""),
+                turn_id=_ac_turn,
+                role="tool",
+                source="orchestrator",
+                payload={
+                    "call_id": call_id,
+                    "name": name,
+                    "args_preview": str(args_raw)[:120],
+                    "turn_id": _ac_turn,
+                    "ax_turn_id": str(turn_id or ""),
+                    "character_id": str(character_id or ""),
+                },
+                dedupe_key=f"tool:{call_id}:call",
+            )
+        except Exception as _agent_exc:  # noqa: BLE001 —— 影子写绝不改真实行为
+            logger.debug("[agent_core][step=hook_tool_call_skipped] %s", _agent_exc)
         success = False
         error = ""
         try:
@@ -635,6 +663,48 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             result = ToolResult(False, error="tool_execution_failed")
             rd = result.to_dict()
             error = "tool_execution_failed"
+        # ── agent_core 影子账本：调用结果 + 提醒承诺 ──
+        # 承诺是「我答应过要做什么」的唯一影子源：`set_reminder` 成功才写，
+        # reminder_id 为确定性去重键（同 call 重放不产生第二行）。
+        try:
+            from agent_core import events as _ac_events
+
+            _ac_turn2 = _ac_events.turn_key()
+            _ac_events.record_event(
+                "tool_result",
+                session_key=str(session_key or ""),
+                character_id=str(character_id or ""),
+                turn_id=_ac_turn2,
+                role="tool",
+                source="orchestrator",
+                payload={
+                    "call_id": call_id,
+                    "name": name,
+                    "success": bool(success),
+                    "error": str(error or ""),
+                    "result_keys": sorted(rd.keys()) if isinstance(rd, dict) else [],
+                    "turn_id": _ac_turn2,
+                },
+                dedupe_key=f"tool:{call_id}:result",
+            )
+            if name == "set_reminder" and success:
+                _ac_data = rd.get("data") if isinstance(rd, dict) else None
+                if isinstance(_ac_data, dict):
+                    from agent_core.commitments import add_commitment
+
+                    _ac_rid = str(_ac_data.get("reminder_id") or "")
+                    add_commitment(
+                        str(_ac_data.get("content") or ""),
+                        kind="remind",
+                        session_key=str(session_key or ""),
+                        character_id=str(character_id or ""),
+                        due_at=str(_ac_data.get("trigger_time") or ""),
+                        source_turn_id=_ac_turn2,
+                        ref=f"reminder:{_ac_rid}" if _ac_rid else "",
+                        dedupe_key=f"reminder:{_ac_rid}" if _ac_rid else "",
+                    )
+        except Exception as _agent_exc:  # noqa: BLE001
+            logger.debug("[agent_core][step=hook_tool_result_skipped] %s", _agent_exc)
         # 缺陷 I：逐调用入账（call_id/结果状态/关联轮），回放可定位失败调用
         try:
             from shisi.agent_plane.runtime import append_tool_call_event
@@ -2377,6 +2447,33 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.debug("口误应用跳过: %s", exc)
+        # ── agent_core 影子账本（B-1，2026-11-11）：唯一终裁点 ──
+        # 批量出口（process_message）与真流式（_stream_mixin）都只经此一处，
+        # 选函数内而非调用点，两条出站路径一次覆盖。轮次身份 = turn_key()
+        # （读请求级 ContextVar，与入站/发送同一 m:{mid}）。零行为：异常只 debug。
+        try:
+            import hashlib as _hashlib
+
+            from agent_core import events as _ac_events
+
+            _ac_turn = _ac_events.turn_key()
+            _ac_sha = _hashlib.sha256(final.encode("utf-8")).hexdigest()[:16]
+            _ac_events.record_event(
+                "agent_msg",
+                session_key=str(session_id or ""),
+                character_id=str(character_id or ""),
+                turn_id=_ac_turn,
+                source="orchestrator",
+                payload={
+                    "phase": "final",
+                    "reply_len": len(final),
+                    "reply_sha256": _ac_sha,
+                    "reply_mode": effective_mode,
+                },
+                dedupe_key=f"agent_msg:final:{_ac_turn}:{_ac_sha}" if _ac_turn else "",
+            )
+        except Exception as _agent_exc:  # noqa: BLE001 —— 影子写绝不改真实行为
+            logger.debug("[agent_core][step=hook_final_skipped] %s", _agent_exc)
         return final
 
     @request_scoped_llm

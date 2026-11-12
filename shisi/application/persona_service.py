@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,7 @@ from my_character.persona_engine import (
     PersonaEngine,
     is_external_character_id,
 )
+from shisi.application import persona_context
 from shisi.core.models.affinity_level import AffinityLevel
 from shisi.core.models.character_aggregate import CharacterAggregate
 from shisi.core.models.emotion_type import EmotionType
@@ -672,33 +672,11 @@ class PersonaService:
         if cached is not None and cached[0] == mtime and mtime > 0.0:
             return cached[1]
 
-        raw_card: dict[str, Any] | None = None
-        matched_path: Path | None = None
-
-        # 1. 按文件名查
-        if direct_path.exists():
-            try:
-                with open(direct_path, encoding="utf-8") as fh:
-                    raw_card = json.load(fh)
-                matched_path = direct_path
-            except (OSError, json.JSONDecodeError):
-                pass
-
-        # 2. 遍历匹配内部 id 字段
-        if raw_card is None:
-            try:
-                for f in chars_dir.glob("*.json"):
-                    try:
-                        with open(f, encoding="utf-8") as fh:
-                            data = json.load(fh)
-                        if data.get("id") == character_id:
-                            raw_card = data
-                            matched_path = f
-                            break
-                    except (OSError, json.JSONDecodeError):
-                        continue
-            except OSError:
-                pass
+        # 找文件：文件名直查 → 遍历 *.json 匹配内部 id（唯一 owner：
+        # shisi.application.persona_context.resolve_card_path）。
+        matched_path: Path | None = persona_context.resolve_card_path(
+            character_id, match_name=False, root=chars_dir,
+        )
 
         # 记录命中文件的 mtime（文件名直查与 id 遍历两条路径都要记），
         # 否则 id 遍历命中的卡片 mtime 恒为 0 → 缓存永不生效，每轮都重扫目录。
@@ -707,6 +685,12 @@ class PersonaService:
                 mtime = matched_path.stat().st_mtime
             except OSError:
                 mtime = 0.0
+
+        # 读 JSON：解析失败/不可读返回 (None, None)，与旧实现「缺卡不抛」一致。
+        raw_card: dict[str, Any] | None
+        raw_card, _matched = persona_context.load_raw_card(
+            character_id, match_name=False, root=chars_dir,
+        )
 
         # 展平 SillyTavern 等嵌套格式，确保 name/description/personality 等字段可用
         card = normalize_character_card(raw_card) if raw_card else None

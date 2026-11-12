@@ -513,8 +513,19 @@ _SPLIT_MAX_CHARS = 45
 _OUTBOX_TICK = 5.0
 
 
-def _split_overlong_line(line: str, max_chars: int) -> list[str]:
-    """单行超长时按句末标点切句并贪心合并到 ≤ max_chars（只在行内合并）。"""
+def _split_overlong_line(
+    line: str,
+    max_chars: int,
+    *,
+    hard_limit: bool = False,
+) -> list[str]:
+    """单行超长时按句末标点切句并贪心合并到 ≤ max_chars（只在行内合并）。
+
+    ``hard_limit``（2026-11-12 B-3）：默认 False 保持 legacy 行为——带句末标点的
+    超长句原样保留（旧实现只对「无标点收尾的尾串」硬切，实测 100 字带句号仍返回
+    ``[100]``）。True 时对每个超过 ``max_chars`` 的 part 再按 ``max_chars`` 硬切，
+    保证合并前每片 ≤ ``max_chars``；legacy 调用方不传，行为逐字不变。
+    """
     if len(line) <= max_chars:
         return [line]
     parts: list[str] = []
@@ -531,6 +542,17 @@ def _split_overlong_line(line: str, max_chars: int) -> list[str]:
             rest = rest[max_chars:]
         if rest:
             parts.append(rest)
+    if hard_limit:
+        hardened: list[str] = []
+        for part in parts:
+            if len(part) <= max_chars:
+                hardened.append(part)
+                continue
+            for i in range(0, len(part), max_chars):
+                piece = part[i:i + max_chars]
+                if piece:
+                    hardened.append(piece)
+        parts = hardened
     merged: list[str] = []
     for s in parts:
         if merged and len(merged[-1]) + len(s) <= max_chars:
@@ -540,10 +562,22 @@ def _split_overlong_line(line: str, max_chars: int) -> list[str]:
     return [s for s in merged if s] or [line]
 
 
+def _speaker_reply_hard_limit() -> bool:
+    """B-3 拆条新语义开关（唯一消费口；异常按开处理，保持新路径）。"""
+    try:
+        from utils.speaker_switches import speaker_reply_enabled
+
+        return speaker_reply_enabled()
+    except Exception:  # noqa: BLE001 —— 开关读取失败不得阻断发送
+        return True
+
+
 def split_reply_for_wechat(
     reply: str,
     max_segments: int = _SPLIT_MAX_SEGMENTS,
     max_chars: int = _SPLIT_MAX_CHARS,
+    *,
+    hard_limit: bool = False,
 ) -> list[str]:
     """把一条回复拆成**最多 2 条**「微信里一句一句发」的消息。
 
@@ -578,7 +612,9 @@ def split_reply_for_wechat(
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if line:
-            for j, piece in enumerate(_split_overlong_line(line, max_chars)):
+            for j, piece in enumerate(
+                _split_overlong_line(line, max_chars, hard_limit=hard_limit)
+            ):
                 seps.append("\n" if (j == 0 and units) else "")
                 units.append(piece)
     if not units:
@@ -2092,7 +2128,9 @@ class WeChatConnector:
         except Exception as exc:  # noqa: BLE001
             logger.debug("[wx][step=humanize_scope_unreadable] %s", exc)
         segments = split_reply_for_wechat(
-            reply, max_segments=self._split_cap_for(peer, humanize)
+            reply,
+            max_segments=self._split_cap_for(peer, humanize),
+            hard_limit=_speaker_reply_hard_limit(),
         )
         accepted = []
         for idx, segment in enumerate(segments):
@@ -2391,15 +2429,118 @@ class WeChatConnector:
             msg_id, self.owner_user_id, from_user, session_key, len(text),
         )
 
+        # ── agent_core 影子账本（B-1，2026-11-11）：入站只写元数据 ──
+        # 线程身份 = (user × session)，**不含角色**：入站早于角色解析，且两处解析
+        # 器实现不同（本批未证明恒等），角色归属以事件行为准。零行为：任何异常
+        # 只 debug，不改流程/返回值。开关关闭时 store 各写接口首行短路。
+        _agent_thread_id = ""
+        try:
+            import hashlib as _hashlib
+
+            from agent_core import events as _ac_events
+            from agent_core import threads as _ac_threads
+
+            _media_kinds: list[str] = []
+            if image_data or parsed.image_payload is not None:
+                _media_kinds.append("image")
+            if voice_data or parsed.voice_media is not None or parsed.voice_text:
+                _media_kinds.append("voice")
+            _agent_thread_id = _ac_threads.open_thread(
+                user_key=session_key, session_key=session_key, character_id="",
+            ) or ""
+            _ac_events.record_event(
+                "user_msg",
+                session_key=session_key,
+                turn_id=_ac_events.turn_key(msg_id),
+                thread_id=_agent_thread_id,
+                role="user",
+                source="wechat",
+                payload={
+                    "msg_id": msg_id,
+                    "text_len": len(text or ""),
+                    "text_sha256": _hashlib.sha256(
+                        (text or "").encode("utf-8")
+                    ).hexdigest()[:16],
+                    "has_media": bool(_media_kinds),
+                    "media_kinds": _media_kinds,
+                    "attachments_count": len(attachments),
+                },
+                dedupe_key=f"user_msg:{msg_id}" if msg_id else "",
+            )
+        except Exception as _agent_exc:  # noqa: BLE001 —— 影子写绝不改真实行为
+            logger.debug("[agent_core][step=hook_inbound_skipped] %s", _agent_exc)
+
+        # ── 承诺账本入站销账（B-2，契约 9.5 指定锚点：user_msg 影子写之后）──
+        # 用户回执必须在入站侧闭环，不能依赖主动 tick：前置闸（should_skip /
+        # 骰子闸）一旦跳过，scheduler 的 close 块就永远走不到。这里在任何出站
+        # 之前销账，保证「笔记我收到了」当轮即 fulfilled；幂等，已 fulfilled /
+        # expired 返回 False，不重复记账。开关关 / 异常一律 fail-open，不改变
+        # 真实收发行为。
+        try:
+            from agent_core import commitment_gate as _ac_gate_mod
+            from agent_core import commitments as _ac_commitments
+            from agent_core import events as _ac_events
+            from utils.speaker_switches import speaker_proactive_enabled as _ac_speaker_on
+
+            _receipt_text = str(text or "").strip()
+            if (
+                _receipt_text
+                and _ac_events.enabled()
+                and _ac_speaker_on()
+            ):
+                for _c in _ac_commitments.list_open_commitments(str(session_key)) or []:
+                    _detail = str(_c.get("detail") or "")
+                    _cid = str(_c.get("commitment_id") or "")
+                    if (
+                        _detail and _cid
+                        and _ac_gate_mod.should_close(_detail, _receipt_text)
+                        and _ac_commitments.close_commitment(
+                            _cid, reason="user_receipt", user_key=str(session_key),
+                        )
+                    ):
+                        logger.info(
+                            "[agent_core][step=commitment_closed_inbound] cid=%s", _cid,
+                        )
+        except Exception as _agent_exc:  # noqa: BLE001 —— 影子读绝不改真实行为
+            logger.debug("[agent_core][step=hook_inbound_close_skipped] %s", _agent_exc)
+
         sent_reply: dict[str, Any] = {}
 
         def publish(reply: str) -> str:
             if sent_reply:
                 return str(sent_reply["accepted"])
             accepted = self.send_reply_segments(from_user, reply, context_token=context_token)
+            _segment_cap = self._split_cap_for(from_user)
             sent_reply.update(accepted=accepted, complete=bool(accepted) and accepted == "\n".join(
-                split_reply_for_wechat(reply, max_segments=self._split_cap_for(from_user))
+                split_reply_for_wechat(
+                    reply,
+                    max_segments=_segment_cap,
+                    hard_limit=_speaker_reply_hard_limit(),
+                )
             ))
+            # 影子账本：先发送后记账（受理长度 / 完整性 / 分段上限）。
+            try:
+                from agent_core import events as _ac_events
+
+                _ac_turn = _ac_events.turn_key(msg_id)
+                _ac_events.record_event(
+                    "agent_msg",
+                    session_key=session_key,
+                    turn_id=_ac_turn,
+                    thread_id=_agent_thread_id,
+                    source="wechat",
+                    payload={
+                        "phase": "sent",
+                        "msg_id": msg_id,
+                        "accepted_len": len(accepted or ""),
+                        "complete": bool(sent_reply.get("complete")),
+                        "segment_cap": _segment_cap,
+                        "turn_id": _ac_turn,
+                    },
+                    dedupe_key=f"agent_msg:sent:{msg_id}" if msg_id else "",
+                )
+            except Exception as _agent_exc:  # noqa: BLE001
+                logger.debug("[agent_core][step=hook_sent_skipped] %s", _agent_exc)
             return accepted
 
         def typing_hook(on: bool) -> None:
@@ -2499,6 +2640,8 @@ class WeChatConnector:
             logger.info("[wx][step=reply_accepted] msg_id=%s session=%s", msg_id, session_key)
 
         voice_sent = False
+        voice_fmt = ""
+        duration_ms = 0
         if voice_result:
             try:
                 # W7：统一音频对象携带实际格式（云端 mp3 / SAPI 兜底 wav）
@@ -2519,6 +2662,30 @@ class WeChatConnector:
             if voice_sent:
                 logger.info("[wx][step=voice_sent] msg_id=%s session=%s",
                             msg_id, session_key)
+                # 影子账本：语音轮不发文字气泡 —— 缺此点则「她说出口的话」
+                # 在账本里完全缺失。
+                try:
+                    from agent_core import events as _ac_events
+
+                    _ac_turn = _ac_events.turn_key(msg_id)
+                    _ac_events.record_event(
+                        "agent_msg",
+                        session_key=session_key,
+                        turn_id=_ac_turn,
+                        thread_id=_agent_thread_id,
+                        source="wechat",
+                        payload={
+                            "phase": "voice_sent",
+                            "msg_id": msg_id,
+                            "voice_fmt": str(voice_fmt),
+                            "duration_ms": int(duration_ms or 0),
+                            "reply_len": len(reply or ""),
+                            "turn_id": _ac_turn,
+                        },
+                        dedupe_key=f"agent_msg:voice:{msg_id}" if msg_id else "",
+                    )
+                except Exception as _agent_exc:  # noqa: BLE001
+                    logger.debug("[agent_core][step=hook_voice_skipped] %s", _agent_exc)
             else:
                 # 语音兜底：合成成功但转码/发送失败 → 补发文字（不静默丢内容）
                 logger.info("[wx][step=voice_only_fallback_text] msg_id=%s session=%s",

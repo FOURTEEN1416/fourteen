@@ -62,6 +62,18 @@ class _InitPhasesMixin:
         if self._initialized:
             return True
 
+        # 开关一致性校验（B-2，2026-11-11）：--no-api 入口不走 create_api_app，
+        # 本方法是两条入口的共同启动点，且必须早于 scheduler.start() —— 账本
+        # 关着而主动线上收开着时，这里给出唯一的降级判定与 ERROR 留痕。
+        # 实现唯一 owner = utils.speaker_switches（app_factory 调同一函数）；
+        # 纯读环境变量、幂等，异常一律 fail-open，不得阻止启动。
+        try:
+            from utils.speaker_switches import validate_speaker_switches
+
+            logger.info("启动开关校验: %s", validate_speaker_switches())
+        except Exception as exc:  # noqa: BLE001 —— 配置校验不得阻塞启动
+            logger.warning("启动开关校验失败（忽略）: %s", exc)
+
         fusion_cfg = fusion_cfg or {}
         logger.info("[初始化] 启动并行组件初始化 (fast 模式)...")
         start_time = time.perf_counter()

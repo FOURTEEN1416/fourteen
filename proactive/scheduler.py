@@ -1001,15 +1001,46 @@ class ProactiveScheduler:
                         "session_key": key}
 
             message = str(result.get("message") or "")
+            _manual_char_id = self._resolve_character_id(key)
             delivered = bool(
-                self._deliver(message, session_key=key,
-                              character_id=self._resolve_character_id(key))
+                self._deliver(message, session_key=key, character_id=_manual_char_id)
             )
             public = {k: v for k, v in result.items() if not str(k).startswith("_")}
             if not delivered:
                 logger.warning("手动发送未获投递受理 session=%s", key)
                 return {"status": "not_delivered", "delivered": False,
                         "reason": "deliver_rejected", "session_key": key, **public}
+            # 影子账本（B-1，2026-11-11）：投递受理之后才记，主动线无入站 id
+            # → turn_id 恒空，回放只能按 session_key。零行为：异常只 debug。
+            try:
+                import hashlib as _ac_hashlib
+
+                from agent_core import events as _ac_events
+
+                # 确定性去重键（B-2，2026-11-11）：本函数没有 command_id 形参
+                # （跨 worker 命令 id 在 `_drain_control_commands` 帧里，不传进来），
+                # 按契约回落「正文 sha256 前 16 位」——同一正文重复自测不产生第二行。
+                _ac_manual_dedup = (
+                    f"proactive_manual:{key}:"
+                    f"{_ac_hashlib.sha256(str(message or '').encode('utf-8')).hexdigest()[:16]}"
+                )
+                _ac_events.record_event(
+                    "agent_msg",
+                    session_key=key,
+                    character_id=str(_manual_char_id or ""),
+                    source="scheduler/manual",
+                    dedupe_key=_ac_manual_dedup,
+                    payload={
+                        "phase": "proactive_delivered",
+                        "channel": "proactive",
+                        "voice": False,
+                        "text_len": len(message),
+                        "character_id": str(_manual_char_id or ""),
+                        "turn_id": "",
+                    },
+                )
+            except Exception as _agent_exc:  # noqa: BLE001 —— 影子写绝不改真实行为
+                logger.debug("[agent_core][step=hook_manual_send_skipped] %s", _agent_exc)
             # 受理之后才记账（旧实现发送前就写 sent_history）
             recorder = getattr(eng, "record_sent_entry", None)
             if callable(recorder):
@@ -1539,6 +1570,18 @@ class ProactiveScheduler:
         logger.info("proactive LLM tick per-user: targets=%d %s", len(user_keys), user_keys[:8])
         # A4：账本驱逐在 fan-out 前、单线程执行（自身已 try/except 降级 debug）
         self._evict_stale_ledger_entries()
+        # 承诺账本维护（B-2，2026-11-11）：过期 open 承诺**每 tick 全库收敛一次**。
+        # 🔴 必须放在 per-user 循环/fan-out **之前**：放进循环会退化成 O(N) 全库扫
+        # （N 规模治理纪律）。账本关着时 `expire_commitments` 首行短路 = 零 IO；
+        # 任何异常 fail-open + WARNING，绝不穿出 tick。
+        try:
+            from agent_core import commitments as _ac_commitments
+
+            _ac_expired = _ac_commitments.expire_commitments(limit=500)
+            if _ac_expired:
+                logger.info("[agent_core][step=commitments_expired] rows=%d", _ac_expired)
+        except Exception as _ac_expire_exc:  # noqa: BLE001 —— 维护失败不阻塞主动线
+            logger.warning("[agent_core][step=commitment_expire_skipped] %s", _ac_expire_exc)
         # 引擎级全局值每拍只算一次（读 yaml + scheduler_config.json）：4 worker 下
         # admin 保存只落到一个 worker 的引擎/`_replay`，其余 worker 靠本函数把
         # **持久化全局值**对齐到自己的引擎（2026-10-30 二轮复核 medium）。
@@ -2181,6 +2224,139 @@ class ProactiveScheduler:
         floor_extra = proactive_floor_extra(
             hours_since_last_chat=float(hours or 0.0), sent_today=sent_today,
         )
+        # ── 承诺账本读侧消费（B-2，2026-11-11）──────────────────────────────
+        # 执行顺序 = **(B) 回执闭环 → (A) 上下文注入 / hooks 剔除**（2026-11-11
+        # 复核修复：闭环必须先于消费，否则回执当拍仍会把已兑现的承诺当未兑现）。
+        # (B) 回执闭环：本轮已解析到的用户最后一句命中 should_close → 就地
+        #     置 fulfilled（幂等，已 fulfilled 不再重复 close），并从本轮快照剔除。
+        #     ⚠️ 契约 9.5 指定锚点是 wechat_connector 的 user_msg 影子写之后，
+        #     该文件不在本域文件清单；这里用主动链已可见的入站文本做等价闭环点。
+        # (A) 未兑现承诺进决策上下文（最多 5 条、每条 80 字），并把命中承诺核心词
+        #     的 hooks 条目从候选里剔除——承诺没兑现就反复复提 = 空头支票。
+        #     **只剔由头，不拦正文**；候选全被剔除时 hooks 段整段消失。
+        # 账本或主动线上收开关关着 → 整段跳过（零 IO）；任何异常 fail-open + WARNING。
+        try:
+            from agent_core import events as _ac_events
+            from utils.speaker_switches import speaker_proactive_enabled
+
+            # 承诺闸的**生效性**（B-2 复核修复）：账本开关 **且** 主动线上收开关
+            # 都要开。此前只判 `_ac_events.enabled()`，而 SPEAKER_PROACTIVE 除了
+            # 启动期被打印外无人消费 —— 运维按 .env.example / 方案文档单独置 0
+            # 会得到「以为回滚了、实际没回滚」。现在两侧共用 utils.speaker_switches
+            # 的消费侧入口（与启动期校验同一 owner，含「speaker on + ledger off →
+            # 自动降级」口径）。tick 内只求值一次，登记（下方投递成功分支）与消费
+            # （本段）都读它 ⇒ 同一 tick 不会一侧开一侧关。
+            _ac_gate_on = _ac_events.enabled() and speaker_proactive_enabled()
+        except Exception as _ac_ev_exc:  # noqa: BLE001
+            _ac_gate_on = False
+            logger.warning("[agent_core][step=commitment_gate_unavailable] %s", _ac_ev_exc)
+        if _ac_gate_on:
+            _open_commitments: list[dict[str, Any]] = []
+            _ac_gate: Any = None
+            try:
+                from agent_core import commitment_gate as _ac_gate_mod
+                from agent_core import commitments as _ac_commitments
+
+                _ac_gate = _ac_gate_mod
+                _open_commitments = _ac_commitments.list_open_commitments(
+                    str(user_key), character_id=str(char_id or ""),
+                ) or []
+            except Exception as _commit_exc:  # noqa: BLE001
+                logger.warning("[agent_core][step=commitments_list_skipped] %s", _commit_exc)
+                _open_commitments = []
+            if _open_commitments and _ac_gate is not None:
+                # ── (B) 先闭环，再消费（B-2 复核修复）────────────────────────
+                # 旧序是「读快照 → 用快照建注入段 / 剔 hooks → 才 close」：用户回执
+                # 的那个 tick 里承诺已置 fulfilled，本轮 prompt 却仍说「这条还没
+                # 兑现」、且该承诺的 hooks 由头仍被剔 ⇒ 模型可能在用户已经收到东西
+                # 之后再次承诺 / 重复交付（正是账本要消灭的空头支票复提），要等下一
+                # 个 tick 才恢复正常。契约 9.5「入站即闭环」要求闭环先于消费，故把
+                # close 提到注入之前，并把本轮真闭环的行从快照剔除。
+                _closed_ids: set[str] = set()
+                try:
+                    _receipt_text = str(last_user_message or "").strip()
+                    _close_fn = getattr(_ac_commitments, "close_commitment", None)
+                    if _receipt_text and callable(_close_fn):
+                        for _c in _open_commitments:
+                            _detail = str(_c.get("detail") or "")
+                            _cid = str(_c.get("commitment_id") or "")
+                            # 只在**真发生状态转换**时剔除（close 返回 False 说明这行
+                            # 已不是 open，交给读取侧过滤即可，不在此谎报已闭环）
+                            if (
+                                _detail and _cid
+                                and _ac_gate.should_close(_detail, _receipt_text)
+                                and _close_fn(
+                                    _cid, reason="user_receipt", user_key=str(user_key),
+                                )
+                            ):
+                                _closed_ids.add(_cid)
+                except Exception as _close_exc:  # noqa: BLE001
+                    logger.warning(
+                        "[agent_core][step=commitment_close_skipped] %s", _close_exc,
+                    )
+                if _closed_ids:
+                    # 本轮快照剔除刚闭环的行：注入段与 hooks 剔除都只看**仍 open** 的
+                    _open_commitments = [
+                        _c for _c in _open_commitments
+                        if str(_c.get("commitment_id") or "") not in _closed_ids
+                    ]
+                if _open_commitments:
+                    # ── (A) 未兑现承诺进上下文 + 剔除对应 hooks 由头 ────────────
+                    try:
+                        _hook_body = str(getattr(hooks, "section", "") or "")
+                        if _hook_body:
+                            _kept: list[str] = []
+                            _dropped = 0
+                            for _line in _hook_body.splitlines():
+                                if _line.startswith("- ") and any(
+                                    _ac_gate.references_commitment(
+                                        str(_c.get("detail") or ""), _line[2:],
+                                    )
+                                    for _c in _open_commitments
+                                ):
+                                    _dropped += 1
+                                    continue
+                                _kept.append(_line)
+                            if _dropped:
+                                # 只剩标题（无 bullet）= 无候选 → 整段空（不让标题裸奔）
+                                hooks.section = "\n".join(_kept) if any(
+                                    _ln.startswith("- ") for _ln in _kept
+                                ) else ""
+                                if not hooks.section:
+                                    # 候选清零 = 择优关键词也清零（不留已剔条目的关键词）
+                                    hooks.keywords = []
+                                if getattr(hooks, "keywords", None):
+                                    hooks.keywords = [
+                                        _kw for _kw in hooks.keywords
+                                        if not any(
+                                            _ac_gate.references_commitment(
+                                                str(_c.get("detail") or ""), str(_kw),
+                                            )
+                                            for _c in _open_commitments
+                                        )
+                                    ]
+                                logger.info(
+                                    "[agent_core][step=commitment_hooks_trimmed] user=%s dropped=%d",
+                                    user_key, _dropped,
+                                )
+                        _commit_lines = [
+                            "- " + str(_c.get("detail") or "").strip()[:80]
+                            for _c in _open_commitments[:5]
+                            if str(_c.get("detail") or "").strip()
+                        ]
+                        if _commit_lines:
+                            _commit_block = (
+                                "【你还没兑现的承诺（本轮若不能真的交付就别提；"
+                                "提了就必须交付）】\n" + "\n".join(_commit_lines)
+                            )
+                            floor_extra = (
+                                (str(floor_extra).strip() + "\n\n" if str(floor_extra).strip() else "")
+                                + _commit_block
+                            )
+                    except Exception as _commit_exc:  # noqa: BLE001
+                        logger.warning(
+                            "[agent_core][step=commitments_context_skipped] %s", _commit_exc,
+                        )
         ctx = build_proactive_context(
             session_key=str(user_key),
             hours_since_last_chat=float(hours or 0.0),
@@ -2420,6 +2596,67 @@ class ProactiveScheduler:
         if self._deliver(
             message, session_key=user_key, character_id=char_id, **_deliver_kwargs,
         ):
+            # 影子账本（B-1，2026-11-11）：决策线投递成功即记；主动线无入站 id
+            # → turn_id 恒空。**不挂 `_record_outbound`**：它在 memory 缺位时早退、
+            # 且只在写历史成功分支被调，挂那里会静默丢事件。零行为：异常只 debug。
+            _ac_event_id = ""
+            try:
+                from agent_core import events as _ac_events
+
+                _ac_voice = bool(_deliver_kwargs.get("voice"))
+                # 确定性去重键（B-2，2026-11-11）：同一 tick（分钟粒度）内
+                # 重入（重试/并发 worker）不产生第二行；种子含 user_key。
+                _ac_decision_dedup = (
+                    f"proactive_decision:{user_key}:{now.strftime('%Y-%m-%d %H:%M')}"
+                )
+                _ac_event_id = _ac_events.record_event(
+                    "agent_msg",
+                    session_key=str(user_key),
+                    character_id=str(char_id or ""),
+                    source="scheduler/decision",
+                    dedupe_key=_ac_decision_dedup,
+                    payload={
+                        "phase": "proactive_delivered",
+                        "channel": "proactive_voice" if _ac_voice else "proactive",
+                        "voice": _ac_voice,
+                        "text_len": len(message),
+                        "character_id": str(char_id or ""),
+                        "turn_id": "",
+                    },
+                )
+            except Exception as _agent_exc:  # noqa: BLE001
+                logger.debug("[agent_core][step=hook_proactive_skipped] %s", _agent_exc)
+            # 承诺账本写入（B-2，2026-11-11）：主动正文里若是「我答应要交付的事」
+            # （整理/查/发…且未完成、非问句），登记为一条 open 承诺，后续 tick 的
+            # hooks 候选会被剔除、上下文会提醒交付，直到用户回执或 TTL 过期。
+            # **只写一条账、不拦任何出站正文**；异常 fail-open + WARNING。
+            # ⚠️ due_at 必须写成 B-1 `_normalize_ts` 认得的**精确格式**
+            # "%Y-%m-%d %H:%M:%S"（它只认 "%Y-%m-%d %H:%M[:%S]"）：带 "T" / 微秒 /
+            # "+08:00" 尾巴一律判不可解析 → 落空串 ⇒ 这条承诺**永不过期**（两个
+            # expire 谓词都依赖非空时间）。`expires_at()` 自 2026-11-11 复核修复起
+            # 恒返回北京 naive 墙钟（非 UTC+8 主机不再产出 aware 串），这里再用
+            # strftime 收口格式，两道都不靠调用方自觉。
+            # 闸门（B-2 复核修复）：`_ac_gate_on` = 账本 on **且** SPEAKER_PROACTIVE
+            # on —— 置 0 时既不登记也不消费，才真的是可回滚开关。
+            try:
+                from agent_core import commitment_gate as _ac_gate
+                from agent_core import commitments as _ac_commitments
+
+                if _ac_gate_on and _ac_gate.should_extract(message):
+                    _ac_commitments.add_commitment(
+                        message[:500],
+                        kind="deliver",
+                        session_key=str(user_key),
+                        character_id=str(char_id or ""),
+                        due_at=_ac_gate.expires_at().strftime("%Y-%m-%d %H:%M:%S"),
+                        # 契约的 `source_event_id` 在 B-1 列名里叫 `source_turn_id`。
+                        # 2026-11-11 复核修复 L4：取本 tick 刚写入的 proactive
+                        # `agent_msg` 事件 id（record_event 的返回值）回填，回放可据此
+                        # 定位到产生这条承诺的原始主动消息行；事件写失败时为空串。
+                        source_turn_id=_ac_event_id,
+                    )
+            except Exception as _commit_exc:  # noqa: BLE001 —— fail-open
+                logger.warning("[agent_core][step=commitment_extract_skipped] %s", _commit_exc)
             # 2026-10-27 话题状态机 Q3/Q4：发送成功才消费旧计划，并保存本次
             # 决定的下一步（wait=0 → 下一次决策即可见）。投递失败分支不消费、
             # 不覆盖旧计划（保留到 TTL，见下方 else）。
@@ -3128,6 +3365,29 @@ class ProactiveScheduler:
             return
         logger.info("[重要日期] 命中 %s（user=%s），定向发送祝福", names, user_key)
         if self._deliver(message, session_key=user_key, character_id=char_id):
+            # 影子账本（B-1，2026-11-11）：只记长度与角色，**不写节日名/人名**
+            # （避免把画像数据搬进事件库）。零行为：异常只 debug。
+            try:
+                from agent_core import events as _ac_events
+
+                # 确定性去重键（B-2，2026-11-11）：目标日期（today_key=YYYY-MM-DD）
+                # —— 同一会话同一日重复重试祝福 job 不产生第二行。
+                _ac_blessing_dedup = f"proactive_blessing:{user_key}:{today_key}"
+                _ac_events.record_event(
+                    "agent_msg",
+                    session_key=str(user_key),
+                    character_id=str(char_id or ""),
+                    source="scheduler/blessing",
+                    dedupe_key=_ac_blessing_dedup,
+                    payload={
+                        "phase": "blessing_delivered",
+                        "text_len": len(message),
+                        "character_id": str(char_id or ""),
+                        "turn_id": "",
+                    },
+                )
+            except Exception as _agent_exc:  # noqa: BLE001
+                logger.debug("[agent_core][step=hook_blessing_skipped] %s", _agent_exc)
             # A2：add 与 persist 快照的迭代竞态（祝福 job 线程 vs tick worker 的
             # persist）——R10 红测实证 "Set changed size during iteration"，
             # add 落锁后快照恒一致

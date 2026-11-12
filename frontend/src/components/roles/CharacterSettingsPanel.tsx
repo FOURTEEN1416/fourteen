@@ -306,7 +306,7 @@ export default function CharacterSettingsPanel({ characterId, characterName }: {
           <div className="flex items-center justify-between gap-4">
             <p className="text-sm text-gray-700">单次回复拆条上限</p>
             <div className="flex gap-1 p-1 bg-gray-100/60 rounded-xl">
-              {[2, 3, 4].map((cap) => (
+              {[1, 2, 3, 4].map((cap) => (
                 <button
                   key={cap}
                   type="button"

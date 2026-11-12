@@ -160,7 +160,10 @@ def send_proactive_segmented(connector: Any, peer: str, msg: str) -> bool | None
     send = segment_sender(connector)
     if send is None:
         return None
-    from wechat_direct.wechat_connector import split_reply_for_wechat
+    from wechat_direct.wechat_connector import (
+        _speaker_reply_hard_limit,
+        split_reply_for_wechat,
+    )
 
     lock = getattr(connector, "_peer_lock", None)
     session_key = getattr(connector, "_session_key", None)
@@ -170,7 +173,9 @@ def send_proactive_segmented(connector: Any, peer: str, msg: str) -> bool | None
     else:
         accepted = send(peer, msg)
     expected = split_reply_for_wechat(
-        msg, max_segments=_scoped_split_cap(connector, peer)
+        msg,
+        max_segments=_scoped_split_cap(connector, peer),
+        hard_limit=_speaker_reply_hard_limit(),
     )
     return bool(accepted) and accepted == "\n".join(expected)
 

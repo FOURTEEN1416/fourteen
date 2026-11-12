@@ -297,6 +297,30 @@ class ReminderDeliveryTask:
             return fallback
         resolved_name = character_resolver.display_name(character_id) if character_id else ""
         who = f"（你是{resolved_name}）" if resolved_name else ""
+        # 原 generic 任务指令——开关关/人设空时**逐字**保持 2026-11-12 之前口径。
+        generic_system_prompt = (
+            f"你是用户的亲密AI伴侣角色{who}，正在微信上主动发消息提醒用户。"
+            "输出口语化的一句话（不超过40字）。"
+        )
+        system_prompt = generic_system_prompt
+        # B-4（2026-11-12）：提醒线与重要日期线共用同一人设源
+        # （``proactive_context.load_full_persona_hint``，渲染唯一 owner =
+        # ``shisi.application.persona_context``）。仅在开关开且取到人设时前置：
+        # **人设在前、任务指令在后**；失败按空串回落 generic（不阻断提醒）。
+        try:
+            from utils.speaker_switches import speaker_reminder_enabled
+
+            if speaker_reminder_enabled():
+                from proactive.proactive_context import load_full_persona_hint
+
+                persona_hint = load_full_persona_hint(
+                    character_id,
+                    user_key=str(reminder.get("session_key") or ""),
+                ) or ""
+                if persona_hint:
+                    system_prompt = f"{persona_hint}\n\n{generic_system_prompt}"
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[reminder] 人设加载失败，使用通用提示词: %s", e)
         try:
             reply = await asyncio.wait_for(
                 llm.chat(
@@ -304,10 +328,7 @@ class ReminderDeliveryTask:
                         f"设定的提醒到时间了。请用一句符合你口吻的中文提醒用户：{content}。"
                         "只输出这一句话本身，不要解释、不要动作神态、不要换行。"
                     ),
-                    system_prompt=(
-                        f"你是用户的亲密AI伴侣角色{who}，正在微信上主动发消息提醒用户。"
-                        "输出口语化的一句话（不超过40字）。"
-                    ),
+                    system_prompt=system_prompt,
                     temperature=0.7,
                     max_tokens=120,
                 ),

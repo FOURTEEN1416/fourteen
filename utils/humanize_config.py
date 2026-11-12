@@ -77,10 +77,11 @@ DEFAULT_DELAY_MODE = DELAY_MODE_DYNAMIC
 #: 可达，**不可落盘**），故本正则 === 可落盘档位全集，不是连接器可解析档位全集。
 DELAY_MODE_PATTERN = "^(" + "|".join(DELAY_MODES) + ")$"
 
-#: 单次回复拆条上限 —— 2026-10-27 Q6 用户裁决：默认 **3**，可在 2/3/4 之间配置
-#: （「放宽到 3–4 段」；超上限时剩余内容并入最后一条，内容逐字无损）。
+#: 单次回复拆条上限 —— 2026-10-27 Q6 用户裁决：默认 **3**；2026-11-12 B-3 起
+#: 放开 **1**（「永不拆」：整段一条发出）与 2/3/4。超上限时剩余内容并入最后
+#: 一条，内容逐字无损；1 是用户显式选择，不是回落值。
 MAX_SEGMENTS = 3
-SEGMENT_CAP_CHOICES = (2, 3, 4)
+SEGMENT_CAP_CHOICES = (1, 2, 3, 4)
 
 DELAY_MODE_LABELS: dict[str, str] = {
     DELAY_MODE_DYNAMIC: "逐字(按字数)",
@@ -122,7 +123,7 @@ HUMANIZE_FIELDS: tuple[HumanizeField, ...] = (
     HumanizeField("read_delay_channel_cap_ms", "int", 5000, (0, 60000), True, "无typing渠道封顶"),
     HumanizeField("typing_enabled", "bool", True, None, True, "输入状态(typing)"),
     HumanizeField("typo_rate", "int", 0, (0, 100), True, "沉浸式口误概率(%)"),
-    HumanizeField("max_segments", "int", MAX_SEGMENTS, None, True, "单次拆条上限(2/3/4)"),
+    HumanizeField("max_segments", "int", MAX_SEGMENTS, None, True, "单次拆条上限(1/2/3/4，1=永不拆)"),
 )
 
 _FIELD_BY_NAME: dict[str, HumanizeField] = {f.name: f for f in HUMANIZE_FIELDS}
@@ -136,7 +137,7 @@ INT_BOUNDS: dict[str, tuple[int, int]] = {
     if f.type == "int" and f.bounds is not None
 }
 
-#: 可写字段（依序落盘，保证文件形态稳定；``max_segments`` 仅接受 2/3/4）。
+#: 可写字段（依序落盘，保证文件形态稳定；``max_segments`` 仅接受 1/2/3/4）。
 WRITABLE_FIELDS: tuple[str, ...] = tuple(f.name for f in HUMANIZE_FIELDS if f.writable)
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "data" / "scheduler_config.json"
@@ -145,7 +146,7 @@ _HUMANIZE_KEY = "humanize"
 
 @dataclass(frozen=True)
 class HumanizeConfig:
-    """生效中的拟人度配置（值语义；``max_segments`` 取值 2/3/4，见字段表）。"""
+    """生效中的拟人度配置（值语义；``max_segments`` 取值 1/2/3/4，见字段表）。"""
 
     delay_mode: str = DEFAULT_DELAY_MODE
     per_char_ms: int = 45
@@ -214,7 +215,7 @@ def _read_bool(block: dict[str, Any], key: str) -> bool:
 
 
 def _read_segment_cap(block: dict[str, Any]) -> int:
-    """拆条上限（Q6）：只接受 2/3/4；其余（含手改坏值）回落默认 3。"""
+    """拆条上限（Q6 / B-3）：只接受 1/2/3/4；其余（含手改坏值）回落默认 3。"""
     value = block.get("max_segments")
     if isinstance(value, bool) or not isinstance(value, int):
         return MAX_SEGMENTS
