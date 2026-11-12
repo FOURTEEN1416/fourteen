@@ -1059,6 +1059,13 @@ class ProactiveScheduler:
         API worker 里没有调度器（``run_api._ensure_scheduler_singleton`` 把非
         master 的 components['scheduler'] 置 None），手动发送只能落持久命令，
         由 master 执行并回写**真实回执**；``CLAIM_TTL`` 过期自动重投。
+
+        ⚠️ B-4 盘点（2026-11-12）：手动命令线**存在 LLM 生成**——本方法调
+        :meth:`manual_send_now`（见上），后者经 ``ase_engine._generate_and_return``
+        在 ``_generation_mode=='llm'`` 时走 ``_message_generator.generate(use_llm=True)``。
+        因此它**不是**「无发声语义可收编」；本批只做提醒/日期两线的人设统一，
+        手动线留待 Speaker 统一出口批次收编（避免在没有 Speaker 的情况下再造
+        一个半套 prompt 入口）。
         """
         rp = self._plane()
         if rp is None:

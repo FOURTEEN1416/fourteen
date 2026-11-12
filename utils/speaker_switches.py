@@ -1,13 +1,19 @@
-"""主动线开关一致性校验（B-2，2026-11-11）。
+"""发声相关开关的唯一 owner（B-2 2026-11-11 / B-3+B-4 2026-11-12）。
 
-**唯一 owner**：``AGENT_CORE_EVENTS``（影子账本）与 ``SPEAKER_PROACTIVE``
-（主动线上收）两条开关的启动期一致性判定只在这里实现一份。两个挂载点
-（``orchestrator/_init_mixin.initialize`` 与 ``api/app_factory``）都调它，
-**禁止**在调用点各写一份判定（分叉即漂移）。
+**唯一 owner**：本模块集中持有四条开关的读取与语义，调用点禁止各写一份：
+
+- ``AGENT_CORE_EVENTS``（影子账本）与 ``SPEAKER_PROACTIVE``（主动线上收）：
+  启动期一致性判定 + 消费侧入口 :func:`speaker_proactive_enabled`；
+- ``SPEAKER_REPLY``（B-3 主链拆条新语义，:func:`speaker_reply_enabled`）；
+- ``SPEAKER_REMINDER``（B-4 提醒线人设前缀，:func:`speaker_reminder_enabled`）。
+
+两个启动期挂载点（``orchestrator/_init_mixin.initialize`` 与
+``api/app_factory``）都调 ``validate_speaker_switches``，**禁止**在调用点
+各写一份判定（分叉即漂移）。
 
 **语义**（契约冻结）：
 
-- 两条开关**缺省都视为 ``'1'``**（未设置 = 开；空串/纯空白同样按未设置）；
+- 四条开关**缺省都视为 ``'1'``**（未设置 = 开；空串/纯空白同样按未设置）；
   ⚠️ 这是**启动期一致性视图**：``agent_core.events.enabled()`` 的运行期缺省是
   **关**（零 IO 纪律），两者不矛盾——视图只负责「显式关」的自动降级判定，
   部署必须按 ``.env.example`` 显式写 ``AGENT_CORE_EVENTS=1``；
@@ -41,7 +47,7 @@ SPEAKER_ENV = "SPEAKER_PROACTIVE"
 REPLY_ENV = "SPEAKER_REPLY"
 REMINDER_ENV = "SPEAKER_REMINDER"
 
-#: 缺省值：两条开关出厂都开（与 ``agent_core.events`` 的 ``_TRUTHY`` 不同——
+#: 缺省值：四条开关出厂都开（与 ``agent_core.events`` 的 ``_TRUTHY`` 不同——
 #: 那边缺省=关是「写接口首行短路」的历史口径，这里是**启动期一致性视图**，
 #: 缺省按产品意图（开）呈现，避免把「没配」误报成「关」）。
 _DEFAULT_ON = "1"

@@ -16,16 +16,9 @@ from shisi.application import persona_context
 
 logger = logging.getLogger("proactive_context")
 
-# 渲染上限唯一 owner 在 shisi.application.persona_context；此处只保留同名常量
-# 的历史引用，不复制数值定义。
-_PERSONA_HINT_MAX_CHARS = persona_context._PERSONA_HINT_MAX_CHARS
-_MES_EXAMPLE_MAX_CHARS = persona_context._MES_EXAMPLE_MAX_CHARS
-_CREATOR_NOTES_MAX_CHARS = persona_context._CREATOR_NOTES_MAX_CHARS
-
-# B-3b 迁移：渲染实现唯一 owner 在 shisi.application.persona_context。
-# 以下两个名字仅作既有测试直调入场的转发（proactive_context 不再持逻辑副本）。
-_persona_from_card = persona_context._persona_from_card
-_persona_from_yaml = persona_context._persona_from_yaml
+# B-3b 迁移：渲染实现与上限常量的唯一 owner 均在
+# ``shisi.application.persona_context``；本模块不再保留任何同名别名
+# （防止未来误从 proactive_context 直调而绕过真源）。
 
 
 def load_full_persona_hint(character_id: str, user_key: str | None = None) -> str:

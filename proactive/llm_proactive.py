@@ -1383,73 +1383,16 @@ def decide_proactive(
 
 
 def load_persona_hint(character_id: str = "") -> str:
-    """加载角色人设摘要供主动决策使用。
+    """兼容适配器（2026-11-12 B-3b 清理）：渲染唯一 owner = persona_context。
 
-    2026-09-22：`default`（内置十四）此前查 `config/characters/default.json`
-    必 miss → 主动决策人设恒空。现 default 走 `config/persona.yaml`，
-    与 `PersonaService._builtin_character_card` 同源。
-
-    ⚠️ 2026-10-15：本函数是 400+200 裁剪版（旧口径），**新代码应走
-    `proactive/proactive_context.py::load_full_persona_hint`**（完整版，
-    含【回复示例】【通用禁令】）。保留本函数是因 scheduler 与既有测试仍在
-    消费，两包合流后由主控终审统一切换。
+    旧 400+200 裁剪版已退役——它曾独立裁 description/speaking_style，与完整版
+    人设的上限/剥离规则分叉。保留本函数仅因既有测试与 ImportError 回退仍按名
+    导入；新代码一律走 ``proactive_context.load_full_persona_hint``。
     """
     try:
-        import json as _json
-        from pathlib import Path
+        from shisi.application.persona_context import render_persona_hint
 
-        from utils.project_paths import project_path
-
-        cid = (character_id or "").strip()
-        if not cid:
-            return ""
-
-        # 内置十四：persona.yaml（与 Chat 路径同源）
-        if cid in ("default", "demo"):
-            py = Path(project_path("config", "persona.yaml"))
-            if py.exists():
-                name = "十四"
-                desc_lines: list[str] = []
-                in_desc = False
-                for line in py.read_text(encoding="utf-8").splitlines():
-                    s = line.rstrip()
-                    # YAML 键值切分用 partition —— 不得写 split(":", 1)
-                    # （静态门禁把该形态一律视为会话键 owner 手写拆分）
-                    if not in_desc and s.startswith("name:"):
-                        name = s.partition(":")[2].strip().strip("'\"") or name
-                    elif s.startswith("description:"):
-                        in_desc = True
-                        rest = s.partition(":")[2].strip()
-                        if rest and rest not in ("|", ">"):
-                            desc_lines.append(rest.strip("'\""))
-                    elif in_desc:
-                        if s and not s[0].isspace() and ":" in s and not s.lstrip().startswith("#"):
-                            in_desc = False
-                        else:
-                            desc_lines.append(s)
-                desc = "\n".join(desc_lines).strip()[:400]
-                if desc:
-                    return f"角色：{name}\n{desc}".strip()
-                return f"角色：{name}"
-
-        root = Path(project_path("config", "characters"))
-        p = root / f"{cid}.json"
-        if not p.exists() and root.exists():
-            for f in root.glob("*.json"):
-                try:
-                    d = _json.loads(f.read_text(encoding="utf-8"))
-                    if str(d.get("id") or "") == cid or str(d.get("name") or "") == cid:
-                        p = f
-                        break
-                except Exception:  # noqa: BLE001
-                    continue
-        if not p.exists():
-            return ""
-        d = _json.loads(p.read_text(encoding="utf-8"))
-        name = str(d.get("name") or cid)
-        desc = str(d.get("description") or d.get("personality_text") or "")[:400]
-        style = str(d.get("speaking_style") or d.get("personality") or "")[:200]
-        return f"角色：{name}\n{desc}\n说话风格：{style}".strip()
+        return render_persona_hint(str(character_id or "").strip())
     except Exception as e:  # noqa: BLE001
         logger.debug("load_persona_hint failed: %s", e)
         return ""

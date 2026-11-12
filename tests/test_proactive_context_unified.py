@@ -26,6 +26,7 @@ from proactive.proactive_context import (
     immersive_proactive_constraints,
     load_full_persona_hint,
 )
+from shisi.application import persona_context
 
 _CHAR_ROOT = Path(__file__).resolve().parent.parent / "config" / "characters"
 
@@ -288,7 +289,6 @@ def _section(hint: str, title: str) -> str:
 
 def test_persona_hint_strips_stage_directions_in_immersive(monkeypatch, tmp_path):
     """沉浸式：示例/规则段（【回复示例】【扮演规则】）无括号动作。"""
-    from proactive import proactive_context as pctx
 
     _write_card(
         tmp_path, "cid-imm",
@@ -299,7 +299,7 @@ def test_persona_hint_strips_stage_directions_in_immersive(monkeypatch, tmp_path
         creator_notes="（微笑）保持傲娇；不许客服腔。",
     )
     _force_mode(monkeypatch, "immersive")
-    hint = pctx._persona_from_card(tmp_path, "cid-imm")
+    hint = persona_context._persona_from_card(tmp_path, "cid-imm")
 
     assert hint, "人设不得为空"
     assert not _STAGE_RE.search(_section(hint, "【回复示例】")), (
@@ -319,7 +319,6 @@ def test_persona_hint_keeps_role_definition_segments(monkeypatch, tmp_path):
     实测卡文这两段的括号绝大多数是规则限定语而非动作（李信「（优先级从高到低，
     不可越级违背）」、上杉绘梨衣「（凌驾于所有规则之上…）」），剥掉等于扣角色规则。
     """
-    from proactive import proactive_context as pctx
 
     _write_card(
         tmp_path, "cid-def",
@@ -328,7 +327,7 @@ def test_persona_hint_keeps_role_definition_segments(monkeypatch, tmp_path):
         mes_example="（想了想）早呀。",
     )
     _force_mode(monkeypatch, "immersive")
-    hint = pctx._persona_from_card(tmp_path, "cid-def")
+    hint = persona_context._persona_from_card(tmp_path, "cid-def")
 
     assert "（优先级从高到低，不可越级违背）" in hint, "角色设定段的规则限定语不得被剥"
     assert "（强制不可修改）" in hint, "性格段的规则限定语不得被剥"
@@ -336,7 +335,6 @@ def test_persona_hint_keeps_role_definition_segments(monkeypatch, tmp_path):
 
 def test_persona_hint_keeps_stage_directions_in_novel(monkeypatch, tmp_path):
     """小说式：括号动作是设计的一部分，示例/规则段原样保留（不误伤）。"""
-    from proactive import proactive_context as pctx
 
     _write_card(
         tmp_path, "cid-novel",
@@ -345,7 +343,7 @@ def test_persona_hint_keeps_stage_directions_in_novel(monkeypatch, tmp_path):
         creator_notes="（微笑）保持傲娇。",
     )
     _force_mode(monkeypatch, "novel")
-    hint = pctx._persona_from_card(tmp_path, "cid-novel")
+    hint = persona_context._persona_from_card(tmp_path, "cid-novel")
 
     assert "（她站在窗边）" in hint
     assert "（想了想）" in hint, "小说式不得剥 mes_example 括号"
@@ -354,7 +352,6 @@ def test_persona_hint_keeps_stage_directions_in_novel(monkeypatch, tmp_path):
 
 def test_persona_hint_empty_segment_removed_not_empty_title(monkeypatch, tmp_path):
     """沉浸式剥空 → 该段**不注入**，而非留一个空标题行。"""
-    from proactive import proactive_context as pctx
 
     _write_card(
         tmp_path, "cid-empty",
@@ -363,7 +360,7 @@ def test_persona_hint_empty_segment_removed_not_empty_title(monkeypatch, tmp_pat
         creator_notes="（微笑）",            # 整段都是动作 → 剥空
     )
     _force_mode(monkeypatch, "immersive")
-    hint = pctx._persona_from_card(tmp_path, "cid-empty")
+    hint = persona_context._persona_from_card(tmp_path, "cid-empty")
 
     assert "【回复示例】" not in hint, "剥空段不得留空标题（【回复示例】）"
     assert "【扮演规则】" not in hint, "剥空段不得留空标题（【扮演规则】）"
@@ -372,7 +369,6 @@ def test_persona_hint_empty_segment_removed_not_empty_title(monkeypatch, tmp_pat
 
 def test_persona_hint_yaml_branch_mode_boundary(monkeypatch, tmp_path):
     """yaml 分支（内置十四）同样按模式剥：description + 通用禁令段。"""
-    from proactive import proactive_context as pctx
 
     yml = tmp_path / "persona.yaml"
     yml.write_text(
@@ -385,13 +381,13 @@ def test_persona_hint_yaml_branch_mode_boundary(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     _force_mode(monkeypatch, "immersive")
-    hint_imm = pctx._persona_from_yaml(yml)
+    hint_imm = persona_context._persona_from_yaml(yml)
     assert not _STAGE_RE.search(hint_imm), f"沉浸式 yaml 人设仍含括号: {hint_imm!r}"
     assert "傲娇的十四" in hint_imm and "通用禁令" in hint_imm
     assert "不许客服腔" in hint_imm
 
     _force_mode(monkeypatch, "novel")
-    hint_novel = pctx._persona_from_yaml(yml)
+    hint_novel = persona_context._persona_from_yaml(yml)
     assert "（她抱着猫）" in hint_novel and "（最高优先级）" in hint_novel
 
 

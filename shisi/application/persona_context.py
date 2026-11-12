@@ -25,6 +25,27 @@ _MES_EXAMPLE_MAX_CHARS = 600
 _CREATOR_NOTES_MAX_CHARS = 400
 
 
+def _characters_dir(root: Path | None) -> Path:
+    """卡库目录（root 显式给出时优先；否则读项目真源）。"""
+    if root is not None:
+        return Path(root)
+    # 函数内导入：保留既有测试对 project_path 的 monkeypatch 语义。
+    from utils.project_paths import project_path
+
+    return Path(project_path("config", "characters"))
+
+
+def _read_card_json(path: Path | None) -> dict | None:
+    """读一张卡；不可读/非法 JSON/非 dict 一律 None（不抛）。"""
+    if path is None:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def resolve_card_path(
     character_id: str,
     *,
@@ -44,14 +65,7 @@ def resolve_card_path(
         命中文件路径；未命中返回 None。
     """
     cid = str(character_id or "")
-    if root is None:
-        # 函数内导入：保留既有测试对 ``utils.project_paths.project_path`` 的
-        # monkeypatch 语义（模块级绑定会让补丁失效）。
-        from utils.project_paths import project_path
-
-        base = Path(project_path("config", "characters"))
-    else:
-        base = Path(root)
+    base = _characters_dir(root)
 
     direct_path = base / f"{cid}.json"
     if direct_path.exists():
@@ -83,25 +97,49 @@ def load_raw_card(
     *,
     match_name: bool = False,
     root: Path | None = None,
+    path: Path | None = None,
+    fallback_on_invalid: bool = False,
 ) -> tuple[dict | None, Path | None]:
     """读取角色卡原始 JSON（不展平、不清洗）。
 
-    解析失败/文件不可读/顶层不是对象时返回 ``(None, None)``，**不抛**——
-    调用方（persona_service）据此走既有「缺卡返回 None」路径。
+    Args:
+        path: 已定位的文件路径；给出时跳过 ``resolve_card_path``（persona_service
+            用它避免同一次加载扫两遍目录）。
+        fallback_on_invalid: 指定文件解析失败时，是否继续遍历目录按 id/name
+            找下一张可用卡。persona_service 传 True 以保持旧实现「同名文件损坏
+            仍按内部 id 兜底」的语义；proactive 渲染保持 False（与迁移前一致）。
 
     Returns:
         ``(原始卡片字典, 命中文件路径)``；未找到时两者均为 None。
     """
-    path = resolve_card_path(character_id, match_name=match_name, root=root)
-    if path is None:
+    target = Path(path) if path is not None else resolve_card_path(
+        character_id, match_name=match_name, root=root,
+    )
+    data = _read_card_json(target)
+    if data is not None:
+        return data, target
+    if not fallback_on_invalid:
+        return None, None
+
+    cid = str(character_id or "")
+    base = _characters_dir(root)
+    if not base.exists():
         return None, None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        candidates = sorted(base.glob("*.json"))
+    except OSError:
         return None, None
-    if not isinstance(data, dict):
-        return None, None
-    return data, path
+    for f in candidates:
+        if target is not None and f == target:
+            continue
+        candidate = _read_card_json(f)
+        if candidate is None:
+            continue
+        if str(candidate.get("id") or "") == cid:
+            return candidate, f
+        if match_name and str(candidate.get("name") or "") == cid:
+            return candidate, f
+    return None, None
 
 
 def strip_stage_directions_if_immersive(

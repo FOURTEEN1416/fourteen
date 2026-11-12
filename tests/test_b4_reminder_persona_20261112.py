@@ -177,6 +177,26 @@ def test_switch_off_keeps_generic_prompt_verbatim(
     assert calls == [], "开关关时不应读取人设"
 
 
+def test_switch_off_keeps_generic_prompt_with_nonempty_character(
+    clean_reminder_env, fixed_reply_mode,
+):
+    """生产形态：character_id 非空时，开关关仍保留 who=「（你是{name}）」变体。"""
+    clean_reminder_env.setenv(REMINDER_ENV, "0")
+    from proactive import reminder_delivery as rd_mod
+
+    fixed_reply_mode.setattr(
+        rd_mod.character_resolver, "display_name", lambda cid: "测试角色",
+    )
+    llm = _CapturingLLM()
+    _compose(_task(llm), character_id="charB4")
+
+    expected = (
+        "你是用户的亲密AI伴侣角色（你是测试角色），正在微信上主动发消息提醒用户。"
+        "输出口语化的一句话（不超过40字）。"
+    )
+    assert llm.calls[0]["system_prompt"] == expected
+
+
 def test_empty_persona_falls_back_to_generic(
     clean_reminder_env, fixed_reply_mode,
 ):

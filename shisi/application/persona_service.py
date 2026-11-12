@@ -686,10 +686,15 @@ class PersonaService:
             except OSError:
                 mtime = 0.0
 
-        # 读 JSON：解析失败/不可读返回 (None, None)，与旧实现「缺卡不抛」一致。
+        # 读 JSON：复用已定位的 path（不再二次扫目录）；同名文件损坏时继续按
+        # 内部 id 兜底（fallback_on_invalid=True，保持旧实现语义）。
         raw_card: dict[str, Any] | None
         raw_card, _matched = persona_context.load_raw_card(
-            character_id, match_name=False, root=chars_dir,
+            character_id,
+            match_name=False,
+            root=chars_dir,
+            path=matched_path,
+            fallback_on_invalid=True,
         )
 
         # 展平 SillyTavern 等嵌套格式，确保 name/description/personality 等字段可用

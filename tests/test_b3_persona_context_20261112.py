@@ -208,3 +208,21 @@ def test_persona_service_loads_card_via_persona_context(tmp_path, monkeypatch):
     # 文件名直查命中 mtime>0 才命中缓存；内部 id 匹配路径每轮重读）
     again = service._load_character_card("svc-id")
     assert again is not None and again["id"] == "svc-id" and again["name"] == "服务卡角色"
+
+
+def test_persona_service_corrupt_direct_file_falls_back_to_id(tmp_path, monkeypatch):
+    """旧语义：同名文件损坏时，persona_service 仍按内部 id 找下一张可用卡。"""
+    from shisi.application.persona_service import PersonaService
+
+    (tmp_path / "broken-id.json").write_text("{not json", encoding="utf-8")
+    _write_card(tmp_path, "other.json", id="broken-id", name="兜底卡", description="兜底描述。")
+    _patch_card_root(monkeypatch, tmp_path)
+
+    service = object.__new__(PersonaService)
+    service._card_cache = {}
+    service._card_cache_max = 64
+
+    card = service._load_character_card("broken-id")
+    assert card is not None, "同名文件损坏时必须继续按内部 id 兜底（旧实现语义）"
+    assert card["id"] == "broken-id"
+    assert card["name"] == "兜底卡"
