@@ -353,11 +353,22 @@ def test_send_date_wish_uses_bound_persona(monkeypatch):
         gf=SimpleNamespace(get_user_character=lambda uk: "default")
     ))
     hints: list[str] = []
-    # 2026-10-15 统一真源：祝福润色已切 proactive_context 完整版人设
+    # 2026-11-12 复核修复：显式打开 Speaker；新旧人设源返回不同哨兵，
+    # 若 Speaker 路径未执行而回退旧路径，断言必红。
+    monkeypatch.setenv("SPEAKER_REMINDER", "1")
+    import shisi.application.persona_context as pc_mod
+
+    old_calls: list[str] = []
     monkeypatch.setattr(
         pctx_mod, "load_full_persona_hint",
-        lambda cid="": (hints.append(str(cid)), "昭阳人设")[1],
+        lambda cid="", user_key=None: old_calls.append(str(cid)) or "OLD-PATH-PERSONA",
     )
+
+    def _persona(cid, user_key=None):
+        hints.append(str(cid))
+        return "昭阳人设"
+
+    monkeypatch.setattr(pc_mod, "render_persona_hint", _persona)
     seen: dict[str, str] = {}
 
     class _LLM:
@@ -370,7 +381,7 @@ def test_send_date_wish_uses_bound_persona(monkeypatch):
     delivered: list[str] = []
     monkeypatch.setattr(
         s, "_deliver",
-        lambda msg, session_key=None, character_id=None: delivered.append(msg) or True,
+        lambda msg, session_key=None, character_id=None, **kwargs: delivered.append(msg) or True,
     )
 
     s._send_date_wish(
@@ -378,7 +389,11 @@ def test_send_date_wish_uses_bound_persona(monkeypatch):
     )
 
     assert hints == ["昭阳"], f"hub 键自选角色后缀必须优先于 default，实得 {hints}"
-    assert seen.get("system") == "昭阳人设", "人设必须进 LLM system_prompt"
+    assert old_calls == [], "Speaker 开时不得再走旧 load_full_persona_hint"
+    # 2026-11-12 Speaker 第 1 刀：system_prompt 变为「人设 → 能力 → 话题 → base」，
+    # base 仍是人设原文；人设必须在场（能力/话题段可另行追加）。
+    assert "昭阳人设" in seen.get("system", ""), "人设必须进 LLM system_prompt"
+    assert "OLD-PATH-PERSONA" not in seen.get("system", "")
     assert delivered == ["生日快乐呀，今天属于你。"]
     assert any("birthday" in k for k in s._important_dates_sent), "送达后当日幂等必须记录"
 

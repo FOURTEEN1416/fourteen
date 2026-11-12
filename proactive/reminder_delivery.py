@@ -141,6 +141,17 @@ class ReminderDeliveryTask:
                 return
         character_id = self._resolve_character_id(session_key)
         text = await self._compose_text(reminder, character_id=character_id)
+        # 2026-11-12 复核修复：终审把兜底文案整段剥空时不得再发原文——
+        # 空文案按本轮未送达处理（计入失败配额，3 次判死），绝不绕过守卫。
+        if not str(text or "").strip():
+            logger.warning(
+                "[reminder] 文案终审为空，本轮不投递 id=%s session=%s",
+                reminder.get("id"), session_key,
+            )
+            await asyncio.to_thread(
+                self._sm.mark_reminder_result, reminder.get("id"), False,
+            )
+            return
         try:
             if self._plane is not None:
                 # 块3：投递经控制面 outbox —— 通道宿主可能在别的 worker（scheduler
@@ -170,6 +181,30 @@ class ReminderDeliveryTask:
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.warning("[reminder] 回写历史失败 session=%s: %s", session_key, e)
+            # Speaker 第 1 刀（2026-11-12）：补齐提醒线缺失的影子账本
+            # ``agent_msg``（盘点 gaps #1）。chat_history 已在上面由既有
+            # ``record_outbound_message`` 写过，故 Speaker 不注入 memory，
+            # 只写 agent_core 事件，避免同一行双写。失败不影响提醒状态。
+            if session_key:
+                try:
+                    from speaker import DeliveryResult, Speaker, UtteranceIntent
+
+                    speaker = Speaker()
+                    await asyncio.to_thread(
+                        speaker.record,
+                        UtteranceIntent("reminder", session_key, character_id),
+                        text,
+                        DeliveryResult(
+                            accepted=True,
+                            accepted_text=text,
+                            segments=(text,),
+                            channel="reminder",
+                        ),
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "[reminder] 影子账本写入失败 session=%s: %s", session_key, e,
+                    )
             logger.info(
                 "[reminder] 已投递 id=%s session=%s content=%.40s",
                 reminder.get("id"), session_key, reminder.get("content", ""),
@@ -283,19 +318,35 @@ class ReminderDeliveryTask:
         return character_resolver.resolve_character_id(session_key, gf)
 
     async def _compose_text(self, reminder: dict[str, Any], *, character_id: str) -> str:
-        """按固定身份生成；降级时明确引用用户设定的任务，不冒充角色自述。"""
+        """按固定身份生成；降级时明确引用用户设定的任务，不冒充角色自述。
+
+        2026-11-12 Speaker 第 1 刀：系统提示词统一由
+        ``Speaker.build_system_prompt`` 拼装（人设 → 能力 → 话题 → 原 generic
+        任务指令）；``SPEAKER_REMINDER=0`` 时逐字保留旧 generic 文案（一行回滚）。
+        """
         content = str(reminder.get("content") or "").strip()
         fallback = f"你设定的提醒时间到了：「{content}」。" if content else "你设定的提醒时间到了。"
+        session_key = str(reminder.get("session_key") or "")
+        resolved_name = character_resolver.display_name(character_id) if character_id else ""
         llm = self._llm
         if self._llm_resolver is not None:
             try:
-                llm = await self._llm_resolver(str(reminder.get("session_key") or ""))
+                llm = await self._llm_resolver(session_key)
             except Exception:
                 logger.warning("提醒模型凭证不可用，使用无模型引用文案")
-                return fallback
+                return self._guard_fallback(
+                    fallback,
+                    session_key=session_key,
+                    character_id=character_id,
+                    resolved_name=resolved_name,
+                )
         if llm is None:
-            return fallback
-        resolved_name = character_resolver.display_name(character_id) if character_id else ""
+            return self._guard_fallback(
+                fallback,
+                session_key=session_key,
+                character_id=character_id,
+                resolved_name=resolved_name,
+            )
         who = f"（你是{resolved_name}）" if resolved_name else ""
         # 原 generic 任务指令——开关关/人设空时**逐字**保持 2026-11-12 之前口径。
         generic_system_prompt = (
@@ -303,24 +354,21 @@ class ReminderDeliveryTask:
             "输出口语化的一句话（不超过40字）。"
         )
         system_prompt = generic_system_prompt
-        # B-4（2026-11-12）：提醒线与重要日期线共用同一人设源
-        # （``proactive_context.load_full_persona_hint``，渲染唯一 owner =
-        # ``shisi.application.persona_context``）。仅在开关开且取到人设时前置：
-        # **人设在前、任务指令在后**；失败按空串回落 generic（不阻断提醒）。
+        # Speaker 统一出口：人设/能力/话题三段由核心件统一拼装，提醒线不再
+        # 自己读人设源（防止与日期线出现两套提示词口径）。
         try:
             from utils.speaker_switches import speaker_reminder_enabled
 
             if speaker_reminder_enabled():
-                from proactive.proactive_context import load_full_persona_hint
+                from speaker import Speaker, UtteranceIntent
 
-                persona_hint = load_full_persona_hint(
-                    character_id,
-                    user_key=str(reminder.get("session_key") or ""),
-                ) or ""
-                if persona_hint:
-                    system_prompt = f"{persona_hint}\n\n{generic_system_prompt}"
+                system_prompt = Speaker().build_system_prompt(
+                    UtteranceIntent("reminder", session_key, character_id),
+                    base=generic_system_prompt,
+                )
         except Exception as e:  # noqa: BLE001
-            logger.debug("[reminder] 人设加载失败，使用通用提示词: %s", e)
+            logger.debug("[reminder] Speaker 提示词构造失败，使用通用提示词: %s", e)
+            system_prompt = generic_system_prompt
         try:
             reply = await asyncio.wait_for(
                 llm.chat(
@@ -336,7 +384,12 @@ class ReminderDeliveryTask:
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("[reminder] 文案生成失败，引用用户任务兜底: %s", e)
-            return fallback
+            return self._guard_fallback(
+                fallback,
+                session_key=session_key,
+                character_id=character_id,
+                resolved_name=resolved_name,
+            )
         cleaned = sanitize_message(str(reply or "").strip())
         # 2026-10-16 出站终审补齐：提醒线与主链/主动链共用 terminal_reply_guard
         # （错误哨兵/表情复读/退化回复/系统标记回显/非法称呼全类）——此前提醒
@@ -350,14 +403,56 @@ class ReminderDeliveryTask:
             cleaned,
             user_msg="",
             character_name=str(resolved_name or ""),
-            session_key=str(reminder.get("session_key") or ""),
+            session_key=session_key,
             character_id=str(character_id or ""),
             reply_mode=read_reply_mode(
-                str(reminder.get("session_key") or "") or None,
+                session_key or None,
                 str(character_id or "") or None,
             ),
         )
-        return guarded or fallback
+        # 终审剥空时兜底文案同样要过守卫（旧实现 `guarded or fallback` 让
+        # fallback 绕过守卫矩阵）。
+        return guarded or self._guard_fallback(
+            fallback,
+            session_key=session_key,
+            character_id=character_id,
+            resolved_name=resolved_name,
+        )
+
+    def _guard_fallback(
+        self,
+        fallback: str,
+        *,
+        session_key: str,
+        character_id: str,
+        resolved_name: str,
+    ) -> str:
+        """兜底文案过出站终审；剥空或守卫异常都返回空串（不投递）。
+
+        绝不按原文返回——异常路径同样不得绕过守卫矩阵。
+        """
+        try:
+            from utils.prompt_sanitize import terminal_reply_guard
+
+            guarded = terminal_reply_guard(
+                fallback,
+                user_msg="",
+                character_name=str(resolved_name or ""),
+                session_key=str(session_key or ""),
+                character_id=str(character_id or ""),
+                reply_mode=read_reply_mode(
+                    str(session_key or "") or None,
+                    str(character_id or "") or None,
+                ),
+            )
+            if not guarded:
+                logger.warning("[reminder] 兜底文案被终审剥空，不发送")
+            return guarded
+        except Exception as e:  # noqa: BLE001
+            # 2026-11-12 复核修复：终审器异常时返回空串（不投递），
+            # 不能按原文返回——异常路径同样不得绕过守卫。
+            logger.warning("[reminder] 兜底文案终审异常，不发送: %s", e)
+            return ""
 
     async def _maybe_gc_intents(self) -> None:
         """节流清理过期澄清任务（失败不影响投递主流程）。

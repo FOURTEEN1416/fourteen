@@ -1061,7 +1061,7 @@ def test_engine_level_override_is_idempotent(scope_sched):
     assert len(hub.get(keys[0]).apply_calls) == 1, "每 tick 重复下发会把该用户的日配额永远清零"
 
 
-def test_reset_snapshot_reverts_engine_to_global(scope_sched):
+def test_reset_snapshot_reverts_engine_to_global(scope_sched, monkeypatch):
     """清除设置（DELETE my-settings）后，已加载引擎必须回落到**全局**值。
 
     2026-11-08：墓碑机制随 per-user 层退役。快照语义下 `character_settings.reset`
@@ -1070,6 +1070,9 @@ def test_reset_snapshot_reverts_engine_to_global(scope_sched):
     from utils import character_settings
 
     sched, hub, keys, _events, _spy = scope_sched
+    # 时钟无关：reset 删掉快照后按默认 23-7，夜间跑用例会先被静默闸短路，
+    # 引擎回滚永不发生。本用例只验回滚，不验静默。
+    monkeypatch.setattr(sched, "_is_quiet_hours_for", lambda cfg: False)
     character_settings.write(
         keys[0], "card-1", {"threshold": 9.0, "min_interval_minutes": 90},
     )
@@ -1088,7 +1091,7 @@ def test_reset_snapshot_reverts_engine_to_global(scope_sched):
     )
 
 
-def test_delete_then_repause_reverts_engine_and_keeps_new_setting(scope_sched):
+def test_delete_then_repause_reverts_engine_and_keeps_new_setting(scope_sched, monkeypatch):
     """DELETE → 重新设 paused：新设置必须存活，恢复后引擎回滚到全局。
 
     旧实现（墓碑 + 整行 purge）会把刚写的 paused 一起删掉 —— 用户看到
@@ -1101,6 +1104,7 @@ def test_delete_then_repause_reverts_engine_and_keeps_new_setting(scope_sched):
     from utils import character_settings
 
     sched, hub, keys, events, _spy = scope_sched
+    monkeypatch.setattr(sched, "_is_quiet_hours_for", lambda cfg: False)
     character_settings.write(
         keys[0], "card-1", {"threshold": 9.0, "max_daily_messages": 3},
     )
@@ -1123,11 +1127,12 @@ def test_delete_then_repause_reverts_engine_and_keeps_new_setting(scope_sched):
     assert (eng._urgency_threshold, eng._max_daily_messages) == (2.0, 8), "引擎没回滚"
 
 
-def test_reset_snapshot_revert_is_idempotent(scope_sched):
+def test_reset_snapshot_revert_is_idempotent(scope_sched, monkeypatch):
     """回滚后再跑一拍不得重复下发（重复下发 = 重建控制器、日配额归零）。"""
     from utils import character_settings
 
     sched, hub, keys, _events, _spy = scope_sched
+    monkeypatch.setattr(sched, "_is_quiet_hours_for", lambda cfg: False)
     character_settings.write(keys[0], "card-1", {"threshold": 9.0})
     _tick(sched)
     character_settings.reset(keys[0], "card-1")

@@ -640,6 +640,10 @@ def annotate_history_time_gaps(
 OUTBOUND_CHANNEL_MARKERS = {
     "proactive": "[主动]",      # 定时主动关怀（scheduler LLM 决策链投递）
     "reminder": "[定时提醒]",   # 到期提醒投递（reminder_delivery）
+    # 2026-11-12 B1 终审修复：日期祝福/手动自测也是「非回应用户消息」的出站，
+    # 必须与真实主动同标，否则模型会把它们误当成对上一条用户消息的回复。
+    "important_date": "[重要日期]",
+    "manual": "[主动]",
 }
 
 

@@ -227,15 +227,31 @@ def test_date_wish_cancels_character_change_without_dedup(monkeypatch):
     from types import SimpleNamespace
 
     from proactive import proactive_context as pctx
+    from shisi.application import persona_context
 
     s = _scheduler()
     current = ["charA"]
     monkeypatch.setattr(s, "_resolve_character_id", lambda sk: current[0])
-    # 2026-10-15 统一真源：祝福润色已切 proactive_context 完整版人设
-    monkeypatch.setattr(pctx, "load_full_persona_hint", lambda cid, user_key=None: cid)
+    # 2026-11-12 复核修复：显式打开 Speaker，且新旧两条人设源返回**不同**
+    # 哨兵——若 Speaker 路径未执行而回退旧路径，断言会立刻抓到。
+    monkeypatch.setenv("SPEAKER_REMINDER", "1")
+    old_calls: list[str] = []
+    monkeypatch.setattr(
+        pctx, "load_full_persona_hint",
+        lambda cid, user_key=None: old_calls.append(str(cid)) or "OLD-PATH-PERSONA",
+    )
+    persona_calls: list[tuple[str, str | None]] = []
+
+    def _persona(cid, user_key=None):
+        persona_calls.append((str(cid), user_key))
+        return "charA"
+
+    monkeypatch.setattr(persona_context, "render_persona_hint", _persona)
 
     def generate(**kw):
-        assert kw["system_prompt"] == "charA"
+        # 本用例只关心角色快照未被旧草稿污染 + 新路径确实生效。
+        assert "charA" in kw["system_prompt"]
+        assert "OLD-PATH-PERSONA" not in kw["system_prompt"]
         current[0] = "charB"
         return "生日快乐呀"
 
@@ -243,6 +259,8 @@ def test_date_wish_cancels_character_change_without_dedup(monkeypatch):
     monkeypatch.setattr(s, "_deliver", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("不应发送")))
     s._send_date_wish(SESSION, "2026-09-26", label="生日", kind="birthday", names="生日")
     assert not s._important_dates_sent
+    assert old_calls == [], "Speaker 开时不得再走旧 load_full_persona_hint"
+    assert persona_calls == [("charA", SESSION)]
 
 
 def test_scheduler_deliver_no_record_when_not_delivered(tmp_path, monkeypatch):

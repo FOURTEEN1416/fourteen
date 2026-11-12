@@ -494,13 +494,27 @@ class _ManualEngine:
     def _select_type_by_urgency(self):
         return "morning"
 
-    def _generate_and_return(self, msg_type):
-        self._daily_message_count += 1
-        return {"message": self._message, "type": str(getattr(msg_type, "value", msg_type))}
+    def _generate_and_return(self, msg_type, commit: bool = True):
+        if commit:
+            self._daily_message_count += 1
+        result = {"message": self._message, "type": str(getattr(msg_type, "value", msg_type))}
+        if commit:
+            result["_committed"] = True
+        return result
 
-    def _record_and_return(self, scene):
+    def _record_and_return(self, scene, commit: bool = True):
+        if commit:
+            self._daily_message_count += 1
+        result = {"message": self._message, "type": str(scene)}
+        if commit:
+            result["_committed"] = True
+        return result
+
+    def commit_sent(self, result: dict) -> None:
+        if not result or result.get("_committed"):
+            return
+        result["_committed"] = True
         self._daily_message_count += 1
-        return {"message": self._message, "type": str(scene)}
 
     def record_sent_entry(self, entry: dict) -> None:
         self.sent_history.append(entry)
@@ -512,6 +526,8 @@ def _mk_scheduler(monkeypatch, *, delivered: list[str] | None = None):
     sched = ProactiveScheduler()
     sched._is_quiet_hours = lambda: False
     sched._is_quiet_hours_for = lambda cfg: False
+    # 2026-11-12 B2：手动脉走 per-session 窗口；本用例只关心账本。
+    sched._quiet_hours_for_session = lambda *a, **k: (0, 0)
     sched._resolve_character_id = lambda sk: CHARACTER
     calls = delivered if delivered is not None else []
 
@@ -537,7 +553,9 @@ def test_scheduler_manual_send_records_proactive(tmp_path, monkeypatch):
     assert len(rows) == 1, f"手动发送每轮恰 1 条，实得 {len(rows)}"
     payload = _payload(rows[0])
     assert payload["phase"] == "proactive_delivered"
-    assert payload["channel"] == "proactive"
+    # 2026-11-12 B1：chat_history 与 agent_msg 同记 manual，不再一条 manual
+    # 一条 proactive。
+    assert payload["channel"] == "manual"
     assert payload["text_len"] == 3
     assert payload["character_id"] == CHARACTER
     assert rows[0]["source"] == "scheduler/manual"

@@ -20,7 +20,7 @@ from collections import OrderedDict
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import requests
@@ -29,6 +29,9 @@ from utils.humanize_config import DELAY_MODES
 from utils.humanize_config import MAX_SEGMENTS as _SPLIT_MAX_SEGMENTS
 from utils.local_time import now_local
 from wechat_direct.media_upload import DEFAULT_CDN_BASE_URL
+
+if TYPE_CHECKING:  # 仅类型检查：运行时 Speaker 必须方法内局部 import（反向依赖）
+    from speaker.types import DeliveryResult
 
 logger = logging.getLogger("wechat_direct")
 
@@ -1987,8 +1990,11 @@ class WeChatConnector:
         的唯一真源** ``utils.humanize_delivery.direct_send_proactive`` —— 生产
         为 uvicorn 4 worker，run_api 的定向分支只入队并等回执，**真实发送点
         就在本方法**；此前本方法直调 ``send_text``，`humanize.proactive_split`
-        开启后定向主动投递仍整段直发（功能开了不生效）。``reminder`` 等其它
-        kind 不属「主动消息拆条」语义，路径不动。
+        开启后定向主动投递仍整段直发（功能开了不生效）。
+        A2（2026-11-12）控制面 kind 归一：``proactive`` / ``important_date`` /
+        ``manual`` / ``reminder`` 四条出站线**统一**走同一真源；开关关闭
+        （默认）时 ``direct_send_proactive`` 逐字回落 ``send_text``，四条线
+        行为不变。其它未知 kind 仍走 ``send_text``。
         默认（``proactive_split=False``/配置不可读）逐字回落 ``send_text``，
         本行行为不变。
         """
@@ -2030,16 +2036,60 @@ class WeChatConnector:
             kind = str(row.get("kind") or "")
             ok = False
             try:
-                # 拆条链可达性（补全，见上方 docstring）：kind=proactive 经
-                # 两个投递点共用的唯一真源 `utils.humanize_delivery.direct_send_proactive`
-                # —— 默认（proactive_split=False / 配置不可读）逐字回落
-                # `send_text`（零行为变更）；开启且连接器支持拆条时才走
-                # 「拆条 + 段间节奏」。reminder 等其它 kind 不属主动拆条语义，
-                # 路径不动（即便开关开启）。
-                if kind == "proactive":
-                    from utils.humanize_delivery import direct_send_proactive
+                # A2（2026-11-12）：控制面 kind 归一——proactive / important_date /
+                # manual / reminder 四条本机出站线统一走
+                # `utils.humanize_delivery.direct_send_proactive`。该函数是
+                # 「主动拆条」开关的唯一真源：开关关闭（默认）时逐字回落
+                # `send_text`，因此四条线的既有整段直发行为不变；只有开关
+                # 开启且连接器支持拆条时才走「拆条 + 段间节奏」。
+                #
+                # D1（2026-11-12）：kind=proactive_voice 分支——语音合成与投递
+                # 都在连接器宿主完成，且与主链发送共用同一把 `_peer_lock`：
+                # 否则主动语音会和同一好友的流式文字回复交错（文件卡片先于
+                # 刚说出口的文字到达）。合成失败 ok=False，不回退文字（回落
+                # 由 scheduler 的既有语音→文字链路负责）。
+                if kind == "proactive_voice":
+                    from utils.proactive_voice_delivery import synthesize_audio
 
-                    ok = direct_send_proactive(self, peer, text)
+                    row_owner = row.get("owner_id")
+                    owner = (
+                        int(row_owner) if row_owner is not None
+                        else self.owner_user_id
+                    )
+                    character_id = str(row.get("character_id") or "")
+                    with self._peer_lock(session_key):
+                        audio = synthesize_audio(text, character_id, owner)
+                        if audio is None:
+                            ok = False
+                        else:
+                            audio_bytes, fmt = audio
+                            ok, _err = send_voice_clip_to(
+                                peer,
+                                audio_bytes,
+                                fmt,
+                                context_token=self._get_context_token(peer) or "",
+                                token=self.token,
+                                base_url=self.base_url,
+                                duration_ms=min(
+                                    60000, max(1500, len(text) * 180)
+                                ),
+                            )
+                elif kind in ("proactive", "important_date", "manual"):
+                    from utils.humanize_delivery import direct_send_proactive_result
+
+                    accepted_any, complete = direct_send_proactive_result(self, peer, text)
+                    ok = complete
+                    if accepted_any and not complete:
+                        logger.warning(
+                            "[wx][step=partial_delivery] kind=%s peer=%s 已受理前缀但未完整",
+                            kind, peer,
+                        )
+                elif kind == "reminder":
+                    # 2026-11-12 终审回退：提醒暂不进入拆条链——控制面回执只有
+                    # bool，部分受理无法把「已受理前缀」传回 reminder_delivery，
+                    # 会把未受理尾段写进历史。先保持整段直发；拆条待回执契约
+                    # 增加 accepted_text 后单列原子再做。
+                    ok = bool(self.send_text(text, to_user=peer))
                 else:
                     ok = self.send_text(text, to_user=peer)
             except Exception as e:  # noqa: BLE001
@@ -2108,11 +2158,16 @@ class WeChatConnector:
         except Exception:  # noqa: BLE001
             return _SPLIT_MAX_SEGMENTS
 
-    def send_reply_segments(self, peer: str, reply: str, *, context_token: str = "") -> str:
-        """拆条投递一条回复，**只返回 API 已明确受理的前缀**；失败段及后续不进入历史。
+    def send_reply_segments_result(
+        self, peer: str, reply: str, *, context_token: str = ""
+    ) -> "DeliveryResult":
+        """拆条投递一条回复，返回**同一次发送**的完整回执（A1 单点）。
 
-        设计契约第 1 步：由私有 ``_send_reply_segments`` 公有化（主链 publish 与
-        主动线 wiring 共用同一实现），**不留私有别名 shim**。
+        主链 ``publish`` 的 ``complete`` 与 ``agent_msg:sent`` 的
+        ``accepted_len``/``complete`` 必须取自本方法的返回值；禁止调用方再拆
+        一次条去比较完整性——两次拆条边界一旦漂移，就会把「已完整受理」
+        误判成「未完整受理」。（``segment_cap`` 是配置上限，``DeliveryResult``
+        无该字段，仍由同一「用户 × 角色」快照的 ``_split_cap_for`` 读取。）
 
         锁契约（单一口径）：本方法**不自持** ``_peer_lock`` —— 调用方负责持锁。
         主链由 ``_handle_message_serial`` 外层 ``with self._peer_lock(...)`` 覆盖
@@ -2120,19 +2175,28 @@ class WeChatConnector:
         可重入 RLock（RLock，重复获取不自死锁）。**不得在本方法内再持一半**。
 
         2026-11-08 D-A：拆条上限与段间节奏同读一份「用户 × 角色」快照
-        （``_humanize_for``），一次解析两处消费，不再各自读全局。
+        （``_humanize_for``）；拆条唯一入口为 ``Speaker.express``（其内部复用
+        ``split_reply_for_wechat``）。``Speaker`` 与 ``wechat_connector`` 有反向
+        依赖（Speaker.express 内才 import 本模块），因此必须方法内局部 import。
         """
+        from speaker import DeliveryResult, Speaker, UtteranceIntent
+
+        session_key, character_id = self.humanize_scope(peer)
         humanize = None
         try:
             humanize = self._humanize_for(peer)
         except Exception as exc:  # noqa: BLE001
             logger.debug("[wx][step=humanize_scope_unreadable] %s", exc)
-        segments = split_reply_for_wechat(
+
+        segments = Speaker().express(
+            UtteranceIntent("reply", session_key, character_id),
             reply,
             max_segments=self._split_cap_for(peer, humanize),
-            hard_limit=_speaker_reply_hard_limit(),
         )
-        accepted = []
+        if not segments:
+            return DeliveryResult(accepted=False, channel="reply", reason="empty_text")
+
+        accepted: list[str] = []
         for idx, segment in enumerate(segments):
             try:
                 if idx:
@@ -2145,12 +2209,43 @@ class WeChatConnector:
                 ok, error = _api_ok(response)
                 if not ok:
                     logger.warning("[wx][step=reply_send_failed] peer=%s part=%s error=%s", peer, idx + 1, error)
-                    break
+                    return DeliveryResult(
+                        accepted=False,
+                        accepted_text="\n".join(accepted),
+                        segments=tuple(accepted),
+                        channel="reply",
+                        reason=str(error),
+                    )
                 accepted.append(segment)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[wx][step=reply_send_failed] peer=%s part=%s error=%s", peer, idx + 1, exc)
-                break
-        return "\n".join(accepted)
+                return DeliveryResult(
+                    accepted=False,
+                    accepted_text="\n".join(accepted),
+                    segments=tuple(accepted),
+                    channel="reply",
+                    reason=str(exc),
+                )
+        return DeliveryResult(
+            accepted=True,
+            accepted_text="\n".join(accepted),
+            segments=tuple(accepted),
+            channel="reply",
+        )
+
+    def send_reply_segments(self, peer: str, reply: str, *, context_token: str = "") -> str:
+        """拆条投递一条回复，**只返回 API 已明确受理的前缀**；失败段及后续不进入历史。
+
+        设计契约第 1 步：由私有 ``_send_reply_segments`` 公有化（主链 publish 与
+        主动线 wiring 共用同一实现），**不留私有别名 shim**。
+
+        本方法是 :meth:`send_reply_segments_result` 的薄包装：返回值仍是
+        「已受理前缀按 ``\\n`` 拼接」的字符串，锁契约/段间延时/失败日志/空文本
+        行为全部由唯一实现决定，本方法不重复任何投递逻辑。
+        """
+        return self.send_reply_segments_result(
+            peer, reply, context_token=context_token
+        ).accepted_text
 
     def _inbound_quota_allow(self) -> bool:
         """per-owner 入站日配额记账（ABUSE-4，2026-10-09）。
@@ -2509,15 +2604,15 @@ class WeChatConnector:
         def publish(reply: str) -> str:
             if sent_reply:
                 return str(sent_reply["accepted"])
-            accepted = self.send_reply_segments(from_user, reply, context_token=context_token)
+            # A1（2026-11-12）：拆条/发送/受理判定只做一次——complete 与账本
+            # 字段全部取自同一次 DeliveryResult，禁止再拆一次条去比较完整性
+            # （两次拆条边界漂移会把「已完整受理」误判为「未完整受理」）。
+            result = self.send_reply_segments_result(
+                from_user, reply, context_token=context_token
+            )
+            accepted = result.accepted_text
             _segment_cap = self._split_cap_for(from_user)
-            sent_reply.update(accepted=accepted, complete=bool(accepted) and accepted == "\n".join(
-                split_reply_for_wechat(
-                    reply,
-                    max_segments=_segment_cap,
-                    hard_limit=_speaker_reply_hard_limit(),
-                )
-            ))
+            sent_reply.update(accepted=accepted, complete=bool(result.accepted))
             # 影子账本：先发送后记账（受理长度 / 完整性 / 分段上限）。
             try:
                 from agent_core import events as _ac_events
@@ -2532,8 +2627,8 @@ class WeChatConnector:
                     payload={
                         "phase": "sent",
                         "msg_id": msg_id,
-                        "accepted_len": len(accepted or ""),
-                        "complete": bool(sent_reply.get("complete")),
+                        "accepted_len": len(result.accepted_text),
+                        "complete": bool(result.accepted),
                         "segment_cap": _segment_cap,
                         "turn_id": _ac_turn,
                     },

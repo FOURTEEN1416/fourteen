@@ -18,13 +18,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 SESSIONS_DIR = Path("data/wechat_sessions")
 DEFAULT_MAX_AGE_HOURS = 24.0
+
+#: D1（2026-11-12）：控制面 outbox 的语音 kind（连接器宿主 ``_drain_outbox`` 消费）。
+PLANE_KIND = "proactive_voice"
+#: 等连接器宿主受理回执的窗口。与 ``api.run_api`` 的文本定向投递同量级
+#: （45s = 5s outbox tick + TTS 合成 + 上传发送的余量），超时按未确认处理。
+PLANE_RECEIPT_TIMEOUT = 45.0
 
 _TTS_LOCK = threading.Lock()
 _TTS_MGR: Any = None
@@ -176,6 +185,23 @@ def find_wechat_credentials(
     return best
 
 
+def _control_plane_for(owner_id: int | str) -> Any:
+    """控制面**可用**判定：模块可导入 **且** 该 owner 有活着的连接器宿主。
+
+    「可导入」不等于「可用」：没有宿主的 outbox 是黑洞——入队只会在回执窗
+    里空等，且失败原因掩盖真实通道状态。此时返回 ``None``，调用方走
+    2026-11-12 之前的直发路径（``find_wechat_credentials`` + 合成 + 发送）。
+    """
+    try:
+        from proactive import runtime_plane
+
+        if not runtime_plane.live_slots(int(owner_id)):
+            return None
+        return runtime_plane
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def send_proactive_voice(
     session_key: str,
     text: str,
@@ -183,7 +209,15 @@ def send_proactive_voice(
     *,
     max_age_hours: float = DEFAULT_MAX_AGE_HOURS,
 ) -> tuple[bool, str]:
-    """给微信会话发一条语音条。返回 ``(ok, reason)``；失败原因不含隐私。"""
+    """给微信会话发一条语音条。返回 ``(ok, reason)``；失败原因不含隐私。
+
+    D1（2026-11-12）：开关 ``PROACTIVE_VOICE_VIA_PLANE``（缺省开）且控制面
+    可用时，改为 ``enqueue_and_wait(kind="proactive_voice")``，由连接器宿主在
+    ``_peer_lock`` 内合成并投递（与主链发送同锁，避免同好友语音/文字交错）；
+    本进程**不再**自己找凭据/合成/直发。只认 ``accepted`` 回执，超时/失败
+    一律 ``(False, reason)``，由 scheduler 走既有文字回落。开关关或控制面
+    不可用时，下面这条直发路径逐字保留（一行回滚）。
+    """
     try:
         from utils import session_key as sk_mod
 
@@ -196,6 +230,59 @@ def send_proactive_voice(
             return False, "bad_session_key"
     except Exception:  # noqa: BLE001
         return False, "bad_session_key"
+
+    try:
+        from utils.speaker_switches import proactive_voice_via_plane_enabled
+
+        via_plane = proactive_voice_via_plane_enabled()
+    except Exception:  # noqa: BLE001
+        # 开关模块缺失/不可读（半更新部署）→ 按关闭处理，走旧直发（可发）。
+        via_plane = False
+
+    if via_plane:
+        plane = _control_plane_for(owner)
+        if plane is not None:
+            try:
+                ok, reason, _cid = plane.enqueue_and_wait(
+                    kind=PLANE_KIND,
+                    channel="wechat",
+                    session_key=sk,
+                    owner_id=owner,
+                    peer=peer,
+                    character_id=str(character_id or ""),
+                    message=str(text or ""),
+                    timeout=PLANE_RECEIPT_TIMEOUT,
+                )
+            except Exception as e:  # noqa: BLE001
+                return False, f"{type(e).__name__}"
+            if ok:
+                return True, str(reason or "accepted")
+            reason_text = str(reason or "send_rejected")[:120]
+            # 2026-11-12 复核修复（超时双发）：生产者超时只代表「未确认」，
+            # 行可能仍 pending（可安全取消）或已被宿主认领（可能正在发）。
+            # pending → 取消失败？取消失败按未确认处理；claimed → 明确回
+            # unconfirmed_claimed，调用方不得回落文字。
+            if reason_text.startswith("unconfirmed_"):
+                cid = int(_cid or 0)
+                try:
+                    cancelled = bool(plane.cancel_send_pending(
+                        cid, reason="producer_timeout",
+                    )) if cid else False
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("[proactive_voice] 取消 pending 行失败 cid=%s: %s", cid, e)
+                    cancelled = False
+                if not cancelled and cid:
+                    # 已被认领：再给 20s 等晚到回执——若真的发出则按成功返回，
+                    # 让 scheduler 正常写历史；仍无回执才按 unconfirmed 处理。
+                    try:
+                        late = plane.wait_for_receipt(cid, timeout=20.0)
+                    except Exception:  # noqa: BLE001
+                        late = None
+                    if str((late or {}).get("status") or "") == "accepted":
+                        return True, "accepted_late"
+                return (False, "timeout_cancelled") if cancelled else (False, "unconfirmed_claimed")
+            return False, reason_text
+
     creds = find_wechat_credentials(owner, peer, max_age_hours=max_age_hours)
     if creds is None:
         return False, "no_credentials"

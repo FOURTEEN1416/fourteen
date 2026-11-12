@@ -561,6 +561,34 @@ def _ase_states_verify(scope: AccountScope) -> dict:
     return {"states": len(_owned_keys_of(scope, list(raw)))}
 
 
+def _topic_state_purge(scope: AccountScope) -> dict:
+    """话题状态机三表（topic_state / topic_plan / topic_meta）按会话键清除。"""
+    from utils import topic_state
+
+    _chars, _kn, sqlite_db, _agent, _chroma = _default_paths(
+        scope.characters_dir, scope.knowledge_dir, scope.sqlite_db,
+        scope.agent_db, scope.chroma_dir,
+    )
+    keys = sorted(set(scope.session_keys) | set(scope.wxids))
+    removed = topic_state.purge_owner(
+        keys, db_path=sqlite_db, owner_uid=scope.user_id,
+    )
+    return {"topic_rows": removed}
+
+
+def _topic_state_verify(scope: AccountScope) -> dict:
+    from utils import topic_state
+
+    _chars, _kn, sqlite_db, _agent, _chroma = _default_paths(
+        scope.characters_dir, scope.knowledge_dir, scope.sqlite_db,
+        scope.agent_db, scope.chroma_dir,
+    )
+    keys = sorted(set(scope.session_keys) | set(scope.wxids))
+    return {"topic_rows": topic_state.count_owner(
+        keys, db_path=sqlite_db, owner_uid=scope.user_id,
+    )}
+
+
 def _affinity_purge(scope: AccountScope) -> dict:
     from utils import affinity_state
 
@@ -732,6 +760,7 @@ _OWNER_STEPS: dict[str, OwnerStep] = {
         ("persona_profile", None, _persona_profile_purge, _persona_profile_verify),
         ("memory_vectors", None, _memory_vectors_purge, _memory_vectors_verify),
         ("event_ledger", None, _event_ledger_purge, _event_ledger_verify),
+        ("topic_state", None, _topic_state_purge, _topic_state_verify),
         ("ase_states", None, _ase_states_purge, _ase_states_verify),
         ("affinity_points", None, _affinity_purge, _affinity_verify),
         ("wechat_channels", None, _wechat_channels_purge, _wechat_channels_verify),
@@ -745,7 +774,7 @@ _OWNER_STEPS: dict[str, OwnerStep] = {
 # 冻结步骤必须先于一切清除；users_db 行删除必须最后。
 _STEP_ORDER = [
     "freeze_revoke", "character_instances", "memory_sqlite", "persona_profile",
-    "memory_vectors", "event_ledger", "ase_states", "affinity_points",
+    "memory_vectors", "event_ledger", "topic_state", "ase_states", "affinity_points",
     "wechat_channels", "scheduler_throttle", "process_caches", "users_db",
 ]
 

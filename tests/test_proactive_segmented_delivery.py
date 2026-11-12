@@ -555,8 +555,8 @@ def test_drain_outbox_proactive_default_is_unchanged_send_text(tmp_path, monkeyp
     assert rp.send_status(cid)["status"] == "accepted"
 
 
-def test_drain_outbox_non_proactive_kind_keeps_send_text(tmp_path, monkeypatch):
-    """`reminder` 等非主动 kind 不属拆条语义 —— 路径不动（即便开关开启）。"""
+def test_drain_outbox_unknown_kind_keeps_send_text(tmp_path, monkeypatch):
+    """未知 kind（非 proactive/important_date/manual/reminder）路径不动。"""
     _split_config(monkeypatch, True)
     wc, rp, conn = _outbox_connector(tmp_path, monkeypatch)
     segment_calls: list[tuple[str, str]] = []
@@ -570,7 +570,7 @@ def test_drain_outbox_non_proactive_kind_keeps_send_text(tmp_path, monkeypatch):
         lambda text, to_user="": (text_calls.append((text, to_user)) or True),
     )
     rp.enqueue_send(
-        kind="reminder", channel="wechat", session_key="7:wx_b",
+        kind="broadcast", channel="wechat", session_key="7:wx_b",
         owner_id=7, peer="wx_b", message="记得吃药",
     )
     conn._drain_outbox()

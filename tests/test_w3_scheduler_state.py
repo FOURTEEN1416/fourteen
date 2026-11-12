@@ -37,6 +37,9 @@ def sched_sandbox():
 
     s = ProactiveScheduler()
     s._quiet_hours = _quiet_window_excluding_now()  # 当前小时落在静默窗外
+    # 2026-11-12 B2：手动脉改走 per-session 窗口；本沙箱默认与全局同窗，
+    # 专门测静默的用例再单独覆盖。
+    s._quiet_hours_for_session = lambda *a, **k: s._quiet_hours
     return s
 
 
@@ -557,20 +560,33 @@ class _ManualEngine:
     def _select_type_by_urgency(self):
         return "morning"
 
-    def _generate_and_return(self, msg_type):
-        # 真引擎内部 _record_proactive_sent：配额 +1、写冷却
-        self._daily_message_count += 1
+    def _generate_and_return(self, msg_type, commit: bool = True):
+        # 2026-11-12 B3：commit=False 只生成；受理后由 commit_sent 记账。
+        if commit:
+            self._daily_message_count += 1
         self.generated.append(getattr(msg_type, "value", msg_type))
-        return {
+        result = {
             "message": self._message,
             "type": str(getattr(msg_type, "value", msg_type)),
-            "_committed": True,
         }
+        if commit:
+            result["_committed"] = True
+        return result
 
-    def _record_and_return(self, scene):
-        self._daily_message_count += 1
+    def _record_and_return(self, scene, commit: bool = True):
+        if commit:
+            self._daily_message_count += 1
         self.generated.append(scene)
-        return {"message": self._message, "type": str(scene)}
+        result = {"message": self._message, "type": str(scene)}
+        if commit:
+            result["_committed"] = True
+        return result
+
+    def commit_sent(self, result: dict) -> None:
+        if not result or result.get("_committed"):
+            return
+        result["_committed"] = True
+        self._daily_message_count += 1
 
     def record_sent_entry(self, entry: dict) -> None:
         self.sent_history.append(entry)
@@ -601,7 +617,7 @@ def _wire_manual_send(sched, hub, monkeypatch, *, deliver_ok=True):
     calls: list[tuple] = []
     broadcasts: list[str] = []
 
-    def _deliver(message, session_key=None, character_id=None):
+    def _deliver(message, session_key=None, character_id=None, **kwargs):
         calls.append((message, session_key, character_id))
         return deliver_ok
 
@@ -638,7 +654,12 @@ def test_manual_send_quiet_hours_rejects_without_generating(sched_sandbox, monke
     hub = _ManualHub(["7:wx_a@im.wechat"])
     calls, _bc = _wire_manual_send(sched_sandbox, hub, monkeypatch)
     h = _local_now_hour()
-    sched_sandbox._quiet_hours = (h, (h + 1) % 24)  # 当前小时必在窗内
+    # 2026-11-12 B2：手动脉改走「用户 × 角色」生效窗口；本用例直接钉住
+    # 生成前闸的输入，不依赖全局配置文件里的窗口值。
+    monkeypatch.setattr(
+        sched_sandbox, "_quiet_hours_for_session",
+        lambda *a, **k: (h, (h + 1) % 24),
+    )
 
     result = sched_sandbox.manual_send_now("7:wx_a@im.wechat")
 

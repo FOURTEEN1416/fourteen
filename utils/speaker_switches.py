@@ -1,11 +1,13 @@
-"""发声相关开关的唯一 owner（B-2 2026-11-11 / B-3+B-4 2026-11-12）。
+"""发声相关开关的唯一 owner（B-2 2026-11-11 / B-3+B-4+D1 2026-11-12）。
 
-**唯一 owner**：本模块集中持有四条开关的读取与语义，调用点禁止各写一份：
+**唯一 owner**：本模块集中持有五条开关的读取与语义，调用点禁止各写一份：
 
 - ``AGENT_CORE_EVENTS``（影子账本）与 ``SPEAKER_PROACTIVE``（主动线上收）：
   启动期一致性判定 + 消费侧入口 :func:`speaker_proactive_enabled`；
 - ``SPEAKER_REPLY``（B-3 主链拆条新语义，:func:`speaker_reply_enabled`）；
-- ``SPEAKER_REMINDER``（B-4 提醒线人设前缀，:func:`speaker_reminder_enabled`）。
+- ``SPEAKER_REMINDER``（B-4 提醒线人设前缀，:func:`speaker_reminder_enabled`）；
+- ``PROACTIVE_VOICE_VIA_PLANE``（D1 主动语音走控制面，:func:`proactive_voice_via_plane_enabled`）
+  ——纯运行期消费侧开关，不参与启动期一致性判定（与账本无耦合）。
 
 两个启动期挂载点（``orchestrator/_init_mixin.initialize`` 与
 ``api/app_factory``）都调 ``validate_speaker_switches``，**禁止**在调用点
@@ -46,8 +48,9 @@ LEDGER_ENV = "AGENT_CORE_EVENTS"
 SPEAKER_ENV = "SPEAKER_PROACTIVE"
 REPLY_ENV = "SPEAKER_REPLY"
 REMINDER_ENV = "SPEAKER_REMINDER"
+PROACTIVE_VOICE_ENV = "PROACTIVE_VOICE_VIA_PLANE"
 
-#: 缺省值：四条开关出厂都开（与 ``agent_core.events`` 的 ``_TRUTHY`` 不同——
+#: 缺省值：五条开关出厂都开（与 ``agent_core.events`` 的 ``_TRUTHY`` 不同——
 #: 那边缺省=关是「写接口首行短路」的历史口径，这里是**启动期一致性视图**，
 #: 缺省按产品意图（开）呈现，避免把「没配」误报成「关」）。
 _DEFAULT_ON = "1"
@@ -101,3 +104,14 @@ def speaker_reminder_enabled() -> bool:
     逐字回到 2026-11-12 之前的 generic 任务指令（不读人设），供一行回滚。
     """
     return _effective(os.environ.get(REMINDER_ENV)) == "1"
+
+
+def proactive_voice_via_plane_enabled() -> bool:
+    """D1 主动语音是否经控制面 + 连接器宿主投递（**消费侧唯一入口**）。
+
+    ``PROACTIVE_VOICE_VIA_PLANE``：缺省/空串 = 开（``'1'``）；
+    ``('0','false','off','no')`` 视为关 → ``send_proactive_voice`` 逐字回到
+    2026-11-12 之前的直发路径（本进程找凭据 + 合成 + ``send_voice_clip_to``），
+    供一行回滚。控制面不可用（无活跃连接器宿主）时同样回旧路径，与本开关无关。
+    """
+    return _effective(os.environ.get(PROACTIVE_VOICE_ENV)) == "1"

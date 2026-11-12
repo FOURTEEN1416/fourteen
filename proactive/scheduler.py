@@ -952,8 +952,9 @@ class ProactiveScheduler:
            delivered=True，通道拒收/无归属连接也一起算成功）。
         3. **不预记账**：``sent_history`` 只在受理后写。
 
-        配额仍归还（2026-09-18 生产实证：自测几次耗尽当日 8 条额度使自动消息
-        全天停发），但保留生成时写入的 30 分钟冷却。
+        2026-11-12 B3：生成改 ``commit=False``（不预扣配额/冷却/连击），投递
+        受理后由 ``commit_sent(result)`` 一次性记账；失败/未受理的 result 直接
+        丢弃（不再用 finally 归还日配额——生成本就没扣）。
         """
         key = str(session_key or "").strip()
         if not key:
@@ -963,10 +964,15 @@ class ProactiveScheduler:
         if not callable(getter):
             logger.error("手动发送跳过：ASE 注入非 hub（%s）", type(hub).__name__)
             return {"status": "rejected", "delivered": False, "reason": "no_engine"}
-        if self._is_quiet_hours():
+        # 2026-11-12 B2：生成前先按「用户 × 角色」生效窗口判静默；旧实现只看
+        # 全局 _is_quiet_hours()，用户把窗口调窄后自测仍会被全局挡回。
+        _quiet_window = self._quiet_hours_for_session(
+            key, self._resolve_character_id(key),
+        )
+        if self._quiet_hours_contains(_quiet_window):
             logger.warning(
                 "免打扰时段(%s-%s)：手动发送未生成未投递 session=%s",
-                self._quiet_hours[0], self._quiet_hours[1], key,
+                _quiet_window[0], _quiet_window[1], key,
             )
             return {
                 "status": "rejected", "delivered": False, "reason": "quiet_hours",
@@ -974,84 +980,101 @@ class ProactiveScheduler:
             }
 
         eng = getter(key)
+        # 2026-11-12 B3：生成 commit=False 不扣配额；这里记下基线，
+        # 投递成功后 commit_sent +1，再按手动自测的既有语义只回滚配额。
         quota_before = int(getattr(eng, "_daily_message_count", 0) or 0)
-        try:
-            if message_type:
-                from proactive.ase_engine import ProactiveType
+        if message_type:
+            from proactive.ase_engine import ProactiveType
 
-                try:
-                    chosen = ProactiveType(str(message_type))
-                except ValueError:
-                    return {
-                        "status": "rejected", "delivered": False,
-                        "reason": f"unknown_message_type:{message_type}",
-                        "session_key": key,
-                    }
-                result = eng._generate_and_return(chosen)
-            else:
-                eng._update_urgency(eng._hours_since_last_chat())
-                scene = eng._check_scene_triggers()
-                if scene and float(getattr(eng.urgency, "total", 0.0)) >= 2.0:
-                    result = eng._record_and_return(scene)
-                else:
-                    result = eng._generate_and_return(eng._select_type_by_urgency())
-            if not result:
-                logger.warning("手动发送生成失败 session=%s", key)
-                return {"status": "failed", "delivered": False, "reason": "generation_failed",
-                        "session_key": key}
-
-            message = str(result.get("message") or "")
-            _manual_char_id = self._resolve_character_id(key)
-            delivered = bool(
-                self._deliver(message, session_key=key, character_id=_manual_char_id)
-            )
-            public = {k: v for k, v in result.items() if not str(k).startswith("_")}
-            if not delivered:
-                logger.warning("手动发送未获投递受理 session=%s", key)
-                return {"status": "not_delivered", "delivered": False,
-                        "reason": "deliver_rejected", "session_key": key, **public}
-            # 影子账本（B-1，2026-11-11）：投递受理之后才记，主动线无入站 id
-            # → turn_id 恒空，回放只能按 session_key。零行为：异常只 debug。
             try:
-                import hashlib as _ac_hashlib
-
-                from agent_core import events as _ac_events
-
-                # 确定性去重键（B-2，2026-11-11）：本函数没有 command_id 形参
-                # （跨 worker 命令 id 在 `_drain_control_commands` 帧里，不传进来），
-                # 按契约回落「正文 sha256 前 16 位」——同一正文重复自测不产生第二行。
-                _ac_manual_dedup = (
-                    f"proactive_manual:{key}:"
-                    f"{_ac_hashlib.sha256(str(message or '').encode('utf-8')).hexdigest()[:16]}"
+                chosen = ProactiveType(str(message_type))
+            except ValueError:
+                return {
+                    "status": "rejected", "delivered": False,
+                    "reason": f"unknown_message_type:{message_type}",
+                    "session_key": key,
+                }
+            result = eng._generate_and_return(chosen, commit=False)
+        else:
+            eng._update_urgency(eng._hours_since_last_chat())
+            # 2026-11-12 B3 终审修复：场景触发器必须 commit=False——否则在
+            # 决定是否投递之前就置位当日场景标记，失败/静默时当天问候永久缺失。
+            scene = eng._check_scene_triggers(commit=False)
+            if scene and float(getattr(eng.urgency, "total", 0.0)) >= 2.0:
+                result = eng._record_and_return(scene, commit=False)
+            else:
+                result = eng._generate_and_return(
+                    eng._select_type_by_urgency(), commit=False,
                 )
-                _ac_events.record_event(
-                    "agent_msg",
-                    session_key=key,
-                    character_id=str(_manual_char_id or ""),
-                    source="scheduler/manual",
-                    dedupe_key=_ac_manual_dedup,
-                    payload={
-                        "phase": "proactive_delivered",
-                        "channel": "proactive",
-                        "voice": False,
-                        "text_len": len(message),
-                        "character_id": str(_manual_char_id or ""),
-                        "turn_id": "",
-                    },
-                )
-            except Exception as _agent_exc:  # noqa: BLE001 —— 影子写绝不改真实行为
-                logger.debug("[agent_core][step=hook_manual_send_skipped] %s", _agent_exc)
-            # 受理之后才记账（旧实现发送前就写 sent_history）
-            recorder = getattr(eng, "record_sent_entry", None)
-            if callable(recorder):
-                recorder(result)
-            logger.info("手动发送已定向投递 session=%s [%s]", key, public.get("type"))
-            return {"status": "sent", "delivered": True, "session_key": key, **public}
-        finally:
-            if int(getattr(eng, "_daily_message_count", quota_before)) != quota_before:
-                logger.info("手动发送归还当日配额：%d -> %d",
-                            getattr(eng, "_daily_message_count", 0), quota_before)
-                eng._daily_message_count = quota_before
+        if not result:
+            logger.warning("手动发送生成失败 session=%s", key)
+            return {"status": "failed", "delivered": False, "reason": "generation_failed",
+                    "session_key": key}
+
+        message = str(result.get("message") or "")
+        _manual_char_id = self._resolve_character_id(key)
+        # 2026-11-12 B2：生成期间角色可能切换，发送前按当前角色重算窗口，
+        # 与 _deliver 的角色一致性校验同源。
+        _quiet_window = self._quiet_hours_for_session(key, _manual_char_id)
+        delivered = bool(
+            self._deliver(
+                message, session_key=key, character_id=_manual_char_id,
+                channel="manual", quiet_hours=_quiet_window,
+            )
+        )
+        public = {k: v for k, v in result.items() if not str(k).startswith("_")}
+        if not delivered:
+            logger.warning("手动发送未获投递受理 session=%s", key)
+            return {"status": "not_delivered", "delivered": False,
+                    "reason": "deliver_rejected", "session_key": key, **public}
+        # 影子账本（B-1，2026-11-11）：投递受理之后才记，主动线无入站 id
+        # → turn_id 恒空，回放只能按 session_key。零行为：异常只 debug。
+        try:
+            import hashlib as _ac_hashlib
+
+            from agent_core import events as _ac_events
+
+            # 确定性去重键（B-2，2026-11-11）：本函数没有 command_id 形参
+            # （跨 worker 命令 id 在 `_drain_control_commands` 帧里，不传进来），
+            # 按契约回落「正文 sha256 前 16 位」——同一正文重复自测不产生第二行。
+            _ac_manual_dedup = (
+                f"proactive_manual:{key}:"
+                f"{_ac_hashlib.sha256(str(message or '').encode('utf-8')).hexdigest()[:16]}"
+            )
+            _ac_events.record_event(
+                "agent_msg",
+                session_key=key,
+                character_id=str(_manual_char_id or ""),
+                source="scheduler/manual",
+                dedupe_key=_ac_manual_dedup,
+                payload={
+                    "phase": "proactive_delivered",
+                    "channel": "manual",
+                    "voice": False,
+                    "text_len": len(message),
+                    "character_id": str(_manual_char_id or ""),
+                    "turn_id": "",
+                },
+            )
+        except Exception as _agent_exc:  # noqa: BLE001 —— 影子写绝不改真实行为
+            logger.debug("[agent_core][step=hook_manual_send_skipped] %s", _agent_exc)
+        # 2026-11-12 B3：生成不再记账；受理后提交一次（commit_sent 自带
+        # `_committed` 幂等，同一 result 重复提交只生效一次）。
+        eng.commit_sent(result)
+        # 2026-11-12 B3 复核修复：commit_sent 现在会 +1 配额，但手动自测
+        # 仍保持「归还日配额」的既有产品语义（冷却/连击保留，只回滚配额）。
+        if int(getattr(eng, "_daily_message_count", quota_before)) != quota_before:
+            logger.info(
+                "手动发送归还当日配额：%d -> %d",
+                getattr(eng, "_daily_message_count", 0), quota_before,
+            )
+            eng._daily_message_count = quota_before
+        # 受理之后才记账（旧实现发送前就写 sent_history）
+        recorder = getattr(eng, "record_sent_entry", None)
+        if callable(recorder):
+            recorder(result)
+        logger.info("手动发送已定向投递 session=%s [%s]", key, public.get("type"))
+        return {"status": "sent", "delivered": True, "session_key": key, **public}
 
     def _drain_control_commands(self) -> None:
         """消费跨 worker 转投的控制命令（APScheduler 任务，只在 master 跑）。
@@ -1242,9 +1265,16 @@ class ProactiveScheduler:
 
     @staticmethod
     def _quiet_hours_contains(window: tuple[int, int]) -> bool:
-        """``window`` 是否覆盖当前本地小时（跨零点用 start>end 区分）。"""
+        """``window`` 是否覆盖当前本地小时（跨零点用 start>end 区分）。
+
+        2026-11-12 复核修复：``start == end`` 视为「关闭静默」而非全天静默
+        —— 与 ``ASEEngine._in_quiet_hours`` 同语义；旧实现走 else 分支
+        ``hour >= start or hour < end`` 恒 True，会把手动/日期线永久拒发。
+        """
         local_hour = _local_now().hour
         start, end = window
+        if start == end:
+            return False
         if start < end:
             return start <= local_hour < end
         return local_hour >= start or local_hour < end
@@ -1260,6 +1290,26 @@ class ProactiveScheduler:
                 & set(proactive_config_mod.QUIET_KEYS)):
             return self._is_quiet_hours()
         return self._quiet_hours_contains(self._quiet_hours_for(user_cfg))
+
+    def _quiet_hours_for_session(
+        self, session_key: str, character_id: str = "",
+    ) -> tuple[int, int]:
+        """该会话生效的静默窗口（「用户 × 角色」快照 → 全局默认）。
+
+        2026-11-12 B2：日期/手动线此前只看全局 ``_is_quiet_hours()``，与决策线
+        的 per-user 窗口分裂。这里复用唯一真源 ``proactive_config.effective``；
+        配置读取失败回落全局窗口，绝不因设置脏读炸掉投递链。
+        """
+        try:
+            cfg = proactive_config_mod.effective(
+                str(session_key or ""), character_id=str(character_id or ""),
+            )
+            return self._quiet_hours_for(cfg)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(
+                "会话静默窗口读取失败，回落全局 session=%s: %s", session_key, e,
+            )
+            return getattr(self, "_quiet_hours", None) or (23, 7)
 
     # 仅写日志、不构成真实送达的通道（开发期观察用）。
     # 它们【不得】计入送达：否则真实通道（微信）失败时会被兜底掩盖成「成功」，
@@ -1808,8 +1858,10 @@ class ProactiveScheduler:
             get_profile_prompt_block,
             project_profile_for,
         )
-        from utils import topic_state as _topic_state
+        from speaker import ThreadState
 
+        # 原子 C1（2026-11-12）：话题计划读写的唯一入口是 speaker.ThreadState，
+        # 本函数不再直接触碰 utils.topic_state 的计划 API（归属键由 facade 显式带）。
         # 2026-11-07 用户裁决：设置按「我 × 这个角色」全量快照（唯一真源
         # `utils.character_settings`）。角色先解析一次，本函数后续所有闸位与
         # 引擎下发都用同一对 (user_key, character_id)，避免同拍内换角色。
@@ -2009,11 +2061,10 @@ class ProactiveScheduler:
                 # 2026-10-27 话题状态机 Q4：window_expired 消费旧计划（过期不补），
                 # 防止陈旧计划在下一拍被重新注入（next_at 早于 now 仍视为到期）。
                 try:
-                    _topic_state.take_next_plan(
+                    ThreadState(
                         str(user_key),
                         self._resolve_character_id(str(user_key)),
-                        consume=True,
-                    )
+                    ).take_plan(consume=True)
                 except Exception as _plan_err:  # noqa: BLE001
                     logger.debug("消费过期计划失败（忽略）user=%s: %s", user_key, _plan_err)
                 append_proactive_event(
@@ -2220,7 +2271,7 @@ class ProactiveScheduler:
         )
         _next_plan = None
         try:
-            _next_plan = _topic_state.take_next_plan(str(user_key), char_id, now=now)
+            _next_plan = ThreadState(str(user_key), char_id).take_plan(now=now)
         except Exception as _plan_err:  # noqa: BLE001
             logger.debug("取下次计划失败（忽略）user=%s: %s", user_key, _plan_err)
             _next_plan = None
@@ -2462,17 +2513,15 @@ class ProactiveScheduler:
             _next_intent = str(decision.get("next_intent") or "")
             try:
                 if _next_topic or _next_intent:
-                    _topic_state.save_next_plan(
-                        str(user_key),
-                        char_id,
+                    ThreadState(str(user_key), char_id).save_plan(
                         _next_topic,
                         _next_intent,
                         wait_minutes=wait_m if isinstance(wait_m, int) else 0,
                         planned_at=now,
                     )
                 elif _next_plan is not None:
-                    _topic_state.take_next_plan(
-                        str(user_key), char_id, now=now, consume=True,
+                    ThreadState(str(user_key), char_id).take_plan(
+                        now=now, consume=True,
                     )
             except Exception as _plan_err:  # noqa: BLE001
                 logger.debug("保存/放弃下次计划失败（忽略）user=%s: %s", user_key, _plan_err)
@@ -2668,10 +2717,9 @@ class ProactiveScheduler:
             # 决定的下一步（wait=0 → 下一次决策即可见）。投递失败分支不消费、
             # 不覆盖旧计划（保留到 TTL，见下方 else）。
             try:
-                _topic_state.take_next_plan(str(user_key), char_id, now=now, consume=True)
-                _topic_state.save_next_plan(
-                    str(user_key),
-                    char_id,
+                _thread = ThreadState(str(user_key), char_id)
+                _thread.take_plan(now=now, consume=True)
+                _thread.save_plan(
                     str(decision.get("next_topic") or ""),
                     str(decision.get("next_intent") or ""),
                     wait_minutes=0,
@@ -2686,10 +2734,9 @@ class ProactiveScheduler:
             # 不记账（用户没看到，话题应保持可复提）。
             if _recall.items:
                 try:
+                    _thread = ThreadState(str(user_key), char_id)
                     for _item in _recall.items:
-                        _topic_state.mark_topic_recalled(
-                            str(user_key),
-                            char_id,
+                        _thread.mark_recalled(
                             str(_item.get("topic_id") or ""),
                             now=now,
                         )
@@ -2805,6 +2852,7 @@ class ProactiveScheduler:
     def _deliver(
         self, message: str, session_key: str | None = None, character_id: str | None = None,
         quiet_hours: tuple[int, int] | None = None, *, voice: bool = False,
+        channel: str = "",
     ) -> bool:
         """投递主动消息。session_key 非空时**定向**到该会话，否则广播（旧路径）。
 
@@ -2823,6 +2871,10 @@ class ProactiveScheduler:
         2026-10-14 对抗验收执行位矩阵：三条 LLM 生成→投递路径（决策线 :1381 已
         在调用方接守卫、手动发送线、重要日期祝福线）统一由本入口兜底终审——
         决策线在上游已守卫（去重闸需要守卫后内容），手动/祝福线在此被覆盖。
+
+        ``channel``（keyword-only）只影响送达后的历史归属（``_record_outbound``）：
+        日期祝福线传 ``important_date``、控制台自测传 ``manual``，决策线缺省沿用
+        ``proactive`` / ``proactive_voice``。显式渠道优先于 voice 推导。
         """
         from utils.prompt_sanitize import terminal_reply_guard
 
@@ -2961,9 +3013,10 @@ class ProactiveScheduler:
         if delivered:
             # API 受理后只记录发起发送时的身份，不把已发送文字改归新角色。
             # 2026-11-08：语音轮记 channel=proactive_voice（她是"说"过这句）。
+            # 2026-11-12：显式 channel 优先——日期/手动线不再与真实主动同渠道。
             self._record_outbound(
                 message, session_key, character_id=character_id,
-                channel="proactive_voice" if voice else "proactive",
+                channel=channel or ("proactive_voice" if voice else "proactive"),
             )
         return delivered
 
@@ -3073,6 +3126,15 @@ class ProactiveScheduler:
                             session_key, len(message),
                         )
                         return True
+                    # 2026-11-12 复核修复（D1 超时双发）：回执未确认且行已被
+                    # 宿主认领时，语音可能稍后真实发出；此处不得再发文字，
+                    # 否则用户先收文字后收同内容语音。
+                    if str(v_reason) == "unconfirmed_claimed":
+                        logger.warning(
+                            "[主动消息] 语音回执未确认且已被认领，跳过文字回落防双发 session=%s",
+                            session_key,
+                        )
+                        return False
                     logger.info(
                         "[主动消息] 语音投递失败，回落文字 session=%s reason=%s",
                         session_key, v_reason,
@@ -3348,9 +3410,40 @@ class ProactiveScheduler:
         # 2026-10-15 统一真源：祝福润色与决策线同走完整版人设（旧裁剪版缺
         # 【回复示例】【通用禁令】，祝福口吻曾与角色卡脱钩）。
         try:
-            from proactive.proactive_context import load_full_persona_hint
+            # 2026-11-12 复核修复：Speaker 开时不要再先算一遍 persona_hint——
+            # 那会让人设渲染跑两次（一次给旧变量、一次给 Speaker），既浪费又
+            # 让「人设源只认一个 owner」在日期线重新分叉。
+            system_prompt = ""
+            _speaker_on = False
+            try:
+                from utils.speaker_switches import speaker_reminder_enabled
 
-            persona_hint = load_full_persona_hint(char_id) or ""
+                _speaker_on = speaker_reminder_enabled()
+            except Exception:  # noqa: BLE001
+                _speaker_on = False
+            if _speaker_on:
+                try:
+                    from speaker import Speaker, UtteranceIntent
+
+                    # 人设由 Speaker 按 intent.character_id 渲染；base 留空，
+                    # 任务指令在 chat_sync 的 query 里。补 user_key 供
+                    # 回复模式/沉浸式剥离按「会话 × 角色」快照解析。
+                    system_prompt = Speaker().build_system_prompt(
+                        UtteranceIntent("important_date", str(user_key), char_id),
+                        base="",
+                    )
+                except Exception as _speaker_exc:  # noqa: BLE001
+                    logger.debug(
+                        "[重要日期] Speaker 提示词构造失败，回退人设原文: %s",
+                        _speaker_exc,
+                    )
+                    system_prompt = ""
+            if not system_prompt:
+                from proactive.proactive_context import load_full_persona_hint
+
+                # 开关关闭路径保持 2026-11-12 之前逐字行为：不传 user_key
+                # （user_key 透传只属于 Speaker 新路径，见上方 intent）。
+                system_prompt = load_full_persona_hint(char_id) or ""
             llm = self._session_llm_resolver(user_key) if self._session_llm_resolver else self._resolve_proactive_llm()
             if llm is not None and hasattr(llm, "chat_sync"):
                 polished = llm.chat_sync(
@@ -3358,7 +3451,7 @@ class ProactiveScheduler:
                         f"以角色口吻给对方发一条{'生日' if kind == 'birthday' else '纪念日'}祝福，"
                         f"提到「{names}」，2-3 句话，真挚不说教："
                     ),
-                    system_prompt=persona_hint or "",
+                    system_prompt=system_prompt,
                     max_tokens=150, temperature=0.8,
                 )
                 cleaned = sanitize_message(str(polished or ""))
@@ -3370,8 +3463,14 @@ class ProactiveScheduler:
         if char_id != self._resolve_character_id(str(user_key)):
             logger.info("[重要日期] 生成期间角色切换，取消旧草稿 user=%s", user_key)
             return
+        # 2026-11-12 B2：日期祝福按「用户 × 角色」生效窗口投递，不再让
+        # _send_targeted 回落全局窗口（用户把窗口调窄/调宽都应立即生效）。
+        _quiet_window = self._quiet_hours_for_session(str(user_key), char_id)
         logger.info("[重要日期] 命中 %s（user=%s），定向发送祝福", names, user_key)
-        if self._deliver(message, session_key=user_key, character_id=char_id):
+        if self._deliver(
+            message, session_key=user_key, character_id=char_id,
+            channel="important_date", quiet_hours=_quiet_window,
+        ):
             # 影子账本（B-1，2026-11-11）：只记长度与角色，**不写节日名/人名**
             # （避免把画像数据搬进事件库）。零行为：异常只 debug。
             try:

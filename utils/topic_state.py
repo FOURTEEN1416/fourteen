@@ -8,9 +8,11 @@
 - **六 API**：``get_topic_snapshot / update_after_turn / select_proactive_recall
   / save_next_plan / take_next_plan / purge_expired``；加 ``read/write_topic_config``
   与复提记账 ``mark_topic_recalled``（2026-11-07 对抗验收残余缺口②：
-  投递成功计数 + 冷却升级，堵「无回应话题每 ≥6h 周期性复提」）。
+  投递成功计数 + 冷却升级，堵「无回应话题每 ≥6h 周期性复提」）、生命周期
+  清场 ``purge_owner / count_owner``（2026-11-12 原子 C2：账号删除三表级联）。
 - **关闭态零 DB**：``enabled=false`` 时六个 API 首行短路，不 ``_connect``、
-  不建表、不读表。唯一例外是每日维护用的 ``purge_expired(force=True)``。
+  不建表、不读表。例外是每日维护 ``purge_expired(force=True)`` 与账号删除
+  ``purge_owner`` / ``count_owner``（删除义务不受功能开关影响）。
 - **确定性优先**：每轮先跑确定性状态机；LLM judge 每 4 轮一次、8s 硬超时、
   失败/低置信度保留原状态（fail-open for state）。
 - **裁决固化**：``active_cap`` 上限 3、``retention_days`` 固定 7、
@@ -150,6 +152,8 @@ __all__ = [
     "mark_topic_recalled",
     "take_next_plan",
     "purge_expired",
+    "purge_owner",
+    "count_owner",
     "render_topic_state_block",
     "run_llm_judge",
     "should_run_llm_judge",
@@ -389,11 +393,18 @@ def _row_get(row: sqlite3.Row | None, key: str, default: Any = None) -> Any:
 # ── 连接与事务 ───────────────────────────────────────────────────────────
 
 
-def _connect(*, ensure_schema: bool = False, busy_timeout_ms: int | None = None) -> sqlite3.Connection:
-    """打开 ``data/sqlite.db``；``ensure_schema`` 只在后台写路径为 True。"""
+def _connect(
+    *, ensure_schema: bool = False, busy_timeout_ms: int | None = None,
+    db_path: str | Path | None = None,
+) -> sqlite3.Connection:
+    """打开 ``data/sqlite.db``；``ensure_schema`` 只在后台写路径为 True。
+
+    ``db_path`` 供生命周期删除账号等调用方显式指定目标库（默认仍是全局
+    ``_DB_PATH``）；不传时行为与旧实现逐字一致。
+    """
     if busy_timeout_ms is None:
         busy_timeout_ms = _WRITE_TIMEOUT_MS
-    path = Path(_DB_PATH)
+    path = Path(db_path) if db_path is not None else Path(_DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=busy_timeout_ms / 1000.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
@@ -1523,8 +1534,34 @@ def _read_plan_row_from_conn(
     return _row_to_plan(conn.execute(sql, tuple(params)).fetchone())
 
 
+def _owner_keys(session_keys: Any) -> list[str]:
+    """归一化 owner purge/count 的会话键：去空白、去重、稳定排序。"""
+    if isinstance(session_keys, str):
+        raw: list[Any] = [session_keys]
+    else:
+        raw = list(session_keys or [])
+    return sorted(
+        {str(k).strip() for k in raw if k is not None and str(k).strip()}
+    )
+
+
+def _existing_topic_tables(conn: sqlite3.Connection) -> set[str]:
+    """当前库里真实存在的三张话题表（避免对未建表的库做 DDL/报错）。"""
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+        "('topic_state', 'topic_plan', 'topic_meta')"
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
 def purge_expired(*, now: datetime | None = None, force: bool = False) -> int:
-    """删除 ``expires_at < now`` 的 topic_state / topic_plan 行。
+    """删除过期话题数据（三表，同一事务）。
+
+    - ``topic_state`` / ``topic_plan``：``expires_at < now``；
+    - ``topic_meta``：``last_llm_at < cutoff``（cutoff = now - retention）
+      **且**该 ``(session_key, character_id)`` 没有未过期的 state / plan。
+      meta 只是轮次与 LLM 预算账本，存在未过期话题时不能丢（否则预算会被
+      重置、``judge_every_turns`` 重新计）。
 
     默认 ``enabled=false`` → 0，不连库；``force=True`` 仅供每日维护。
     """
@@ -1533,16 +1570,123 @@ def purge_expired(*, now: datetime | None = None, force: bool = False) -> int:
         return 0
     dt = _normalize_now(now)
     now_ts = _ts(dt)
+    cutoff_ts = _ts(dt - _retention(cfg))
     try:
         with closing(_connect(ensure_schema=False)) as conn, _write_tx(conn):
-            cur_state = conn.execute("DELETE FROM topic_state WHERE expires_at < ?", (now_ts,))
-            cur_plan = conn.execute("DELETE FROM topic_plan WHERE expires_at < ?", (now_ts,))
-            deleted = int(cur_state.rowcount or 0) + int(cur_plan.rowcount or 0)
+            tables = _existing_topic_tables(conn)
+            deleted = 0
+            if "topic_state" in tables:
+                cur_state = conn.execute(
+                    "DELETE FROM topic_state WHERE expires_at < ?", (now_ts,)
+                )
+                deleted += int(cur_state.rowcount or 0)
+            if "topic_plan" in tables:
+                cur_plan = conn.execute(
+                    "DELETE FROM topic_plan WHERE expires_at < ?", (now_ts,)
+                )
+                deleted += int(cur_plan.rowcount or 0)
+            # meta 谓词依赖 state/plan 两表；缺表时保守跳过（不猜未过期）。
+            if {"topic_state", "topic_plan", "topic_meta"} <= tables:
+                cur_meta = conn.execute(
+                    "DELETE FROM topic_meta WHERE last_llm_at < ? "
+                    "AND NOT EXISTS ("
+                    " SELECT 1 FROM topic_state"
+                    " WHERE topic_state.session_key = topic_meta.session_key"
+                    "   AND topic_state.character_id = topic_meta.character_id"
+                    "   AND topic_state.expires_at >= ?"
+                    ") "
+                    "AND NOT EXISTS ("
+                    " SELECT 1 FROM topic_plan"
+                    " WHERE topic_plan.session_key = topic_meta.session_key"
+                    "   AND topic_plan.character_id = topic_meta.character_id"
+                    "   AND topic_plan.expires_at >= ?"
+                    ")",
+                    (cutoff_ts, now_ts, now_ts),
+                )
+                deleted += int(cur_meta.rowcount or 0)
     except Exception as e:  # noqa: BLE001
         logger.warning("[topic_state][step=purge] error=%s", type(e).__name__)
         return 0
     logger.debug("[topic_state][step=purge] deleted=%d force=%s", deleted, force)
     return deleted
+
+
+def _owner_where(
+    keys: list[str], owner_uid: int | str | None,
+) -> tuple[str, tuple[Any, ...]]:
+    """构造 owner 归属谓词：显式会话键 ∪ （可选）``owner_uid:`` 前缀。
+
+    2026-11-12 终审修复：生命周期只从绑定/偏好枚举到微信会话键，漏掉
+    ``N:web:hex`` 等未知 web 键；删号必须按 owner 前缀兜底，否则话题三表
+    会残留。``LIKE 'N:%'`` 不会误伤 ``N0:``（有冒号分隔）。
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    if keys:
+        placeholders = ",".join("?" for _ in keys)
+        clauses.append(f"session_key IN ({placeholders})")
+        params.extend(keys)
+    if owner_uid is not None and str(owner_uid).strip():
+        clauses.append("session_key LIKE ?")
+        params.append(f"{int(owner_uid)}:%")
+    if not clauses:
+        return "", ()
+    return "(" + " OR ".join(clauses) + ")", tuple(params)
+
+
+def purge_owner(
+    session_keys: Any, *, db_path: str | Path | None = None,
+    owner_uid: int | str | None = None,
+) -> int:
+    """按 ``session_key`` + 可选 owner 前缀清空三表。
+
+    生命周期删除账号专用：**不读 enabled**（删号必须删干净），三表同一
+    事务；空列表且无 owner_uid → 0。数据库异常**不吞**：向上抛，让生命
+    周期步骤明确失败——旧实现吞成 0 会让 verify 把「没删掉」报告成「0 残留」。
+    """
+    keys = _owner_keys(session_keys)
+    where, params = _owner_where(keys, owner_uid)
+    if not where:
+        return 0
+    with closing(_connect(ensure_schema=False, db_path=db_path)) as conn, _write_tx(conn):
+        tables = _existing_topic_tables(conn)
+        deleted = 0
+        for table in ("topic_state", "topic_plan", "topic_meta"):
+            if table not in tables:
+                continue
+            cur = conn.execute(
+                f"DELETE FROM {table} WHERE {where}",
+                params,
+            )
+            deleted += int(cur.rowcount or 0)
+    logger.debug("[topic_state][step=purge_owner] deleted=%d", deleted)
+    return deleted
+
+
+def count_owner(
+    session_keys: Any, *, db_path: str | Path | None = None,
+    owner_uid: int | str | None = None,
+) -> int:
+    """统计三表中属于给定会话键或 owner 前缀的残留行数（生命周期 verify）。
+
+    数据库异常**不吞**：向上抛，verify 不得把 IO 错误报告成 0 残留。
+    """
+    keys = _owner_keys(session_keys)
+    where, params = _owner_where(keys, owner_uid)
+    if not where:
+        return 0
+    with closing(_connect(ensure_schema=False, db_path=db_path)) as conn:
+        tables = _existing_topic_tables(conn)
+        total = 0
+        for table in ("topic_state", "topic_plan", "topic_meta"):
+            if table not in tables:
+                continue
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {where}",
+                params,
+            ).fetchone()
+            total += int(row[0] or 0) if row else 0
+    return total
 
 
 # ── 稀疏 LLM judge（每 4 轮、8s 硬超时、失败保留原状态）──────────────────

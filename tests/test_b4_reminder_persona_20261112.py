@@ -4,13 +4,14 @@
 
 - ``SPEAKER_REMINDER``：缺省/空串 = 开；``0/false/off/no`` = 关（复用
   ``utils.speaker_switches._effective``）；
-- 开关开且人设可取：``_compose_text`` 的 ``system_prompt`` = 人设前缀 +
-  原 generic 任务指令（**人设在前、任务指令在后**）；
+- 开关开且人设可取：``_compose_text`` 的 ``system_prompt`` 以人设开头、
+  以原 generic 任务指令结尾（2026-11-12 Speaker 第 1 刀后中间插入能力/话题段）；
 - 开关关 / 人设为空 / 人设加载失败：``system_prompt`` 逐字回到 2026-11-12
-  之前的 generic 文案；
+  之前的 generic 文案（开关关）；人设为空时仍保留 Speaker 能力段 + generic；
 - ``query`` / ``temperature`` / ``max_tokens`` / ``timeout`` / 守卫 / fallback
   全部不变（本文件同时钉住 query 与 fallback 逐字值）；
-- 重要日期线不改代码，只以源码级接线守卫防未来漂移。
+- 重要日期线在 2026-11-12 Speaker 第 1 刀后已接入 Speaker.build_system_prompt
+  （人设 + 能力 + 话题），本文件用源码级接线守卫防未来漂移。
 """
 
 from __future__ import annotations
@@ -93,9 +94,10 @@ def _compose(
 
 
 def _patch_persona(monkeypatch, func):
-    import proactive.proactive_context as pc
+    """Speaker 第 1 刀后，人设渲染唯一 owner = persona_context.render_persona_hint。"""
+    from shisi.application import persona_context as pc
 
-    monkeypatch.setattr(pc, "load_full_persona_hint", func)
+    monkeypatch.setattr(pc, "render_persona_hint", func)
 
 
 # ---------------------------------------------------------------------------
@@ -201,11 +203,27 @@ def test_empty_persona_falls_back_to_generic(
     clean_reminder_env, fixed_reply_mode,
 ):
     clean_reminder_env.setenv(REMINDER_ENV, "1")
-    _patch_persona(fixed_reply_mode, lambda *a, **k: "")
-    llm = _CapturingLLM()
-    _compose(_task(llm), character_id="")
+    # 2026-11-12 复核修复：必须传非空 character_id，否则 Speaker 直接跳过
+    # render_persona_hint，本用例根本没覆盖「人设为空」的渲染路径。
+    from shisi.application import persona_context
 
-    assert llm.calls[0]["system_prompt"] == GENERIC_SYSTEM_PROMPT
+    calls: list[tuple[str, str | None]] = []
+    fixed_reply_mode.setattr(
+        persona_context, "render_persona_hint",
+        lambda cid, user_key=None: calls.append((str(cid), user_key)) or "",
+    )
+    from proactive import reminder_delivery as rd_mod
+
+    fixed_reply_mode.setattr(rd_mod.character_resolver, "display_name", lambda cid: "")
+    llm = _CapturingLLM()
+    _compose(_task(llm), character_id="charB4")
+
+    prompt = llm.calls[0]["system_prompt"]
+    # 无人设时 Speaker 仍保留能力段；任务指令逐字在尾部。
+    assert prompt.endswith(GENERIC_SYSTEM_PROMPT)
+    assert "【能力声明】" in prompt
+    assert "【人设】" not in prompt
+    assert calls == [("charB4", "4:wx_b4@im.wechat")]
 
 
 def test_persona_load_error_falls_back_to_generic(
@@ -217,11 +235,23 @@ def test_persona_load_error_falls_back_to_generic(
         raise RuntimeError("persona source unavailable")
 
     _patch_persona(fixed_reply_mode, boom)
+    from proactive import reminder_delivery as rd_mod
+
+    fixed_reply_mode.setattr(
+        rd_mod.character_resolver, "display_name", lambda cid: "测试角色",
+    )
     llm = _CapturingLLM()
-    out = _compose(_task(llm), character_id="")
+    # 2026-11-12 复核修复：必须传非空 character_id，否则 Speaker 直接跳过
+    # render_persona_hint，本用例根本没走到「人设加载异常」路径（假绿）。
+    out = _compose(_task(llm), character_id="charB4")
 
     assert out == "该吃药了"
-    assert llm.calls[0]["system_prompt"] == GENERIC_SYSTEM_PROMPT
+    prompt = llm.calls[0]["system_prompt"]
+    assert prompt.endswith(
+        "你是用户的亲密AI伴侣角色（你是测试角色），正在微信上主动发消息提醒用户。"
+        "输出口语化的一句话（不超过40字）。"
+    )
+    assert "【能力声明】" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +273,7 @@ def test_llm_error_returns_user_content_fallback_verbatim(
 
 
 # ---------------------------------------------------------------------------
-# 重要日期线：不改代码，源码级接线守卫防漂移
+# 重要日期线：源码级接线守卫防漂移（2026-11-12 Speaker 第 1 刀已接入）
 # ---------------------------------------------------------------------------
 
 
@@ -251,7 +281,12 @@ def test_date_wish_keeps_full_persona_hint_wiring():
     from proactive import scheduler
 
     src = inspect.getsource(scheduler.ProactiveScheduler._send_date_wish)
+    # 2026-11-12 复核修复：只断言 "persona_hint" 会被注释骗过；这里钉死
+    # 真实调用点——开关判定、Speaker 构造、旧路径 fallback 与 user_key 透传。
+    assert "speaker_reminder_enabled()" in src
+    assert "Speaker().build_system_prompt(" in src
     assert "load_full_persona_hint(" in src, (
         "重要日期祝福必须继续从完整版人设源取口吻（与提醒线同一真源）"
     )
-    assert "persona_hint" in src
+    assert "str(user_key)" in src
+    assert 'base=""' in src

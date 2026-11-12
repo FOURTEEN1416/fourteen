@@ -1,0 +1,411 @@
+{
+  "outbound": {
+    "lines": [
+      {
+        "name": "主链回复",
+        "entry": "`wechat_direct/wechat_connector.py:2173 _handle_message` → `:2254 _handle_message_serial` → `:2509 publish`；公共同步发送 `:2111 send_reply_segments`（`_call_user_manager.publish` 在 `:1200` 仅做线程桥接转发）。",
+        "compose": "`orchestrator/optimized_orchestrator.py:1404 _prepare_context` 组 prompt/上下文；批量 `:2665 request_llm.chat`，真流式 `orchestrator/_stream_mixin.py:414` 与 `:440 request_llm.chat_stream`；全文定稿在 `optimized_orchestrator.py:2362 _finalize_reply`。",
+        "deliver": "`wechat_direct/wechat_connector.py:2111 send_reply_segments` → `:2140 _send_text`（底层实现 `:915 _send_text`）；逐段以 `_api_ok(response)` 判受理（`:2145-2149`），失败即 break 并只返回已受理前缀。",
+        "record": "发送后：`orchestrator/optimized_orchestrator.py:2114 _after_process` → `:2158 write_chat_history_sync`；流式收尾 `orchestrator/_stream_mixin.py:554` 以 `reply[:accepted_end]` 调 `_after_process`。影子账本：终裁 phase `optimized_orchestrator.py:2461`，发送后 phase `wechat_connector.py:2526 agent_msg:sent`。",
+        "guards": [
+          "入站幂等：`wechat_connector.py:2204-2215`（`inbound_claim`/`inbound_done`）；入站日配额 `:2187`",
+          "扫码人守卫：`wechat_connector.py:2260-2272`（非扫码人直接拒绝）",
+          "流式增量守卫：`utils/stream_guard.py:207 IncrementalReplyGuard`，`orchestrator/_stream_mixin.py:412` 创建、`stream_guard.py:259 feed` / `:287 finish`",
+          "出站终审：`optimized_orchestrator.py:2401 terminal_reply_guard`；`:2436 safety.check_output`；`:2410-2429` 称呼剥除、`sanitize_reply_text`、内部标识剥离",
+          "拆条/长度：`wechat_connector.py:575 split_reply_for_wechat`、`:565 _speaker_reply_hard_limit`、`:2130-2134` 应用拆条上限",
+          "单次发送：`wechat_connector.py:2510-2511 sent_reply` 去重；`:2633-2636` 只在未发送且非 voice_only 时补发，且只有完整受理才继续",
+          "语音兜底：`:2630 voice_only`、`:2653-2673` 语音发送失败补发文字"
+        ],
+        "rollback": "`chat.stream_mode=buffered`（`config/system.yaml:63`；读取 `utils/stream_guard.py:157`）；`SPEAKER_REPLY=0`（拆条 hard_limit 新语义，`utils/speaker_switches.py:89`）；`MAIN_CHAIN_AGENT_ENABLED=False`（`orchestrator/optimized_orchestrator.py:264`）；`WECHAT_NATIVE_VOICE_BUBBLE=1`（`wechat_connector.py:1035`）。",
+        "risk": "已发前缀永不回滚、历史只落 `accepted_end` 位置是硬语义；且 `send_reply_segments` 不自持锁、要求调用方持 `_peer_lock`（`wechat_connector.py:2117-2120`），统一出口若改成长度/布尔回执或另取锁，会把未送达尾句写进历史并与主动线同 peer 交错。"
+      },
+      {
+        "name": "主动决策",
+        "entry": "`proactive/scheduler.py:1785 _llm_proactive_one_user`（上层 `:1560 _check_ase_per_user` 在 `:1602` 调用）。",
+        "compose": "`scheduler.py:2367 build_proactive_context` 组决策上下文（`proactive/llm_proactive.py:726` 是 builder）；`:2422 decide_proactive` 让 LLM 判 should/message（`llm_proactive.py:1346`）；`:2505 sanitize_message` 清洗候选正文。",
+        "deliver": "`:2805 _deliver` → `:2981 _send_targeted` → 通道 sender：多 worker `api/run_api.py:331 _send` 在 `:378-383` 以 `kind=proactive` 入 `runtime_plane.enqueue_and_wait`；连接器宿主 `wechat_direct/wechat_connector.py:1977 _drain_outbox` → `:2039-2042 direct_send_proactive` → `:2111 send_reply_segments`；单进程 `main.py:381 _send` → `:402 direct_send_proactive`。",
+        "record": "`scheduler.py:2964-2967 _record_outbound` 写 chat_history（`channel=proactive_voice` 或 `proactive`）；`:2704 eng.commit_sent` 计数器/冷却；`:2711 append_proactive_event` 账本；影子 `:2619 agent_msg`（source=scheduler/decision）。通道回执由 `runtime_plane` 的 `accepted` 体现（`api/run_api.py:378-389`）。",
+        "guards": [
+          "暂停/启用：`scheduler.py:1879`（paused）与 `:1890`（enabled，全局与角色快照取与）",
+          "静默：`:1909 _is_quiet_hours_for(user_cfg)`；投递层 `:2596-2597` 传 per-user 窗口，`:3014` 再判",
+          "模型闸：`:1926 _primary_model_ok`，首选熔断则跳过不降级",
+          "token 窗口：`:1942-1967 token_window_state`，dead 拦、dying 告警放行",
+          "等待窗/迟到窗：`:1972-1992 _llm_proactive_next_ok`；`:1999-2033 window_expired 过期不补",
+          "节奏双闸/未回复连击：`:2061 should_skip_proactive_decision`；零 token 骰子闸 `:2092 evaluate_dice_gate`",
+          "内容闸：`:2505 sanitize_message`、`:2525 terminal_reply_guard`、`:2551 is_duplicate_proactive`",
+          "投递闸：`:2836 terminal_reply_guard`、`:2899 judge_proactive_message`（fail-closed）、`:2919 outbound_allowed_for_session_sync`、`:2923` 角色切换取消草稿"
+        ],
+        "rollback": "`llm_proactive.enabled=false`（热读 `proactive/llm_proactive.py:642-656`，闸 `scheduler.py:1890`）；`paused` 见 `scheduler.py:1879`；`SPEAKER_PROACTIVE=0` 仅回滚承诺闸（`utils/speaker_switches.py:79`），不关整条主动链。",
+        "risk": "`_deliver` 的 `True` 必须同时表示“通道已受理”和“只记一次账”：统一出口若自行写 chat_history/重试，或把 voice 受理降级成文本，会双写 assistant 行、漏记 `proactive_voice` 渠道，甚至把失败当成功。"
+      },
+      {
+        "name": "提醒",
+        "entry": "`proactive/reminder_delivery.py:111 _run_once` → `:130 _deliver`；调度器侧由 `scheduler.py:661-665` 每分钟 job 调 `:1114 _run_reminder_check` 注入的 task。",
+        "compose": "`reminder_delivery.py:285 _compose_text`；模板兜底 `:288`；system prompt `:301-334`（`SPEAKER_REMINDER=1` 时在 `:311-321` 前置 `load_full_persona_hint`）；LLM `llm.chat` `:324-336`。",
+        "deliver": "`reminder_delivery.py:145-150`；多 worker `_send_via_plane:228` → `proactive/runtime_plane.py:341 enqueue_send(kind=reminder)` → `wechat_direct/wechat_connector.py:1977 _drain_outbox`，kind≠proactive 在 `:2043-2044` 走整段 `send_text`；本机直发 `_send_to_session:184`，sender 由 `proactive/runtime_assembly.py:68 install_reminder_delivery` 注入。",
+        "record": "`reminder_delivery.py:161-170 record_outbound_message(channel=reminder)` 写 chat_history；`:182 mark_reminder_result` 写 reminders 状态；通道回执由 `_send_via_plane` 的 `wait_for_receipt` accepted 体现（`:228-266`）。注意：本文件无 `agent_core` 调用（grep `agent_core|record_event` 返回 NO_MATCH）。",
+        "guards": [
+          "到期查询：`shisi/memory/legacy/structured_memory.py:1721-1731`（active=1、triggered=0、status=pending、session_key 非空、trigger_time<=now）",
+          "3 次判死：`structured_memory.py:1734 mark_reminder_result`，失败累计 `:1745-1751` 达 3 次置 failed/inactive",
+          "通道未就绪不计失败：`reminder_delivery.py:151-157` `ChannelNotReadyError` 直接 return",
+          "回执超时按未送达：`reminder_delivery.py:39 PLANE_RECEIPT_TIMEOUT=30.0`；`:228-266` 只认 accepted，超时/pending 返回 False",
+          "同意门禁：`reminder_delivery.py:132-141 outbound_allowed_for_session`",
+          "静默豁免：模块 docstring `:10-13`；job 不走主动静默闸（`scheduler.py:657-665`）",
+          "文案终审：`reminder_delivery.py:349 terminal_reply_guard`；人设开关 `:311-321`（`SPEAKER_REMINDER`）"
+        ],
+        "rollback": "`SPEAKER_REMINDER=0` 只回滚人设前缀（`utils/speaker_switches.py:96`；`reminder_delivery.py:313`），回到旧 generic 提示词；无整线开关，停线需不装配 `register_reminder_task`（`scheduler.py:661`）。",
+        "risk": "`mark_reminder_result` 每轮必须恰好一次，且 `ChannelNotReadyError` 不计数、30s 未回执按失败；统一出口若吞异常、内部重试或把晚到回执补成成功，会破坏“3 次判死”和“一行只投一次”的既有语义。"
+      },
+      {
+        "name": "重要日期",
+        "entry": "`proactive/scheduler.py:3259 _check_important_dates`（每小时 job `:648-655`，每日维护 `:3257`）→ `:3322`/`:3330` 调 `_send_date_wish`；核心入口 `:3338 _send_date_wish`。",
+        "compose": "`scheduler.py:3345-3346` 模板句；`:3353 load_full_persona_hint(char_id)` 取人设；`:3356-3363 llm.chat_sync` 按角色口吻润色；`:3364 sanitize_message` 清洗。",
+        "deliver": "`scheduler.py:3374 _deliver(message, session_key=user_key, character_id=char_id)` → `:2805 _deliver` → `:2981 _send_targeted`；多 worker 经 `api/run_api.py:378-383` 以 `kind=proactive` 入 outbox，由 `wechat_connector.py:2039-2042 direct_send_proactive` 投递。",
+        "record": "`_deliver` 内 `scheduler.py:2964-2967 _record_outbound` 写 chat_history（channel=proactive）；影子 `:3383 agent_msg`（source=scheduler/blessing）；当日幂等集合 `:3402 _important_dates_sent.add(dedup_key)`，`:3404 _persist_throttle_ledger`。",
+        "guards": [
+          "静默：`scheduler.py:3276 _is_quiet_hours()`，静默期等待下一小时",
+          "当日幂等：`:3341-3343 dedup_key = today_key|user_key|label` 命中即 return",
+          "角色切换：`:3370-3372` 生成后角色变了取消旧草稿",
+          "投递终审：`:2836 terminal_reply_guard`、`:2899 judge_proactive_message`、`:2919 outbound_allowed_for_session_sync`",
+          "投递层静默：`:3014`（`_deliver` 未传 quiet_hours，回落全局窗口）",
+          "文案清洗：`:3364 sanitize_message`"
+        ],
+        "rollback": "无专用开关；`SPEAKER_REMINDER=0` 对日期线不生效（`scheduler.py:3353` 无条件读人设，只有 `reminder_delivery.py:311` 消费该开关）；只能删 `important_dates` job（`scheduler.py:648-655`）或停调度器。",
+        "risk": "`today_key|user_key|label` 只在 `delivered=True` 后入幂等集合；统一出口若先返回成功再异步发送、或内部重试后仍返回 False/True 不一致，会把未送达祝福记成已发，当天不再补发。"
+      },
+      {
+        "name": "手动命令",
+        "entry": "`proactive/scheduler.py:1056 _drain_control_commands`（job `:690`，每 5 秒）→ `:1086 manual_send_now`；API 入口 `api/routers/training_routes.py:849 send_proactive_now`（本机 `:878-884` 直调，非 master `:889-895` 入控制命令）。",
+        "compose": "`manual_send_now:990/997` 调 `proactive/ase_engine.py:1604 _generate_and_return`；`:1621 _message_generator.generate` → `:525 generate_with_llm`（`:611 load_full_persona_hint`）或 `:1642 generate_from_template`。",
+        "deliver": "`scheduler.py:1005-1006 _deliver(message, session_key=key, character_id=_manual_char_id)` → `:2805 _deliver` → `:2981 _send_targeted` → 与主动决策相同的通道/`runtime_plane`/`direct_send_proactive` 路径。",
+        "record": "影子 `scheduler.py:1027 agent_msg`（source=scheduler/manual）；`_deliver` 的 `:2964 _record_outbound` 写 chat_history（channel=proactive）；`:1045-1048 record_sent_entry` 写引擎 sent_history；控制面回执由 `_drain_control_commands:1087-1092 complete_control` 回写；`:1050-1054` finally 归还日配额。",
+        "guards": [
+          "目标显式：`scheduler.py:958-960`（空 session_key 拒绝）",
+          "引擎存在：`:962-965`（hub 无 get 拒绝）",
+          "静默：`:966-974`（全局 `_is_quiet_hours`，生成前拒绝）",
+          "消息类型白名单：`:982-989`（未知类型 rejected）",
+          "生成失败：`:998-1001`；投递失败：`:1009-1012`",
+          "控制命令 CAS/租约：`proactive/runtime_plane.py:642-680 claim_next_control/complete_control`",
+          "投递终审：`scheduler.py:2836 terminal_reply_guard`、`:2899 judge_proactive_message`、`:2919 outbound_allowed_for_session_sync`"
+        ],
+        "rollback": "无专用开关；`manual_send_now` 不读 `paused`/`llm_proactive.enabled`（`scheduler.py:940-1055`），只有 `:966 _is_quiet_hours()` 会拦；停入口需移除 `/api/proactive/send` 或 `proactive_manual` 控制命令消费。",
+        "risk": "`_generate_and_return` 默认 `commit=True`，生成时就经 `proactive/ase_engine.py:1670-1671 commit_sent` → `:1717-1733` 增加 `_daily_message_count`、`_unanswered_streak`、`_last_proactive_time`；`scheduler.py:1050-1054` 只归还日配额，统一出口若改变成功/异常语义，会让控制命令假成功或把未应答连击计数留在引擎里。"
+      }
+    ],
+    "shared": [
+      "连接器底层：`wechat_direct/wechat_connector.py:915 _send_text` / `:1380 send_text` / `:1408 _send_text_unlocked`；同 peer 串行锁 `:1972 _peer_lock`；控制面消费 `:1977 _drain_outbox`。",
+      "拆条：`wechat_direct/wechat_connector.py:575 split_reply_for_wechat` + `:2111 send_reply_segments`；主动侧 `utils/humanize_delivery.py:137 send_proactive_segmented` / `:183 direct_send_proactive`（拆条上限与节奏读 `utils/humanize_config.py:117 proactive_split`）。",
+      "跨 worker 控制面：`proactive/runtime_plane.py:341 enqueue_send`、`:500 enqueue_and_wait`、`:387 claim_next_send`、`:631 enqueue_control`；消费者 `wechat_connector.py:1977` 与 `api/run_api.py:139 _ws_outbox_drain`。",
+      "chat_history 记账：`shisi/memory/legacy/memory_pipeline.py:478 write_chat_history_sync`（主链两行）与 `:532 record_outbound_message`（主动/提醒/日期/手动只有 assistant 一行）。",
+      "影子账本：`agent_core/events.py:355 record_event`、`:158 enabled`（`AGENT_CORE_EVENTS`）；主链 `optimized_orchestrator.py:2461` + `wechat_connector.py:2526`，主动 `scheduler.py:2619`，日期 `:3383`，手动 `:1027`。",
+      "出站终审：`utils/prompt_sanitize.py:1163 terminal_reply_guard`，调用点 `optimized_orchestrator.py:2401`、`scheduler.py:2525`、`scheduler.py:2836`、`reminder_delivery.py:349`；前置清洗 `proactive/ase_engine.py:173 sanitize_message`。",
+      "身份/模式：`utils/character_resolver.py:52 resolve_character_id`、`utils/reply_mode.py:141 read_reply_mode`、人设 `proactive/proactive_context.py:24 load_full_persona_hint` → `shisi/application/persona_context.py:181 render_persona_hint`。",
+      "同意门禁：`api/consent.py:147 outbound_allowed_for_session` / `:175 outbound_allowed_for_session_sync`；主动/日期/手动在 `scheduler.py:2919`，提醒在 `reminder_delivery.py:132-141`。",
+      "静默窗：`proactive/scheduler.py:1211 _is_quiet_hours`、`:1221 _quiet_hours_for`、`:1244 _quiet_hours_contains`；主动线 per-user 透传 `:2596-2597`，日期/手动仍走全局 `:3276`/`:966`。",
+      "发声开关：`utils/speaker_switches.py:66 validate_speaker_switches`、`:79 speaker_proactive_enabled`、`:89 speaker_reply_enabled`、`:96 speaker_reminder_enabled`；`.env.example:89-98` 是公开配置面。",
+      "两个通道装配入口各写一份 sender：`main.py:376 _wechat_sender_factory` 与 `api/run_api.py:322 _wechat_sender_factory`；真正发送实现靠 `utils/humanize_delivery.py:183 direct_send_proactive` 收敛。"
+    ],
+    "gaps": [
+      "提醒线没有影子账本 `agent_msg`：`proactive/reminder_delivery.py:130-182` 只写 `record_outbound_message`/`mark_reminder_result`，全文件无 `agent_core`（grep `agent_core|record_event` 返回 NO_MATCH）；其余四线都有 `record_event`（主链 `optimized_orchestrator.py:2461`/`wechat_connector.py:2526`、主动 `scheduler.py:2619`、日期 `:3383`、手动 `:1027`）。是否刻意省略未确认。",
+      "`SPEAKER_REMINDER` 文档与实现分叉：`.env.example:95-98` 称“提醒线与日期线共用同一人设源”，但只有提醒线消费该开关（`reminder_delivery.py:311-321`）；日期线 `scheduler.py:3353 load_full_persona_hint(char_id)` 无条件读人设，开关关不掉日期线人设。",
+      "`_deliver` 渠道归属丢失：`scheduler.py:2964-2967` 对所有调用方统一记 `channel=\"proactive_voice\"` 或 `\"proactive\"`，日期祝福与手动自测在 chat_history 里与真实主动消息同渠道；只有提醒单独记 `channel=\"reminder\"`（`reminder_delivery.py:169`）。",
+      "提醒线兜底路径绕过 `terminal_reply_guard`：`reminder_delivery.py:293-297`、`:337-339` 直接 `return fallback`；只有 LLM 成功回复才在 `:349` 过守卫，fallback 内容（含用户设定的 `content`）未过终审。",
+      "控制面 kind 分叉：`wechat_connector.py:2039-2044` 只有 `kind=proactive` 走 `direct_send_proactive` 拆条判定，`reminder` 等一律整段 `send_text`；日期/手动经 `_deliver` 走 `api/run_api.py:378-383` 的 `kind=proactive`，所以它们会进入拆条判定，而提醒线即便 `proactive_split=true` 也不会拆条。",
+      "手动线预记账分叉：`manual_send_now` 走 `ase_engine.py:1604 _generate_and_return` 默认 `commit=True`（`:1605`、`:1670-1671`），生成即 `_record_proactive_sent` 增加 `_daily_message_count`/`_unanswered_streak`/`_last_proactive_time`（`:1717-1733`）；`scheduler.py:1050-1054` 只归还日配额，未还原后两项，和“投递成功才记账”的主动决策线不一致。",
+      "主动语音绕过控制面：`utils/proactive_voice_delivery.py:179-220` 自己 `find_wechat_credentials` + `send_voice_clip_to` 直发，不经过 `runtime_plane.enqueue_send` / `_drain_outbox`，也不持 `wechat_connector._peer_lock`；文本与语音可能从不同 worker 发出。",
+      "per-user 静默窗未覆盖日期/手动：日期 `scheduler.py:3276`、手动 `:966` 都用全局 `_is_quiet_hours()`，`_deliver` 调用不带 `quiet_hours`（`:3374`/`:1006`），`_send_targeted` 回落全局 `:3009`；主动线则透传 per-user 窗口 `:2596-2597`。",
+      "主链完全绕过控制面：`wechat_connector.py:2140-2144` 在连接器线程直接 `_send_text`，没有 `runtime_plane` 入队/回执；提醒/日期/手动/主动在多 worker 下走 outbox，形成两套投递栈。",
+      "日期线人设未带 `user_key`：`scheduler.py:3353 load_full_persona_hint(char_id)`；提醒线 `reminder_delivery.py:316-319` 带 `user_key`。`render_persona_hint` 的 user_key 用于按会话×角色解析回复模式/沉浸式剥离（`shisi/application/persona_context.py:181-203`），日期线因此按全局模式格式化人设。"
+    ]
+  },
+  "threads": {
+    "entries": [
+      {
+        "api": "utils/topic_state.py:94-139（_SCHEMA 三表 DDL；:392-428 建表/补列）",
+        "table": "data/sqlite.db → topic_state / topic_plan / topic_meta",
+        "readers": [
+          "utils/topic_state.py:510-548（_snapshot_from_conn 读三表）",
+          "utils/topic_state.py:1060-1090（update_after_turn 读 topic_meta/topic_state）",
+          "utils/topic_state.py:1639-1662（should_run_llm_judge 读 meta + state 存在性）"
+        ],
+        "writers": [
+          "utils/topic_state.py:392-407（ensure_schema=True 时 executescript 建表）",
+          "utils/topic_state.py:411-428（_ensure_recall_columns 幂等 ALTER topic_state）"
+        ],
+        "semantics": "open=status='active'（正在聊，主链状态块可见，active_cap 默认 3）；closed=status='closed'（明确收尾或 judge close，永不复提，仅管理端审计）；parked=中间态（6h 无活动、连续 3 轮 idle 或超 active_cap 转入，Q3 复提候选）；owner=(session_key, character_id) 复合主键，session_key 由 token/会话键派生、character_id 缺省 default，本模块是三表唯一 SQL owner（全仓非测试代码只有 utils/topic_state.py 直接 SQL 三表）；plan=topic_plan 每 (session_key, character_id) 仅一行，topic/intent + next_at + consumed_at，与 topic_state 状态解耦，只服务主动决策线；meta=topic_meta 每对一行，存 judge 计数与 last_turn_id 重放幂等键，无 TTL。表由 ensure_schema=True 的写路径惰性创建，读路径不建表。"
+      },
+      {
+        "api": "utils/topic_state.py:164-191 read_topic_config",
+        "table": "data/scheduler_config.json → topic_state 块（非 SQLite 三表）",
+        "readers": [
+          "api/routers/topic_routes.py:46-48（GET /api/topic-state/config）",
+          "utils/character_settings.py:261-267（角色快照 global_defaults）",
+          "orchestrator/optimized_orchestrator.py:1743-1750（same_session_minutes 续聊窗）",
+          "utils/topic_state.py:580,986,1024,1282,1385,1420,1480,1531,1630,1801（各 API 首行热读）"
+        ],
+        "writers": [
+          "api/routers/topic_routes.py:58-62（唯一块级写入口，POST /api/topic-state/config）",
+          "utils/proactive_config.py:390 / proactive/frequency.py:477 / api/routers/training_routes.py:475（整文件读改写，注释声明保留 topic_state 块）"
+        ],
+        "semantics": "open/closed/owner/plan 均不适用：这是全局热配置，不按会话/角色分片。逐字段类型与 _BOUNDS 校验，坏值/越界回落默认；theta2<theta1 双侧回落。enabled=false 时六 API 首行短路（不连库、不建表、不读表），唯一例外 purge_expired(force=True)。注意 DEFAULTS 实际 12 键，但 HTTP 请求模型只建模 11 键（见迁移风险）。"
+      },
+      {
+        "api": "utils/topic_state.py:194-221 write_topic_config",
+        "table": "data/scheduler_config.json → topic_state 块（非 SQLite 三表）",
+        "readers": [
+          "api/routers/topic_routes.py:62-66（写入后回执 config）",
+          "utils/topic_state.py:221（返回前 read_topic_config 回读）"
+        ],
+        "writers": [
+          "api/routers/topic_routes.py:58-62（POST /api/topic-state/config，admin）",
+          "utils/topic_state.py:205,220（read_topic_config 合并 + json_state.update_json 锁内写）"
+        ],
+        "semantics": "open/closed/owner/plan 均不适用：只做 partial merge，只触碰 topic_state 键，其余顶层键逐字保留；未知字段/越界/跨字段倒置抛 ValueError（路由转 400，Pydantic 先转 422）。无会话归属概念，四个 worker 都可读写同一文件；并发由 utils.json_state 的跨进程锁收口。"
+      },
+      {
+        "api": "utils/topic_state.py:975-1005 get_topic_snapshot",
+        "table": "topic_state（active/parked/closed 三查）+ topic_plan（未消费未过期，不筛 due）",
+        "readers": [
+          "orchestrator/optimized_orchestrator.py:1518-1529（pre-turn 并行任务）",
+          "orchestrator/optimized_orchestrator.py:1601-1603（topic_snapshot 赋值）",
+          "api/routers/topic_routes.py:183-190（GET /api/topic-state/{session_key}，:184 弹出 text）"
+        ],
+        "writers": [],
+        "semantics": "open=active[]（按 salience、last_active_at 排序）；closed=closed[]（只读审计，主链渲染不用）；parked=parked[]；owner=查询参数 (session_key, character_id)，HTTP 层由 topic_routes 的 _owned_session_keys/_is_owned_session_key 白名单兜住（admin 可查任意键）；plan=next_plan 只读 unconsumed+unexpired，且**不要求 next_at<=now**（未来计划也会出现在 API，但 take_next_plan 不会取出）。enabled=false 零 DB；空 key 或读锁/缺表 → degraded=True + 空快照。"
+      },
+      {
+        "api": "utils/topic_state.py:1008-1257 update_after_turn",
+        "table": "topic_state（状态转换/衰减/turn_count）+ topic_meta（turns_since_llm/llm_calls/last_turn_id）+ topic_plan（仅删除过期行）",
+        "readers": [
+          "orchestrator/optimized_orchestrator.py:2215-2223（后台线程调用，仅消费 should_judge）"
+        ],
+        "writers": [
+          "orchestrator/optimized_orchestrator.py:2215-2223（唯一生产调用方，_safe_topic_then_after_chat 内）"
+        ],
+        "semantics": "open=active；closed=明确 close 语句或 judge close 后置 closed；owner=(session_key, character_id)，事务内 BEGIN IMMEDIATE；plan=不读不写计划内容，只在 :1078-1085 删除过期 topic_plan 行。动作集 continue/switch/park/resume/close/timeout/replay/empty/disabled；turn_id 与 topic_meta.last_turn_id 相同则 replay 跳过；idle 衰减、3 轮 idle/park_idle_hours、active_cap 淘汰都在此完成；写 topic_meta 计数。该函数内联 DELETE topic_plan 是删表时的硬依赖（见风险）。"
+      },
+      {
+        "api": "utils/topic_state.py:1269-1369 select_proactive_recall",
+        "table": "topic_state（读 parked；顺带把超 6h 的 active 落 parked）",
+        "readers": [
+          "proactive/topic_recall.py:55-60（唯一生产调用方，build_topic_recall 内）"
+        ],
+        "writers": [
+          "utils/topic_state.py:1313-1325（timeout 写：active→parked，带 status='active' 与 last_active_at 条件）"
+        ],
+        "semantics": "open=active 永不返回（只会被 timeout 落 parked）；closed=永不返回；parked=唯一候选，且 last_active_at/last_recalled_at 均早于 cutoff（≥max(6h, recall_after_hours)）；owner=(session_key, character_id)；plan=不触碰。静默时段直接 []；max_items 钳 1..2；冷却升级 _recall_gap_hours：recall_count≥2 翻倍、≥4 四倍（utils/topic_state.py:431-442）。"
+      },
+      {
+        "api": "utils/topic_state.py:1372-1404 mark_topic_recalled",
+        "table": "topic_state（recall_count / last_recalled_at）",
+        "readers": [
+          "proactive/scheduler.py:2687-2696（返回值未使用，仅调用）"
+        ],
+        "writers": [
+          "proactive/scheduler.py:2690（投递成功分支，_recall.items 逐条调用）"
+        ],
+        "semantics": "open/closed 均非目标：只应对 parked 候选记账；SQL 本身不校验 status（:1396-1399 仅按 session_key/character_id/topic_id 更新），误传 active/closed 也会 +1；owner=(session_key, character_id)；plan 不触碰。recall_count+=1、last_recalled_at=now，供 select 的冷却升级闸使用；topic_id 不存在时 rowcount=0 返回 False。"
+      },
+      {
+        "api": "utils/topic_state.py:1407-1466 save_next_plan",
+        "table": "topic_plan（单行 upsert）",
+        "readers": [
+          "无生产读方：proactive/scheduler.py:2465-2471 与 :2672-2680 均未使用返回值"
+        ],
+        "writers": [
+          "proactive/scheduler.py:2465-2471（should_contact=false 且模型给 next_topic/next_intent 时）",
+          "proactive/scheduler.py:2672-2680（投递成功后 wait=0 保存）"
+        ],
+        "semantics": "open/closed 不触碰；owner=(session_key, character_id)；plan=写：topic<=40 字、intent<=120 字，topic/intent 全空则不写；next_at=planned_at+max(0,wait_minutes)，expires_at=min(next_at+24h, planned_at+retention_days)；ON CONFLICT 时把 consumed_at 复位 NULL（新计划立即生效）；enabled=false 或空 key 返回 None。单槽覆盖，无同题次数闸。"
+      },
+      {
+        "api": "utils/topic_state.py:1469-1507 take_next_plan",
+        "table": "topic_plan（读未消费未过期且 next_at<=now；consume=True 时写 consumed_at）",
+        "readers": [
+          "proactive/scheduler.py:2223-2226（决策前取计划，非消费，结果传入 prompt）",
+          "proactive/scheduler.py:2012-2016（window_expired 消费旧计划，结果忽略）",
+          "proactive/scheduler.py:2474-2476（skip 且模型 next 字段为空时消费旧计划）",
+          "proactive/scheduler.py:2671-2680（投递成功 consume）"
+        ],
+        "writers": [
+          "utils/topic_state.py:1494-1497（consume=True 时 UPDATE consumed_at）"
+        ],
+        "semantics": "open/closed 不触碰；owner=(session_key, character_id)；plan=读/消费：只有 consumed_at IS NULL、expires_at>now、next_at<=now 才返回；默认 consume=False（可重读），consume=True 用 BEGIN IMMEDIATE 读后更新 consumed_at；enabled=false 或空 key 返回 None；缺表/锁异常 catch 后返回 None（静默降级）。"
+      },
+      {
+        "api": "utils/topic_state.py:1526-1545 purge_expired",
+        "table": "topic_state + topic_plan（均按 expires_at<now 删除；不含 topic_meta）",
+        "readers": [
+          "proactive/scheduler.py:3170-3181（每日维护读取返回条数并记 INFO）"
+        ],
+        "writers": [
+          "proactive/scheduler.py:3176（_run_daily_maintenance 调 purge_expired(force=True)）"
+        ],
+        "semantics": "open/closed/plan 的过期行都删；owner 不设过滤（全库维护）；enabled=false 且 force=False → 0 不连库，force=True 仍执行；topic_meta 永不删除（风险项）。删除 topic_state/topic_plan 用同一写事务，任一表缺失/异常则整体回滚并返回 0。"
+      },
+      {
+        "api": "utils/topic_state.py:1622-1665 should_run_llm_judge",
+        "table": "topic_meta（读计数）+ topic_state（存在性读）",
+        "readers": [
+          "utils/topic_state.py:1811（run_llm_judge 内部唯一调用）"
+        ],
+        "writers": [],
+        "semantics": "open=需要至少一条 active 或 parked 才可能 true；closed 不算；owner=(session_key, character_id)；plan 不触碰。判定条件：enabled 且 llm_judge_enabled；turns_since_llm>=judge_every_turns（固定 4）；daily_llm_budget=0 表示不限，>0 时按当日 llm_calls 比较；meta 不存在/异常返回 False（fail-closed）。"
+      },
+      {
+        "api": "utils/topic_state.py:1787-1915 run_llm_judge",
+        "table": "topic_state（读 active/parked，judge 动作写回）+ topic_meta（llm_calls/last_llm_at/turns_since_llm/last_turn_id）",
+        "readers": [
+          "orchestrator/optimized_orchestrator.py:2195-2209（后台 _run_topic_judge）"
+        ],
+        "writers": [
+          "orchestrator/optimized_orchestrator.py:2195-2209（唯一生产调用方）"
+        ],
+        "semantics": "open/closed：action=continue/switch/park/resume/close 可改 active/parked/closed；owner=(session_key, character_id)；plan 不触碰。8s 硬超时；置信度>=0.6 才应用，失败/低置信度/超时保留原状态（fail-open for state）；只要真正发起调用，无论解析成败都 turns_since_llm=0、llm_calls+=1；judge 的 LLM 选择在 orchestrator：per-user resolver 优先，显式配置错误不回落平台凭证。"
+      },
+      {
+        "api": "utils/topic_state.py:558-651 render_topic_state_block",
+        "table": "无（纯函数，入参 snapshot）",
+        "readers": [
+          "utils/topic_state.py:547（_snapshot_from_conn 调它生成 text）",
+          "orchestrator/optimized_orchestrator.py:67-81（_attach_topic_state 挂 topic_state_text）",
+          "orchestrator/optimized_orchestrator.py:1777（并入 memory_context）",
+          "shisi/application/persona_service.py:388-394（untrusted 数据块 + 软化接续）",
+          "orchestrator/context_budget.py:228（MEMORY_SLOT_PRIORITY 的 topic_state_text 槽）"
+        ],
+        "writers": [],
+        "semantics": "open=active 渲染为「正在聊（最多 3 条）」并附最多 2 个细节锚点；last_active_at 超过 same_session_minutes（默认 120）的 active 只在渲染层降级到「之前没聊完」，不改 DB 状态；closed 不渲染；parked 渲染为「之前没聊完」最多 2 条；plan 不渲染；owner 由调用方传入的 snapshot 决定。输出 ≤160 字，标题/锚点经 _sanitize_topic_text 清洗；无 active/parked 返回空串。"
+      },
+      {
+        "api": "utils/topic_state.py:269-295 text_overlap / topic_overlap / is_close_statement",
+        "table": "无（纯函数）",
+        "readers": [
+          "utils/topic_state.py:665（_best_match 用 topic_overlap）",
+          "utils/topic_state.py:1104（update_after_turn 用 is_close_statement）",
+          "utils/topic_state.py:1678（_find_by_title 用 text_overlap）"
+        ],
+        "writers": [],
+        "semantics": "open/closed/owner/plan 均不适用；text_overlap 用短边 bigram 包含度（非 Jaccard）；topic_overlap 取 title+anchors 最大值；is_close_statement 只认明确结束语，疑问句「结束了吗？」不算收尾。都是确定性纯函数，无 DB/无状态。"
+      },
+      {
+        "api": "proactive/topic_recall.py:37-100 build_topic_recall",
+        "table": "topic_state（经 select_proactive_recall 只读；无自有表）",
+        "readers": [
+          "proactive/scheduler.py:2211-2218（决策前构造候选）",
+          "proactive/scheduler.py:2392（items 注入 build_proactive_context）",
+          "proactive/scheduler.py:2585（judge_context 存入 _judge_topic）",
+          "proactive/scheduler.py:2687-2696（items 驱动 mark_topic_recalled）",
+          "proactive/post_draft_judge.py:99-103（topic_context 渲染进 judge prompt）",
+          "proactive/post_draft_judge.py:140-150（topic_context 非空且 judge LLM 为空时 fail-closed drop）"
+        ],
+        "writers": [
+          "无直接写；间接经 select_proactive_recall 的 timeout active→parked（utils/topic_state.py:1313-1325）"
+        ],
+        "semantics": "open=active 永不返回；closed 永不返回；parked=唯一候选；owner=(session_key, character_id) 原样传给 select；plan 不触碰。三重闸：select 的 ≥6h/非静默/最多 2 条；judge 开关 read_judge_config 必须开且 judge_available=True，否则空候选（fail-closed）；judge_context 用 _sanitize_topic_text 清洗（:73 直接 import 私有函数）。"
+      },
+      {
+        "api": "proactive/ase_engine.py:843-982（构造/加载）、991-1086（on_chat/note_user_interaction）、1682-1733（commit_sent）、1838-2024（save/load）",
+        "table": "data/ase_states/<md5(user_key)>.json + data/ase_states/index.json（无 state_path 的默认构造回退 data/proactive_state.json，:742）",
+        "readers": [
+          "proactive/ase_hub.py:164-202（ASEHub.get → factory(state_path) → _load_state）",
+          "proactive/ase_engine.py:982（构造时 _load_state）、1927-1952（refresh_interaction_from_disk 读盘回灌）",
+          "orchestrator/optimized_orchestrator.py:2259-2261（on_chat 读当前内存态）、2355-2356（note_user_interaction）"
+        ],
+        "writers": [
+          "proactive/ase_engine.py:1084（note_user_interaction 立即 save_state）",
+          "proactive/scheduler.py:622-626（每 10 分钟 save_state job）、3420-3426（stop/_save_state）",
+          "proactive/ase_hub.py:142,194（forget/LRU 淘汰前 save_engine_state）、220-223（全 hub save_state）",
+          "api/lifecycle.py:548-555（账号生命周期 purge_user_states 删状态文件）"
+        ],
+        "semantics": "open/closed 不适用：ASE 是主动引擎的会话状态，不是话题生命周期；owner=user_key/session_key（ASEHub 按完整会话键分文件，:22-27；不含 character_id，_current_character_id 只影响画像/生成，不分区状态）；plan 不持有——topic_plan 是另一套存储，ASE 只有 daily_count、last_sent_time、last_delivery_time、replied_since_proactive、unanswered_streak、last_chat_time、last_sent_type、affinity_level、urgency、场景日期、recent_messages、freq adapter/controller、min_interval/cooldown、last_user_message、last_user_interaction、response_rate。save_state 只对 last_user_message/last_user_interaction/response_rate 三键做版本合并（_INTERACTION_STATE_KEYS，:763），其余字段跨 worker 最后写者覆盖。"
+      },
+      {
+        "api": "api/routers/topic_routes.py:40-66,146-190（HTTP 管理面）",
+        "table": "topic_state + topic_plan（经 utils.topic_state 的 read/write_topic_config、get_topic_snapshot）",
+        "readers": [
+          "api/routers/topic_routes.py:40-48（GET /api/topic-state/config，admin）",
+          "api/routers/topic_routes.py:146-190（GET /api/topic-state/{session_key}；admin 任意键，普通用户白名单 :98-143）"
+        ],
+        "writers": [
+          "api/routers/topic_routes.py:51-66（POST /api/topic-state/config，admin）"
+        ],
+        "semantics": "open/closed=GET 快照返回 active/parked/closed 三组，closed 仅供审计；owner=admin 分支 _normalize_admin_target_key（:172-176）可还原数字 user_id，普通用户分支只做 token 派生白名单（微信绑定+活跃会话+owner 前缀），不解析客户端自报键，失败 404；plan=响应含 next_plan（:183-190），但 :184 主动 pop 掉 text，不向任何角色回传 prompt 文本。三个端点由 api/app_factory.py:286 无条件挂载。"
+      }
+    ],
+    "topicPlanConsumers": [
+      "utils/topic_state.py:535-538（读：_snapshot_from_conn SELECT，get_topic_snapshot 返回 next_plan）",
+      "api/routers/topic_routes.py:183-190（读：GET /api/topic-state/{session_key} 响应 next_plan）",
+      "proactive/scheduler.py:2012-2016（写：window_expired 分支 take_next_plan(consume=True)）",
+      "proactive/scheduler.py:2223-2226（读：决策前 take_next_plan(now)）",
+      "proactive/scheduler.py:2392-2393（读：传入 build_proactive_context）",
+      "proactive/llm_proactive.py:884-895（读：渲染「上次决定的下一步」）",
+      "proactive/llm_proactive.py:991-995（读：_has_plan 控制空由头提示）",
+      "proactive/scheduler.py:2465-2471（写：skip 分支 save_next_plan）",
+      "proactive/scheduler.py:2473-2476（写：skip 空字段时 take_next_plan(consume=True)）",
+      "proactive/scheduler.py:2671-2680（写：投递成功 consume + save）",
+      "utils/topic_state.py:1439-1453（写：save_next_plan upsert）",
+      "utils/topic_state.py:1494-1497（写：take_next_plan consume UPDATE）",
+      "utils/topic_state.py:1518-1523（读：take_next_plan SELECT）",
+      "utils/topic_state.py:1082-1085（写：update_after_turn 删除过期 plan）",
+      "utils/topic_state.py:1539（写：purge_expired 删除过期 plan）",
+      "tests/test_topic_state.py:1001-1068（save/take/consume/TTL 用例；:681 插 plan、:1019 查 consumed_at、:1066 查 plan 行数）",
+      "tests/test_proactive_next_plan.py:191-416（计划全周期用例）",
+      "tests/api/test_topic_state_api.py:287（API 快照夹具 save_next_plan）",
+      "tests/test_agent_core_replay_20261111.py:639-640（monkeypatch take/save，agent replay 已假设存在）"
+    ],
+    "migrationRisks": [
+      "单槽覆盖丢计划：topic_plan 主键 (session_key, character_id)，save_next_plan 用 ON CONFLICT ... DO UPDATE（utils/topic_state.py:1439-1453）；skip 每次模型给 next 字段都会覆盖未消费旧计划，无同题次数闸（docs/P1_BACKLOG.md:59 UXV-12 仍开放）。迁移若按队列语义设计会改变行为；保留则建议先补同题计数/拒绝续期。",
+      "双计时器：proactive/scheduler.py:203 的 _llm_proactive_next_ok（持久化到 data/scheduler_config.json 的 throttle 段，:3629-3660）决定「何时再决策」；topic_plan.next_at 只决定「到点注入什么」。两者同拍写（:2443-2453 vs :2465-2471）但独立存储；删 topic_plan 不会解除等待窗，主动线仍按 next_ok 触发，只是丢失内容计划。迁移必须决定新账本是否接管 next_ok。",
+      "update_after_turn 内联 DELETE topic_plan：utils/topic_state.py:1078-1085。若删表/停用 plan 而保留该 DELETE，SQL 报错会被 :1224-1253 捕获 → 整个 update_after_turn 返回 action=error，topic_state 也不再更新。删表顺序必须先删/改这行 DELETE，再动表。",
+      "读路径静默降级：_snapshot_from_conn 读 topic_plan（utils/topic_state.py:535-538），get_topic_snapshot 整体 catch（:1003-1005）；take_next_plan/save_next_plan/purge_expired 也各自 catch 返回 None/0（:1505-1507、:1454-1456、:1541-1543）。删表不会炸主链，但状态块/计划/API 会静默消失，验收容易误判「没问题」。",
+      "API 契约变更：GET /api/topic-state/{session_key} 返回 next_plan（api/routers/topic_routes.py:183-190），GET/POST /api/topic-state/config 暴露配置面；api/app_factory.py:286 无条件挂 router。删 plan 需版本化响应或保留字段；前端当前无页面消费（frontend/src/api/system.ts:118 仅注释），但外部运维脚本可能依赖。",
+      "topic_meta 永久残留：purge_expired 只删 topic_state/topic_plan（utils/topic_state.py:1538-1539），全仓 grep 无 DELETE FROM topic_meta；topic_meta 每 (session_key, character_id) 一行永久增长。迁移/重建需补 DELETE ... WHERE session_key IN (...) 或 TTL。",
+      "账号生命周期不清三表：api/lifecycle.py:548-555 只清 ASE 状态文件（registry :735）；topic_state 标题/摘要/锚点、topic_plan topic/intent 最多留 7 天（retention_days=7，utils/topic_state.py:83），topic_meta 永久。迁移/删除时必须补 owner 级 purge，否则有隐私/合规风险。",
+      "agent_threads 不是等价替代：agent_core/threads.py:3-8 明说 thread_id 不含 character_id；agent_core/events.py:92-114 状态只有 open/awaiting_user/closed，无 parked/salience/anchors/recall_count/TTL；close_thread 在 B-1 无生产调用（threads.py:10-11）。单一个体设计 S4/S5 计划删 topic_plan 自馈/清场（docs/reports/2026-11-10-单一个体Agent架构设计与调研.md:228-229），但直接映射会丢「按角色隔离」「parked 复提」「内容计划」三项。",
+      "角色级 topic 开关是假回执：前端 CharacterSettingsPanel.tsx:418-419 暴露 topic_enabled/llm_judge_enabled 并写入 user_character_settings（utils/character_settings.py:157-158,265-267）；但 read_topic_config 只读全局 scheduler_config.json（utils/topic_state.py:164-191），全仓 grep 无生产消费 topic_enabled。迁移/删除时需删 UI 或补 per-character 覆盖，否则用户以为关了实际没关。",
+      "配置面缺键：DEFAULTS 有 12 键（含 same_session_minutes，utils/topic_state.py:56-75），TopicStateConfigRequest 只建模 11 键（api/main_routes.py:115-151，extra='forbid'），POST 传 same_session_minutes 会 422；write_topic_config 本身接受（utils/topic_state.py:194-221）但无生产入口。orchestrator/optimized_orchestrator.py:1748 注释称「可调」只在代码层成立。迁移时要么补模型+前端，要么明确它是常量。",
+      "懒建表/无迁移版本：_connect(ensure_schema=True) 才执行 _SCHEMA（utils/topic_state.py:392-407），_ensure_recall_columns 只给 topic_state 补两列（:411-428）；topic_plan/topic_meta 无 ALTER/DROP 迁移路径。生产已有 topic_plan 真实数据（docs/CODEMAPS/DATABASE.md:101）。迁移/删除必须写显式 DDL/回滚脚本，不能只删代码。",
+      "closed 重开用时间盐：_create_topic 对同 title 的 closed 行生成 title|timestamp|salt 新 topic_id（utils/topic_state.py:891-906），保留同题多段历史；若迁移到按 title 去重的 agent_threads，会把不同时段的 closed 话题合并/复活。",
+      "plan 文本未走统一清洗：next_topic/next_intent 只 clip（proactive/llm_proactive.py:1094-1095），直接拼入主动 prompt（:884-895）；对比 parked topics 走 _sanitize_topic_text（:951）。迁移/保留时若把 plan 内容进更高权限 prompt，需补同款清洗（防 #、[INST]、system: 注入）。",
+      "无 claim/lease：take_next_plan(consume=False) 是纯读（utils/topic_state.py:1490-1501），调度器在 :2223 读、:2671 成功后才 consume；多 worker/并发决策下同一 due plan 可被重复注入（当前调度器 singleton + 每用户单拍降低概率，但迁移到多 worker agent 需加 claim 列/原子抢占）。",
+      "测试/文档耦合：tests/test_topic_state.py:1001-1068、tests/test_proactive_next_plan.py:191-416、tests/api/test_topic_state_api.py:287、tests/test_agent_core_replay_20261111.py:639-640 直接使用 save/take；docs/FUNCTION_INVENTORY.md:151 与 docs/CODEMAPS/ARCHITECTURE.md:61 的 scheduler 行号（1811/1703/1932/2293、1805/1785）已与当前代码（2223/2465/2671/3176、2215/2195）漂移，按文档行号找消费方会漏。",
+      "核查边界：本报告只做静态 Read/grep；未运行 pytest、未改文件；所有「生产读/写方」均指代码路径存在，不代表运行通过。"
+    ]
+  },
+  "persona": {
+    "renderers": [
+      "shisi/application/persona_context.py:181 render_persona_hint（内部 :209 _persona_from_yaml、:243 _persona_from_card、:145 strip_stage_directions_if_immersive）",
+      "proactive/proactive_context.py:24 load_full_persona_hint（薄委托 persona_context；:50 immersive_proactive_constraints）",
+      "shisi/application/persona_service.py:182 PersonaService.build_system_prompt（:543 _resolve_character_card、:555 _builtin_character_card、:587 _character_from_card、:650 _load_character_card）",
+      "shisi/core/services/prompt_builder.py:26 build（调用 CharacterAggregate.build_system_prompt）",
+      "shisi/core/models/character_aggregate.py:154 CharacterAggregate.build_system_prompt（主链角色卡正文实际拼接）",
+      "shisi/core/models/persona_profile.py:35 PersonaProfile.to_prompt_segment（十维数值人设段）",
+      "my_character/persona_engine.py:541 build_emotion_layer / :545 build_emotion_style_segment / :553 build_style_layer / :562 build_constraint_layer",
+      "proactive/llm_proactive.py:726 build_proactive_context（主动决策上下文）",
+      "proactive/ase_engine.py:525 generate_with_llm（手动线 ASE 生成，人设段 :611-630）",
+      "proactive/reminder_delivery.py:285 _compose_text（提醒线）",
+      "proactive/scheduler.py:3338 _send_date_wish（重要日期祝福线）",
+      "proactive/scheduler.py:940 manual_send_now（手动线入口，委托 ase_engine._generate_and_return:1604）"
+    ],
+    "capability": "题面所写 utils/prompt_sanitize.capability_block 不存在（grep -n \"capability_block\\|capability\" utils/prompt_sanitize.py 无匹配）；能力块唯一 owner 是 shisi/application/persona_service.py:95 capability_block。常量：CAPABILITY_DECLARATION :56-64（静态三段）、CAPABILITY_RECALL_LINE :68-72（memory_recall）、CAPABILITY_VOICE_LINE :78-83（voice_enabled）、CAPABILITY_TOOLS_INLINE_LINE :89-92（tools_inline）；唯一生产注入点 PersonaService.build_system_prompt :374-384。生产者：orchestrator/optimized_orchestrator.py:183 _memory_recall_available、:270 _tools_inline_available、:287 _voice_sending_available，:1914-1919 传入 flags。现状：只有主链有结构化能力块；主动/提醒/日期/手动 prompt 无能力声明，全仓也没有运行时 CapabilityModel 类。",
+    "injectionPoints": [
+      "主链：orchestrator/optimized_orchestrator.py:1901-1924 调 PersonaService.build_system_prompt:182；base 由 prompt_builder.build:26 → CharacterAggregate.build_system_prompt:154 生成；注入序 persona_service.py:342-476（身份 :349、称呼 :354-361、角色说明 :365、记忆守则 :369、能力 :378-384、话题 :391-399、表情 :401、世界 :403、RAG :406-440、情绪/风格/约束 :442-471）。时间锚点：utils/local_time.py:189 time_anchor_line → orchestrator :1717-1726 → persona_service :241-243。",
+      "主动（决策）：proactive/scheduler.py:2367-2393 build_proactive_context → proactive/llm_proactive.py:726-1028；系统提示 DECISION_SYSTEM:127-201；调用 decide_proactive:1346-1382。人设 :852、用户身份 :782-853、称呼白名单 :827-845、画像 :856-867；无 mode_constraints，无 capability 块；自动主动消息由 decide_proactive 直接产出 message（scheduler.py:2422/2505），不经过 ase_engine.generate_with_llm。",
+      "提醒：proactive/reminder_delivery.py:285-360 _compose_text；system_prompt 人设前缀 :305-321（仅 speaker_reminder_enabled:311-313 开时）；query :327-333；terminal_reply_guard :349-359。",
+      "日期：proactive/scheduler.py:3338-3410 _send_date_wish；LLM system_prompt=persona_hint :3350-3363；投递 :3374；终审经 _deliver :2836-2845。",
+      "手动：api/routers/training_routes.py:848-884 → proactive/scheduler.py:940-1049 manual_send_now；生成 :990/:997 → proactive/ase_engine.py:1604-1645 _generate_and_return → :525-700 generate_with_llm（人设 :611-630、mode_constraints :612）；无独立能力块，无 send_voice 能力。"
+    ],
+    "gaps": [
+      "题面路径/owner 漂移：utils/prompt_sanitize.capability_block 不存在（grep -n \"capability_block\\|capability\" utils/prompt_sanitize.py 无匹配）；全仓 grep -rn \"def capability_block\" --include=*.py . 仅 shisi/application/persona_service.py:95。按旧路径盘点会漏掉能力声明唯一 owner。",
+      "能力块只覆盖主链：PersonaService.build_system_prompt 是唯一生产调用点（orchestrator/optimized_orchestrator.py:1901），能力块在 :378-384；主动决策/提醒/日期/手动 prompt 均无 CAPABILITY_*。主动决策反而在 llm_proactive.py:196-200 无条件写死“voice=true 会把 message 转成语音条发出去，本轮不再发明文”；实际 scheduler.py:3052-3079 在 TTS/凭据/平台失败时会静默回落文字，模型被告知的能力与实际通道不一致。",
+      "静态能力声明与工具注册解耦：CAPABILITY_DECLARATION persona_service.py:58-63 无条件声明提醒/天气/搜索/日历/查记忆由真实工具完成；_init_mixin.py:381 只有 tools.enabled 才注册，:436-442 关闭时 components[\"tools\"]=None，:397-431 memory 工具还要求 structured memory。工具关闭时只有 CAPABILITY_RECALL_LINE 会因 memory_recall=False 被移除，静态三句仍声称有工具。另 capability_block 的 memory_recall 缺省 True（persona_service.py:380），非编排器调用方未传 flags 会默认声明有记忆。",
+      "语音能力探测多 owner 且只是初始化快照：主链 _voice_sending_available（optimized_orchestrator.py:287-301）只看 components[\"voice\"].enabled；真实发送还要求 _voice_reply_ready（:207-223：显式请求或 LLM 裁决、正文≥8 字、有 synthesize）和 voice_mgr.synthesize（:2757/:2806）。主动线 utils/proactive_voice_delivery.get_tts_manager（:49-64）另建一个 TTSManager，send_proactive_voice（:179-220）还要求微信凭据。能力 flag 不检查凭据、角色音色绑定或运行时合成健康；TTSManager.initialize 只在有 api_key 时 enabled（voice/tts_manager.py:63-85、:91-93），初始化后失效不会回写能力声明。",
+      "人设渲染分叉：主链走 CharacterAggregate.build_system_prompt:154（卡文全量、无 1200 上限；orchestrator:1884-1899 先 character_overrides.apply 合并用户私人覆盖）；主动/提醒/日期/手动走 persona_context.render_persona_hint:181（:240/:280 总长上限 1200，直接读原始卡，无 user_id/私人覆盖参数）。只读实跑 45 张卡：22/45 渲染长度卡在 1200 上限；15/45 有 creator_notes 但输出完全没有【扮演规则】段。用户改过的私人卡在四条非主链 prompt 中不生效。",
+      "speaking_style dict repr：persona_context._persona_from_card:266-268 对 speaking_style 直接 str()；现役 45/45 卡该字段都是 dict，实际渲染 32/45 的【说话风格】段是 Python dict 字面量（其余 13 张在到达该段前已被 1200 截断）。主链 PersonaProfile.to_prompt_segment:35 输出的是十维中文数值段，四条非主链线拿到机器 repr，污染口吻并挤占 1200 预算。",
+      "卡片定位/规范化分叉：主动侧 render_persona_hint 调 load_raw_card(..., match_name=True)（persona_context.py:203/:245），主链 _load_character_card 用 resolve_card_path(..., match_name=False)（persona_service.py:677-679）并 normalize_character_card（:701）；主动侧不展平嵌套卡。现役 45 张卡无嵌套 data 字段（只读扫盘 0 张），嵌套格式是潜在缺口；name-only 匹配已是现行差异。",
+      "画像/身份来源不齐：主动决策用 agent-plane get_profile_prompt_block（llm_proactive.py:856-867，含 preferences/否认称呼）；手动线 ASE 生成用 legacy default_store().to_prompt_block（ase_engine.py:1119-1139，600s TTL 缓存）；提醒/日期没有画像块。主动决策有【用户身份】+address_prompt_block（llm_proactive.py:782-853）；ASE 生成、提醒、日期只有人设段（ase_engine.py:620-630、reminder_delivery.py:305-321、scheduler.py:3350-3363），没有身份/称呼/画像。日期线还漏传 user_key（scheduler.py:3353），render_persona_hint 的模式剥离只能回全局默认（utils/reply_mode.py:156-157：user_key/character_id 缺任一即跳过用户×角色快照）。",
+      "回复模式/终审守卫覆盖不齐：immersive_proactive_constraints 只在 ASE 生成线被调用（ase_engine.py:604/:612），主动决策与日期线不注入；沉浸式只靠出站 terminal_reply_guard 剥括号（prompt_sanitize.py:1212-1215）。terminal_reply_guard 本身不是能力/人设校验器（:1163-1268），主链调用未传 session_key/character_id（optimized_orchestrator.py:2401-2407），其内部称呼剥除分支 :1256-1267 在主链是死路径，实际靠外层 :2408-2415 再实现一次；主动 _deliver 调守卫时 character_name=\"\"（scheduler.py:2838-2840），退化“只剩角色名”检查在决策/日期/手动线失效。",
+      "能力块文档漂移与探测口径不一致：PersonaService.build_system_prompt docstring 写 capability_flags“目前只消费 memory_recall”（persona_service.py:205-207），实际 :374-383 还消费 voice_enabled/tools_inline。_tools_inline_available 用 get_tools_by_permission(0)（optimized_orchestrator.py:270-284），主链实际循环用 get_tools_by_permission(affinity_level)（:762）；只有 friend/intimate 级工具时两者结论可相反。"
+    ]
+  }
+}

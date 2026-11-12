@@ -445,6 +445,24 @@ def complete_send(cmd_id: int, *, ok: bool, reason: str = "", slot: int | None =
         conn.commit()
 
 
+def cancel_send_pending(cmd_id: int, *, reason: str = "producer_timeout") -> bool:
+    """只取消**尚未被认领**的 pending 行，返回是否取消成功。
+
+    2026-11-12 复核修复（D1 超时双发）：生产者等回执超时时，行若仍 pending
+    可安全判死；已被某个连接器宿主认领（claimed）则不能取消——它可能正在
+    发送，生产者此时必须按「未确认」处理且**不得回落文字**，否则语音+文字
+    双发。
+    """
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE outbound_commands SET status='failed', fail_reason=? "
+            "WHERE id=? AND status='pending'",
+            (reason[:300], int(cmd_id)),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+
+
 def send_status(cmd_id: int) -> dict[str, Any] | None:
     with _conn() as conn:
         row = conn.execute(
@@ -521,7 +539,13 @@ def enqueue_and_wait(
         slot=slot, peer=peer, character_id=character_id, turn_id=turn_id,
         message=message,
     )
-    row = wait_for_receipt(cid, timeout=timeout)
+    try:
+        row = wait_for_receipt(cid, timeout=timeout)
+    except Exception as e:  # noqa: BLE001
+        # 2026-11-12 终审修复：入队已成功、等待阶段异常不能当作「没发」——
+        # 行仍在 outbox，宿主稍后可能真实投递。返回未确认 + cid，让调用方
+        # 走 cancel/不回落文字的同一套保护。
+        return False, f"unconfirmed_wait_error({type(e).__name__})", cid
     status = str((row or {}).get("status") or "")
     reason = str((row or {}).get("fail_reason") or "")
     if status == "accepted":

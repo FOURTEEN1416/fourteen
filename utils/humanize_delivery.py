@@ -134,6 +134,37 @@ def segment_sender(connector: Any):
     return getattr(connector, "send_reply_segments", None)
 
 
+def send_proactive_segmented_result(
+    connector: Any, peer: str, msg: str,
+) -> tuple[str, list[str]] | None:
+    """拆条发送并返回 ``(已受理前缀, 期望段列表)``；连接器无拆条实现 → None。
+
+    2026-11-12 复核修复：提醒线需要区分「完整受理 / 部分前缀」，旧的单一
+    bool 会把部分受理折叠成失败并触发整条重发（已受理前缀被重复发送）。
+    """
+    send = segment_sender(connector)
+    if send is None:
+        return None
+    from wechat_direct.wechat_connector import (
+        _speaker_reply_hard_limit,
+        split_reply_for_wechat,
+    )
+
+    lock = getattr(connector, "_peer_lock", None)
+    session_key = getattr(connector, "_session_key", None)
+    if callable(lock) and callable(session_key):
+        with lock(session_key(peer)):
+            accepted = send(peer, msg)
+    else:
+        accepted = send(peer, msg)
+    expected = split_reply_for_wechat(
+        msg,
+        max_segments=_scoped_split_cap(connector, peer),
+        hard_limit=_speaker_reply_hard_limit(),
+    )
+    return str(accepted or ""), expected
+
+
 def send_proactive_segmented(connector: Any, peer: str, msg: str) -> bool | None:
     """把一条主动消息投进「拆条 + 段间节奏」链。
 
@@ -157,27 +188,24 @@ def send_proactive_segmented(connector: Any, peer: str, msg: str) -> bool | None
     不持锁（connector 契约）——在此补上同一把锁，防主动消息与主回复对同一
     peer 交错。RLock 可重入，段方法日后自行加锁也不会自死锁。
     """
-    send = segment_sender(connector)
-    if send is None:
+    result = send_proactive_segmented_result(connector, peer, msg)
+    if result is None:
         return None
-    from wechat_direct.wechat_connector import (
-        _speaker_reply_hard_limit,
-        split_reply_for_wechat,
-    )
-
-    lock = getattr(connector, "_peer_lock", None)
-    session_key = getattr(connector, "_session_key", None)
-    if callable(lock) and callable(session_key):
-        with lock(session_key(peer)):
-            accepted = send(peer, msg)
-    else:
-        accepted = send(peer, msg)
-    expected = split_reply_for_wechat(
-        msg,
-        max_segments=_scoped_split_cap(connector, peer),
-        hard_limit=_speaker_reply_hard_limit(),
-    )
+    accepted, expected = result
     return bool(accepted) and accepted == "\n".join(expected)
+
+
+def direct_send_proactive_result(
+    connector: Any, peer: str, msg: str,
+) -> tuple[bool, bool]:
+    """直发主动消息，返回 ``(是否有任意段被受理, 是否完整受理)``。"""
+    if proactive_split_enabled(connector, peer):
+        result = send_proactive_segmented_result(connector, peer, msg)
+        if result is not None:
+            accepted, expected = result
+            return bool(accepted), accepted == "\n".join(expected)
+    ok = bool(connector.send_text(msg, to_user=peer))
+    return ok, ok
 
 
 def direct_send_proactive(connector: Any, peer: str, msg: str) -> bool:
@@ -190,8 +218,4 @@ def direct_send_proactive(connector: Any, peer: str, msg: str) -> bool:
     2026-11-08 D-A：「主动拆条」开关按 `connector.humanize_scope(peer)`
     解析的「用户 × 角色」快照读取；连接器不提供作用域时回落全局块。
     """
-    if proactive_split_enabled(connector, peer):
-        accepted = send_proactive_segmented(connector, peer, msg)
-        if accepted is not None:
-            return accepted
-    return bool(connector.send_text(msg, to_user=peer))
+    return direct_send_proactive_result(connector, peer, msg)[1]

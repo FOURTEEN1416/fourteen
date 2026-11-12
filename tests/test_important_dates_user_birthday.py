@@ -58,7 +58,10 @@ class _DeliverRecorder:
     def __init__(self):
         self.calls: list[tuple[str, str | None]] = []
 
-    def __call__(self, message: str, session_key: str | None = None, character_id: str | None = None) -> bool:
+    def __call__(
+        self, message: str, session_key: str | None = None,
+        character_id: str | None = None, **kwargs,
+    ) -> bool:
         self.calls.append((message, session_key))
         return True
 
