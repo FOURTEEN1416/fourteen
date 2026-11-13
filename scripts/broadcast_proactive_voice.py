@@ -238,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         from utils.proactive_voice_delivery import send_proactive_voice
 
         session_key = f"{tgt['user_id']}:{tgt['peer']}@im.wechat"
-        ok, err = send_proactive_voice(session_key, text, tgt["character_id"])
+        ok, err, _cid = send_proactive_voice(session_key, text, tgt["character_id"])
         if ok:
             ok_n += 1
             _record_outbound(text, tgt)

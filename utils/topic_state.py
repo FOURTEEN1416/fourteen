@@ -424,8 +424,15 @@ def _migrate_legacy_plan_table(conn: sqlite3.Connection) -> None:
     """把 v1.58 的 ``topic_plan`` 行迁移到 ``thread_plan`` 后删除旧表。
 
     2026-11-13：topic_plan 表清场。幂等：旧表不存在即 no-op；``INSERT OR
-    IGNORE`` 保证新表已有同键行时不被旧值覆盖；单事务内复制 + DROP，失败
-    由调用方回滚。回滚脚本见 ``scripts/topic_plan_migration.py down``。
+    IGNORE`` 保证新表已有同键行时不被旧值覆盖；显式 ``BEGIN IMMEDIATE``
+    内复制 + DROP（连接是 autocommit，必须自己开事务），失败回滚后上抛。
+    回滚脚本见 ``scripts/topic_plan_migration.py down``。
+
+    对抗验收修复（2026-11-13）：
+    - 旧表可能来自试验期 schema（缺 ``consumed_at``）或外部工具建表，缺列
+      时按默认值补，绝不因一列缺失让整条写路径永久 ``db_error``；
+    - 复制 + DROP 必须原子：中途崩溃只允许「双表并存」，不允许「旧表已删、
+      新表没写全」。
     """
     tables = {
         str(row[0])
@@ -435,14 +442,36 @@ def _migrate_legacy_plan_table(conn: sqlite3.Connection) -> None:
     }
     if "topic_plan" not in tables:
         return
-    conn.execute(
-        "INSERT OR IGNORE INTO thread_plan "
-        "(session_key, character_id, topic, intent, planned_at, next_at, "
-        " expires_at, consumed_at) "
-        "SELECT session_key, character_id, topic, intent, planned_at, next_at, "
-        "       expires_at, consumed_at FROM topic_plan"
-    )
-    conn.execute("DROP TABLE topic_plan")
+    legacy_cols = {
+        str(row[1]) for row in conn.execute("PRAGMA table_info(topic_plan)")
+    }
+    select_parts: list[str] = []
+    for column, default in (
+        ("session_key", "''"),
+        ("character_id", "''"),
+        ("topic", "''"),
+        ("intent", "''"),
+        ("planned_at", "''"),
+        ("next_at", "''"),
+        ("expires_at", "''"),
+        ("consumed_at", "NULL"),
+    ):
+        select_parts.append(column if column in legacy_cols else default)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO thread_plan "
+            "(session_key, character_id, topic, intent, planned_at, next_at, "
+            " expires_at, consumed_at) "
+            f"SELECT {', '.join(select_parts)} FROM topic_plan"
+        )
+        conn.execute("DROP TABLE topic_plan")
+    except Exception:
+        with suppress(sqlite3.Error):
+            conn.execute("ROLLBACK")
+        raise
+    else:
+        conn.execute("COMMIT")
     logger.info("[topic_state][step=migrate_plan] topic_plan -> thread_plan done")
 
 
@@ -478,6 +507,17 @@ def _recall_gap_hours(recall_count: int, base_hours: float) -> float:
     if int(recall_count) >= 2:
         return float(base_hours) * 2.0
     return float(base_hours)
+
+
+def _character_key(character_id: Any) -> str:
+    """角色键：只接受显式值，空白/None **不再**归一成 ``default``。
+
+    2026-11-13 对抗验收（M1）：旧实现把空白 character_id 归一成 ``"default"``，
+    任何绕过 ``ThreadState`` facade 的底层调用（后台线程、脚本、测试直调）都会
+    把消息写进内置十四的桶，同用户切角色后造成跨角色串写。显式 ``"default"``
+    （内置卡）仍原样通过；空值由各 API 各自 no-op。
+    """
+    return str(character_id or "").strip()
 
 
 @contextmanager
@@ -1048,7 +1088,10 @@ def get_topic_snapshot(
     key = str(session_key or "").strip()
     if not key:
         return _empty_snapshot(enabled=True, degraded=True)
-    character = str(character_id or "default").strip() or "default"
+    character = _character_key(character_id)
+    if not character:
+        # 空角色不再猜 default：读 default 桶会把别的角色话题注进本轮上下文。
+        return _empty_snapshot(enabled=True, degraded=True)
     dt = _normalize_now(now)
     try:
         with closing(_connect(ensure_schema=False, busy_timeout_ms=_READ_TIMEOUT_MS)) as conn:
@@ -1093,12 +1136,12 @@ def update_after_turn(
         }
 
     key = str(session_key or "").strip()
-    character = str(character_id or "default").strip() or "default"
+    character = _character_key(character_id)
     message = str(user_message or "").strip()
-    if not key or not message:
+    if not key or not message or not character:
         logger.debug(
             "[topic_state][step=update] action=empty reason=%s",
-            "session_key" if not key else "message",
+            "session_key" if not key else ("character_id" if not character else "message"),
         )
         return {
             "enabled": True,
@@ -1344,7 +1387,9 @@ def select_proactive_recall(
     key = str(session_key or "").strip()
     if not key:
         return []
-    character = str(character_id or "default").strip() or "default"
+    character = _character_key(character_id)
+    if not character:
+        return []
     dt = _normalize_now(now)
     if quiet_hours is not None and _in_quiet_hours(dt.hour, quiet_hours):
         logger.debug("[topic_state][step=recall] quiet_hours")
@@ -1445,9 +1490,9 @@ def mark_topic_recalled(
     if not cfg["enabled"]:
         return False
     key = str(session_key or "").strip()
-    character = str(character_id or "default").strip() or "default"
+    character = _character_key(character_id)
     tid = str(topic_id or "").strip()
-    if not key or not tid:
+    if not key or not tid or not character:
         return False
     dt = _normalize_now(now)
     try:
@@ -1480,10 +1525,10 @@ def save_next_plan(
     if not cfg["enabled"]:
         return None
     key = str(session_key or "").strip()
-    character = str(character_id or "default").strip() or "default"
+    character = _character_key(character_id)
     topic_text = _clip(topic, 40)
     intent_text = _clip(intent, 120)
-    if not key or (not topic_text and not intent_text):
+    if not key or not character or (not topic_text and not intent_text):
         return None
     planned = _normalize_now(planned_at)
     wait = max(0, _safe_int(wait_minutes, 0))
@@ -1542,7 +1587,9 @@ def take_next_plan(
     key = str(session_key or "").strip()
     if not key:
         return None
-    character = str(character_id or "default").strip() or "default"
+    character = _character_key(character_id)
+    if not character:
+        return None
     dt = _normalize_now(now)
     now_ts = _ts(dt)
     try:
@@ -1598,10 +1645,15 @@ def _owner_keys(session_keys: Any) -> list[str]:
 
 
 def _existing_topic_tables(conn: sqlite3.Connection) -> set[str]:
-    """当前库里真实存在的三张话题表（避免对未建表的库做 DDL/报错）。"""
+    """当前库里真实存在的话题表（含迁移前的旧 ``topic_plan``）。
+
+    2026-11-13 对抗验收修复：旧表白名单缺席会让「删号/每日 TTL」对未迁移
+    存量库完全失效，并在之后的自动迁移里把已删账号数据搬进新表（删号复活）。
+    清理与 verify 必须同时看见旧表。
+    """
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
-        "('topic_state', 'thread_plan', 'topic_meta')"
+        "('topic_state', 'thread_plan', 'topic_meta', 'topic_plan')"
     ).fetchall()
     return {str(row[0]) for row in rows}
 
@@ -1637,8 +1689,29 @@ def purge_expired(*, now: datetime | None = None, force: bool = False) -> int:
                     "DELETE FROM thread_plan WHERE expires_at < ?", (now_ts,)
                 )
                 deleted += int(cur_plan.rowcount or 0)
+            if "topic_plan" in tables:
+                # 迁移前存量库：旧表过期行同样要清，否则 purge_expired 的
+                # 返回值与实际残留脱节（2026-11-13 对抗验收）。
+                cur_legacy = conn.execute(
+                    "DELETE FROM topic_plan WHERE expires_at < ?", (now_ts,)
+                )
+                deleted += int(cur_legacy.rowcount or 0)
             # meta 谓词依赖 state/plan 两表；缺表时保守跳过（不猜未过期）。
-            if {"topic_state", "thread_plan", "topic_meta"} <= tables:
+            # plan 表在迁移前后可能叫不同名字，两表并存时逐个检查。
+            if {"topic_state", "topic_meta"} <= tables:
+                plan_checks: list[str] = []
+                plan_params: list[Any] = []
+                for plan_table in ("thread_plan", "topic_plan"):
+                    if plan_table in tables:
+                        plan_checks.append(
+                            f"AND NOT EXISTS ("
+                            f" SELECT 1 FROM {plan_table}"
+                            f" WHERE {plan_table}.session_key = topic_meta.session_key"
+                            f"   AND {plan_table}.character_id = topic_meta.character_id"
+                            f"   AND {plan_table}.expires_at >= ?"
+                            f")"
+                        )
+                        plan_params.append(now_ts)
                 cur_meta = conn.execute(
                     "DELETE FROM topic_meta WHERE last_llm_at < ? "
                     "AND NOT EXISTS ("
@@ -1647,13 +1720,8 @@ def purge_expired(*, now: datetime | None = None, force: bool = False) -> int:
                     "   AND topic_state.character_id = topic_meta.character_id"
                     "   AND topic_state.expires_at >= ?"
                     ") "
-                    "AND NOT EXISTS ("
-                    " SELECT 1 FROM thread_plan"
-                    " WHERE thread_plan.session_key = topic_meta.session_key"
-                    "   AND thread_plan.character_id = topic_meta.character_id"
-                    "   AND thread_plan.expires_at >= ?"
-                    ")",
-                    (cutoff_ts, now_ts, now_ts),
+                    + " ".join(plan_checks),
+                    (cutoff_ts, now_ts, *plan_params),
                 )
                 deleted += int(cur_meta.rowcount or 0)
     except Exception as e:  # noqa: BLE001
@@ -1703,7 +1771,7 @@ def purge_owner(
     with closing(_connect(ensure_schema=False, db_path=db_path)) as conn, _write_tx(conn):
         tables = _existing_topic_tables(conn)
         deleted = 0
-        for table in ("topic_state", "thread_plan", "topic_meta"):
+        for table in ("topic_state", "thread_plan", "topic_meta", "topic_plan"):
             if table not in tables:
                 continue
             cur = conn.execute(
@@ -1730,7 +1798,7 @@ def count_owner(
     with closing(_connect(ensure_schema=False, db_path=db_path)) as conn:
         tables = _existing_topic_tables(conn)
         total = 0
-        for table in ("topic_state", "thread_plan", "topic_meta"):
+        for table in ("topic_state", "thread_plan", "topic_meta", "topic_plan"):
             if table not in tables:
                 continue
             row = conn.execute(
@@ -1829,7 +1897,9 @@ def should_run_llm_judge(
     key = str(session_key or "").strip()
     if not key:
         return False
-    character = str(character_id or "default").strip() or "default"
+    character = _character_key(character_id)
+    if not character:
+        return False
     dt = _normalize_now(now)
     try:
         with closing(_connect(ensure_schema=False, busy_timeout_ms=_READ_TIMEOUT_MS)) as conn:
@@ -2002,7 +2072,9 @@ def run_llm_judge(
     key = str(session_key or "").strip()
     if not key:
         return None
-    character = str(character_id or "default").strip() or "default"
+    character = _character_key(character_id)
+    if not character:
+        return None
     dt = _normalize_now(now)
     if not should_run_llm_judge(key, character, cfg, now=dt):
         return None

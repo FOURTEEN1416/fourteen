@@ -19,6 +19,7 @@ import inspect
 import logging
 import time
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 from proactive.ase_engine import sanitize_message
@@ -38,6 +39,30 @@ _INTENT_GC_INTERVAL_SECONDS = 300.0
 # 控制面受理回执等待窗（秒）：连接器 outbox 消费者挂在 5 秒 tick 上，
 # 正常受理 <10s；超时**按未送达处理**（fail_count 继续累计，不假 delivered）。
 PLANE_RECEIPT_TIMEOUT = 30.0
+
+
+def _now_local_text() -> str:
+    """续投提醒的 trigger_time 格式（与 StructuredMemory._now_local 同形）。"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _remainder_after_prefix(text: str, delivered: str) -> str:
+    """返回 ``text`` 去掉已受理前缀后的尾段；前缀对不上时返回空串（不猜）。
+
+    2026-11-13 对抗验收 H2/M3：拆条链的 ``accepted_text`` 可能是多段拼接
+    （段间换行），也可能是单段前缀；两种都按「原文里能找到的已受理部分」
+    切尾段，找不到就按完整处理——宁可少续投，不重复发送。
+    """
+    raw = str(text or "")
+    prefix = str(delivered or "").strip()
+    if not raw.strip() or not prefix:
+        return ""
+    if raw.startswith(prefix):
+        return raw[len(prefix):].strip()
+    idx = raw.find(prefix)
+    if idx >= 0:
+        return raw[idx + len(prefix):].strip()
+    return ""
 
 
 class ChannelNotReadyError(Exception):
@@ -156,7 +181,7 @@ class ReminderDeliveryTask:
             if self._plane is not None:
                 # 块3：投递经控制面 outbox —— 通道宿主可能在别的 worker（scheduler
                 # 与连接器/WS 各自选主），本地直发在跨 worker 拓扑下必然误判失败。
-                delivered, delivered_text = await self._send_via_plane(
+                delivered, delivered_text, _complete = await self._send_via_plane(
                     session_key, text, character_id,
                 )
             else:
@@ -169,10 +194,17 @@ class ReminderDeliveryTask:
                 reminder.get("id"), session_key, e,
             )
             return
+        # 2026-11-13 对抗验收 H2/M3：部分受理（含失败回执带回来的已受理前缀）
+        # 既不能当完整送达，也不能整条重发（已受理前缀会重复）。统一处理：
+        # 记前缀历史 → 未送达尾段作为新提醒立即续投 → 原提醒按已处理收口。
+        recorded_text = ""
         if delivered:
-            # 2026-11-13 提醒拆条：只记**通道已受理的前缀**，未受理尾段
-            # 不得写进历史（否则下一轮模型会以为自己说完了）。
             recorded_text = str(delivered_text or text)
+        elif delivered_text:
+            recorded_text = str(delivered_text)
+        remainder = _remainder_after_prefix(text, recorded_text)
+        partial = bool(remainder)
+        if recorded_text.strip():
             # 自问自答根治：她主动说的话必须进历史，否则下一轮她自己不记得提醒过
             # 🔴 2026-09-22：必须带 character_id（出站行此前无归属 → 切角色继承台词）
             recorder = getattr(self._memory, "record_outbound_message", None)
@@ -211,6 +243,16 @@ class ReminderDeliveryTask:
                     logger.warning(
                         "[reminder] 影子账本写入失败 session=%s: %s", session_key, e,
                     )
+        if partial:
+            await self._schedule_remainder(reminder, session_key, remainder)
+            logger.warning(
+                "[reminder] 部分受理 id=%s session=%s 已记前缀=%d字 尾段续投=%d字",
+                reminder.get("id"), session_key, len(recorded_text), len(remainder),
+            )
+            # 原提醒按已处理收口：不整条重发（前缀重复），尾段已独立入队。
+            await asyncio.to_thread(self._sm.mark_reminder_result, reminder.get("id"), True)
+            return
+        if delivered:
             logger.info(
                 "[reminder] 已投递 id=%s session=%s content=%.40s",
                 reminder.get("id"), session_key, reminder.get("content", ""),
@@ -269,19 +311,20 @@ class ReminderDeliveryTask:
     async def _send_via_plane(
         self, sk: str, text: str, character_id: str = "",
         receipt_timeout: float = PLANE_RECEIPT_TIMEOUT,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, bool]:
         """经控制面 outbox 投递：入队保留归属快照，等资源宿主的受理回执。
 
-        返回 ``(是否受理, 已受理前缀)``。2026-11-13 提醒拆条：部分受理时
+        返回 ``(是否受理, 已受理前缀, 是否完整受理)``。2026-11-13 提醒拆条：
         回执里的 ``accepted_text`` 是唯一能避免「整条重发/把尾段写进历史」的
-        真源；旧实现只回 bool。
+        真源；本轮补齐 ``complete`` 维度——部分受理不再被生产者当成完整成功
+        （对抗验收 H2），失败回执带回来的前缀也会被消费（M3）。
         """
         rp = self._plane
         parsed = session_key_mod.parse(sk)
         is_wechat = session_key_mod.is_wechat_key(sk)
         if is_wechat and (parsed.owner is None or not parsed.peer):
             logger.warning("[reminder] 微信会话键无法解析为 owner:peer: %s", sk)
-            return False, ""
+            return False, "", False
         channel = "wechat" if is_wechat else "websocket"
         try:
             cid = await asyncio.to_thread(
@@ -293,22 +336,79 @@ class ReminderDeliveryTask:
             row = await asyncio.to_thread(rp.wait_for_receipt, cid, receipt_timeout)
         except Exception as e:  # noqa: BLE001
             logger.warning("[reminder] 控制面投递异常 session=%s: %s", sk, e)
-            return False, ""
-        status = str((row or {}).get("status") or "")
-        reason = str((row or {}).get("fail_reason") or "")
-        accepted_text = str((row or {}).get("accepted_text") or "")
+            return False, "", False
+
+        def _parse(row: dict[str, Any] | None) -> tuple[str, str, str]:
+            return (
+                str((row or {}).get("status") or ""),
+                str((row or {}).get("fail_reason") or ""),
+                str((row or {}).get("accepted_text") or ""),
+            )
+
+        def _accepted(row: dict[str, Any] | None) -> tuple[bool, str, bool]:
+            _status, _reason, accepted = _parse(row)
+            body = accepted or text
+            complete = not accepted or accepted.strip() == str(text).strip()
+            return True, body, complete
+
+        status, reason, accepted_text = _parse(row)
         if status == "accepted":
-            return True, (accepted_text or text)
+            return _accepted(row)
         if status == "failed":
             logger.warning(
                 "[reminder] 宿主回执投递失败 session=%s reason=%s", sk, reason,
             )
-            return False, accepted_text
+            return False, accepted_text, False
+        # 2026-11-13 对抗验收 M2：宿主已 claimed 说明可能仍在发送，第 31s 才
+        # 到 accepted 的晚到回执不能被当成失败（否则下一 tick 重投同一条）。
+        # 再等一个窗口；仍未确认才按未送达处理。
+        if status == "claimed":
+            try:
+                row = await asyncio.to_thread(
+                    rp.wait_for_receipt, cid, receipt_timeout,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[reminder] 晚到回执等待异常 session=%s: %s", sk, e)
+                row = None
+            status, reason, accepted_text = _parse(row)
+            if status == "accepted":
+                return _accepted(row)
+            if status == "failed":
+                logger.warning(
+                    "[reminder] 宿主晚到回执投递失败 session=%s reason=%s", sk, reason,
+                )
+                return False, accepted_text, False
         logger.warning(
             "[reminder] %ss 内未获受理回执，按**未送达**处理 session=%s",
             receipt_timeout, sk,
         )
-        return False, accepted_text
+        return False, accepted_text, False
+
+    async def _schedule_remainder(
+        self, reminder: dict[str, Any], session_key: str, remainder: str,
+    ) -> None:
+        """部分受理后把未送达尾段作为一条新提醒立即续投。
+
+        2026-11-13 对抗验收 H2：旧实现把「任一段受理」当完整送达，尾段永久
+        丢失且用户/模型都以为说完了。续投独立成新提醒——不重复已受理前缀，
+        也不丢尾段；入队失败只降级为一条 warning（原提醒仍按已处理收口）。
+        """
+        tail = str(remainder or "").strip()
+        add = getattr(self._sm, "add_reminder", None)
+        if not tail or add is None or not session_key:
+            return
+        try:
+            await asyncio.to_thread(
+                add,
+                tail,
+                _now_local_text(),
+                session_key,
+                reminder.get("user_id"),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "[reminder] 尾段续投入队失败 session=%s: %s", session_key, e,
+            )
 
     def _resolve_character_id(self, session_key: str) -> str:
         """生成与落库共享同一角色快照；注入解析失败不冒认其他角色。"""

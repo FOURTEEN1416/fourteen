@@ -405,21 +405,32 @@ def claim_next_send(
     slot 且 owner 相符"的行；每行只会被一个宿主认领成功。
     """
     with _conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         _reap_expired(conn, "outbound_commands")
-        where = ["status='pending'", "channel=?"]
+        where = ["o.status='pending'", "o.channel=?"]
         params: list[Any] = [channel]
         if owner_id is not None or slot is not None:
             conds = []
             if owner_id is not None:
-                conds.append("(owner_id=? AND (slot IS NULL OR slot=?))")
+                conds.append("(o.owner_id=? AND (o.slot IS NULL OR o.slot=?))")
                 params.extend([int(owner_id), None if slot is None else int(slot)])
             if slot is not None and owner_id is None:
-                conds.append("slot=?")
+                conds.append("o.slot=?")
                 params.append(int(slot))
             where.append("(" + " OR ".join(conds) + ")")
+        # 同一好友（session_key）的出站严格串行：语音与文字不能被不同 worker
+        # 同时认领。``_peer_lock`` 只是进程内 RLock，多 worker 下形同虚设
+        # （2026-11-13 对抗验收 M4）；这条 SQL 把互斥提升到控制面（跨进程）。
+        where.append(
+            "NOT EXISTS ("
+            " SELECT 1 FROM outbound_commands p"
+            " WHERE p.status='claimed' AND p.id<>o.id"
+            "   AND p.session_key=o.session_key AND o.session_key<>''"
+            ")"
+        )
         row = conn.execute(
-            f"SELECT id FROM outbound_commands WHERE {' AND '.join(where)} "
-            "ORDER BY id ASC LIMIT 1",
+            f"SELECT o.id FROM outbound_commands o WHERE {' AND '.join(where)} "
+            "ORDER BY o.id ASC LIMIT 1",
             params,
         ).fetchone()
         if row is None:
@@ -446,22 +457,52 @@ def claim_next_send(
 
 def complete_send(
     cmd_id: int, *, ok: bool, reason: str = "", slot: int | None = None,
-    accepted_text: str = "",
-) -> None:
+    accepted_text: str = "", claimed_by: str | None = None,
+) -> bool:
     """回写受理回执：``ok=True`` → accepted（受理确认，非 exactly-once）。
 
     ``accepted_text`` 记录**通道已受理的正文/前缀**（提醒拆条用），不参与
     成功判定；失败时也保留已受理前缀，供生产者避免重发。
+
+    2026-11-13 对抗验收（H4/H5）：旧实现 ``WHERE id=?`` 无状态守卫，任意
+    进程可把别人 claimed 的行写成 failed（触发生产者回落文字），随后真正
+    持有行的慢宿主再写 accepted → 语音+文字双发。现加双守卫：
+    ``status='claimed'`` 防终态覆写，``claimed_by``（可选，生产链路必传）
+    防跨宿主误写。返回是否真的写入了回执；重复/迟到回执返回 False。
     """
+    holder = host_id() if claimed_by is None else str(claimed_by)
     with _conn() as conn:
-        conn.execute(
+        cur = conn.execute(
             "UPDATE outbound_commands SET status=?, fail_reason=?, accepted_at=?, "
-            "accepted_text=?, slot=COALESCE(?, slot) WHERE id=?",
+            "accepted_text=?, slot=COALESCE(?, slot) "
+            "WHERE id=? AND status='claimed' AND claimed_by=?",
             ("accepted" if ok else "failed", reason[:300], _now(),
              str(accepted_text or "")[:4000],
-             None if slot is None else int(slot), int(cmd_id)),
+             None if slot is None else int(slot), int(cmd_id), holder),
         )
         conn.commit()
+        return cur.rowcount == 1
+
+
+def renew_claim(
+    cmd_id: int, *, ttl: float = CLAIM_TTL, claimed_by: str | None = None,
+) -> bool:
+    """续租一次认领（慢 TTS/上传期间防止行被 ``_reap_expired`` 回收重投）。
+
+    2026-11-13 对抗验收（H5）：``CLAIM_TTL=60s`` 短于慢速 TTS 合成 +
+    上传的常见耗时，行过期后被另一宿主回收重投 → 同一用户收到两条语音，
+    而账面只见一次（迟到 complete 覆写 accepted）。语音宿主在合成前与
+    发送前各续租一次（3 分钟），把重投窗口移到真实崩溃场景。
+    """
+    holder = host_id() if claimed_by is None else str(claimed_by)
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE outbound_commands SET claim_expires=? "
+            "WHERE id=? AND status='claimed' AND claimed_by=?",
+            (_now() + float(ttl), int(cmd_id), holder),
+        )
+        conn.commit()
+        return cur.rowcount == 1
 
 
 def cancel_send_pending(cmd_id: int, *, reason: str = "producer_timeout") -> bool:
@@ -504,7 +545,10 @@ def wait_for_receipt(cmd_id: int, timeout: float = 30.0, poll: float = 0.2) -> d
 
 
 REQUEUE_MAX_ATTEMPTS = 10   # 退回重投上限（无连接集群里不得无限乒乓）
-RECEIPT_WAIT_DEFAULT = 30.0  # 生产者等受理回执的默认窗（消费者心跳 5s / 3s 量级）
+REQUEUE_MAX_ATTEMPTS_REMINDER = 40  # 提醒：3 tick≈180s 才判死，5s tick → 36 次
+
+# 生产者等受理回执的默认窗（消费者心跳 5s / 3s 量级）
+RECEIPT_WAIT_DEFAULT = 30.0
 
 
 def requeue_send(cmd_id: int, *, reason: str = "") -> bool:
@@ -512,15 +556,27 @@ def requeue_send(cmd_id: int, *, reason: str = "") -> bool:
 
     与 ``complete_send(ok=False)`` 的区分：本机无该会话连接 / 该 slot 不归我，
     只是"这条此刻不该由我投"，必须退回给真正持有资源的宿主；退回不判死，
-    但 attempts 由 :func:`claim_next_send` 递增，达 :data:`REQUEUE_MAX_ATTEMPTS`
-    即判死，避免全集群无连接时的认领乒乓。
+    但 attempts 由 :func:`claim_next_send` 递增，达上限即判死，避免全集群
+    无连接时的认领乒乓。
+
+    2026-11-13 对抗验收（M2）：提醒线在 reminders 表要 3 个 tick（约 3 分钟）
+    才判死；outbox 若沿用 10 次（50s）会把「微信通道短暂离线」判成永久失败，
+    恢复后同文重复补投。提醒行改用更高上限，与提醒线判死口径对齐。
     """
     with _conn() as conn:
+        row = conn.execute(
+            "SELECT kind FROM outbound_commands WHERE id=?", (int(cmd_id),)
+        ).fetchone()
+        limit = (
+            REQUEUE_MAX_ATTEMPTS_REMINDER
+            if row is not None and str(row["kind"]) == "reminder"
+            else REQUEUE_MAX_ATTEMPTS
+        )
         cur = conn.execute(
             "UPDATE outbound_commands SET status='pending', claimed_by='', "
             "claim_expires=0, fail_reason=? WHERE id=? AND status='claimed' "
             "AND attempts < ?",
-            (reason[:300], int(cmd_id), REQUEUE_MAX_ATTEMPTS),
+            (reason[:300], int(cmd_id), limit),
         )
         if cur.rowcount == 1:
             conn.commit()
@@ -623,6 +679,7 @@ async def drain_once_async(
         if not sk or not text:
             await asyncio.to_thread(
                 complete_send, cid, ok=False, reason="invalid_payload",
+                claimed_by=str(row.get("claimed_by") or ""),
             )
             continue
         try:
@@ -631,11 +688,13 @@ async def drain_once_async(
             await asyncio.to_thread(
                 complete_send, cid, ok=False,
                 reason=f"send_error:{type(e).__name__}"[:300],
+                claimed_by=str(row.get("claimed_by") or ""),
             )
             continue
         if delivered > 0:
             await asyncio.to_thread(
                 complete_send, cid, ok=True, reason=f"delivered={delivered}",
+                claimed_by=str(row.get("claimed_by") or ""),
             )
             accepted += 1
         else:

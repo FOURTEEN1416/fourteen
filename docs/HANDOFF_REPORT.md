@@ -4,9 +4,12 @@
 > 历史批次全过程见 `LOG.md`（唯一只追加不覆盖文件）；决策拍板见 `docs/DECISION_LEDGER.md`；删除见 `docs/DELETION_LOG.md`。
 > 2026-09-29 文档清理批：原五层历史快照与旧窗口（09-19/09-26）交接正文移除，信息由 `LOG.md` 与 git 历史承载。
 
-## 当前状态快照（2026-11-08 v1.69 发送链收口批：三端部署 @ `b30987c`）
+## 当前状态快照（2026-11-13 v1.72 对抗验收修复批：本地未 push 未部署）
 
-- **生产 @ `b30987c`**（2026-11-08 20:37 部署：v1.67 偏好快照批 + 死组件退役 + v1.68 语音文件卡片 + v1.69 发送链收口，4 提交连续上线）。部署链：冷停（MainPID=0 / cgroup=0）→ 四库 `.backup` + `integrity_check` 全 ok（`backups/pre-deploy-b30987c-20261108-2035`）→ `git pull --ff-only` 快进 → `deploy/remote_deploy.sh` exit 0（前端 701ms 构建）→ 重启。核验：health/ready 200、openapi **207 路径 / 249 操作**（与 v1.67 口径一致）、重启后 **0 新 ERROR**（仅存量 agnes 429）、微信通道登录成功、调度器在跑、blob 三端 4/4 一致、前端 200。**回填**：`backfill_wechat_bindings.py --apply` = insert 5 + update 1（复核幂等全 noop，bindings 10 行）；`migrate_per_user_prefs_to_my_settings.py` dry-run 0 行（无存量 per-user 覆盖需迁）；`backfill_character_settings --dry-run` 0 组合（快照懒物化）。
+- **代码状态（2026-11-13）**：本地 `main` 含 v1.70/v1.71/v1.72 提交与工作树修复，**未 push、未部署、未压测**；生产仍 @ `b30987c`（2026-11-08）。
+- **基线（2026-11-13 v1.72）**：后端 **5028 通过 + 2 跳过 / 收集 5030**（317 测试文件 / 八块串行精确吻合）；`ruff check .` 全仓 0；前端沿用 v1.69 口径（283/42 + tsc 0，本批未改前端）。
+- **本批**：Speaker 对抗验收确认 **5 high + 6 medium** 全部修复（topic 旧表清理/迁移、提醒部分受理续投、语音回执守卫与续租、跨进程 peer 互斥、广播脚本契约），详见 `LOG.md` 2026-11-13 两条目与 `docs/reports/2026-11-13-Speaker统一出口-验收报告.md`。
+- **历史（2026-11-08）生产 @ `b30987c`**（2026-11-08 20:37 部署：v1.67 偏好快照批 + 死组件退役 + v1.68 语音文件卡片 + v1.69 发送链收口，4 提交连续上线）。部署链：冷停（MainPID=0 / cgroup=0）→ 四库 `.backup` + `integrity_check` 全 ok（`backups/pre-deploy-b30987c-20261108-2035`）→ `git pull --ff-only` 快进 → `deploy/remote_deploy.sh` exit 0（前端 701ms 构建）→ 重启。核验：health/ready 200、openapi **207 路径 / 249 操作**（与 v1.67 口径一致）、重启后 **0 新 ERROR**（仅存量 agnes 429）、微信通道登录成功、调度器在跑、blob 三端 4/4 一致、前端 200。**回填**：`backfill_wechat_bindings.py --apply` = insert 5 + update 1（复核幂等全 noop，bindings 10 行）；`migrate_per_user_prefs_to_my_settings.py` dry-run 0 行（无存量 per-user 覆盖需迁）；`backfill_character_settings --dry-run` 0 组合（快照懒物化）。
 - **基线**：后端 **4646 通过 + 2 跳过 / 收集 4648**（295 文件 / 45 卡；2 跳过 = Redis 环境 + golden live_llm；四分块 4631 + v1.68 新增 15 例补跑）；前端 **283/42** + tsc 0；`ruff` 全仓 0。端点内省 **249 APIRoute / 207 唯一路径**（生产 openapi 实测吻合）。徽章 **4930**（`README.md:11` 已同步）。
 - **待办**：语音文件卡片观感（需点开播放）与真机体验待用户确认。其余历史待办（4 条路由 owner 追认、`CODE_GRAPH` 规模读数）已于 2026-11-08 **v1.69.1 清零**（`DELETION_LOG` 已标 ✅ / `CODE_GRAPH` v3.8.40 全量回扫）。
 

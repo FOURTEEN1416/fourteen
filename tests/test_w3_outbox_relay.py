@@ -64,13 +64,14 @@ def test_reminder_wechat_delivery_enqueues_snapshot_and_acks():
             row = rp.claim_next_send(channel="wechat", owner_id=7, slot=1)
             if row:
                 cid_box["row"] = row
-                rp.complete_send(int(row["id"]), ok=True, reason="delivered=1", slot=1)
+                rp.complete_send(int(row["id"]), ok=True, reason="delivered=1", slot=1,
+                                    claimed_by=str(row["claimed_by"]))
                 return
             time.sleep(0.05)
 
     th = threading.Thread(target=_host)
     th.start()
-    ok, accepted_text = asyncio.run(
+    ok, accepted_text, _complete = asyncio.run(
         task._send_via_plane("7:wx_b@im.wechat", "该喝水了", "micai")
     )
     th.join()
@@ -93,13 +94,14 @@ def test_reminder_websocket_uses_plane_channel():
         while time.time() < deadline:
             row = rp.claim_next_send(channel="websocket")
             if row:
-                rp.complete_send(int(row["id"]), ok=True, reason="delivered=2")
+                rp.complete_send(int(row["id"]), ok=True, reason="delivered=2",
+                                    claimed_by=str(row["claimed_by"]))
                 return
             time.sleep(0.05)
 
     th = threading.Thread(target=_host)
     th.start()
-    ok, accepted_text = asyncio.run(
+    ok, accepted_text, _complete = asyncio.run(
         task._send_via_plane("7:web:aa", "开会提醒", "lin")
     )
     th.join()
@@ -112,7 +114,7 @@ def test_reminder_websocket_uses_plane_channel():
 def test_reminder_unconfirmed_receipt_is_not_success():
     """无任何宿主受理 → 不得判送达（提醒 fail_count 继续累计，3 次判死语义保留）。"""
     task = _task(rp)
-    ok, accepted_text = asyncio.run(
+    ok, accepted_text, _complete = asyncio.run(
         task._send_via_plane(
             "7:wx_b@im.wechat", "早", "micai", receipt_timeout=0.3
         )
@@ -131,13 +133,14 @@ def test_reminder_failed_receipt_reason_visible():
         while time.time() < deadline:
             row = rp.claim_next_send(channel="wechat", owner_id=7, slot=0)
             if row:
-                rp.complete_send(int(row["id"]), ok=False, reason="send_api_rejected")
+                rp.complete_send(int(row["id"]), ok=False, reason="send_api_rejected",
+                                    claimed_by=str(row["claimed_by"]))
                 return
             time.sleep(0.05)
 
     th = threading.Thread(target=_host)
     th.start()
-    ok, _accepted_text = asyncio.run(
+    ok, _accepted_text, _complete = asyncio.run(
         task._send_via_plane("7:wx_b@im.wechat", "早", "micai")
     )
     th.join()
@@ -157,7 +160,8 @@ def test_reminder_deliver_goes_through_plane_and_marks_result():
         while time.time() < deadline:
             row = rp.claim_next_send(channel="wechat", owner_id=7, slot=0)
             if row:
-                rp.complete_send(int(row["id"]), ok=True, reason="delivered=1", slot=0)
+                rp.complete_send(int(row["id"]), ok=True, reason="delivered=1", slot=0,
+                                    claimed_by=str(row["claimed_by"]))
                 return
             time.sleep(0.05)
 

@@ -18,7 +18,16 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+import sys
 from pathlib import Path
+
+# 直接以 ``python scripts/topic_plan_migration.py`` 运行时 sys.path[0] 是
+# scripts/，仓库根不在路径上 → 任何 `from utils...` 都会 ModuleNotFoundError。
+# 与同目录 audit_voice_bindings / bootstrap_admin / preflight_check 保持同一
+# 引导方式（2026-11-13 对抗验收：报告宣称的部署前演练命令一条都跑不通）。
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 from utils.project_paths import project_path
 
@@ -50,10 +59,24 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 
 
 def _copy(conn: sqlite3.Connection, src: str, dst: str) -> int:
+    """复制两表共有的列；缺列按默认值补（旧试验期 schema 可能缺 consumed_at）。"""
+    src_cols = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({src})")}
+    parts = []
+    for column, default in (
+        ("session_key", "''"),
+        ("character_id", "''"),
+        ("topic", "''"),
+        ("intent", "''"),
+        ("planned_at", "''"),
+        ("next_at", "''"),
+        ("expires_at", "''"),
+        ("consumed_at", "NULL"),
+    ):
+        parts.append(column if column in src_cols else default)
     before = conn.total_changes
     conn.execute(
         f"INSERT OR IGNORE INTO {dst} ({PLAN_COLS}) "
-        f"SELECT {PLAN_COLS} FROM {src}"
+        f"SELECT {', '.join(parts)} FROM {src}"
     )
     return conn.total_changes - before
 

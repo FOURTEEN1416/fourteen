@@ -7,6 +7,15 @@
 
 ---
 
+## 2026-11-13 — Speaker 对抗验收修复批（v1.72）
+
+- **触发**：用户 `/workflow 进行对抗skills进行对抗验收！！！！`。dynamic workflow 六路透镜（多用户隔离/提醒拆条/语音超时/thread_plan 迁移/账本/公共契约）→ 归并 → 每条 medium/high 独立复现 → ruff + 八块全量门禁 → 终审；run `dwfrun-cbd220a3`（原 `dwfrun-b1cfafe2` 首阶段盘点员 34 分钟零进展，判定分页器挂起后 Amend 换轨，改为确定性 `git --no-pager diff --name-status`）。
+- **裁决**：**不通过**——门禁全绿（ruff 0，5028 通过 + 2 跳过 / 收集 5030），但 **5 high + 6 medium 全部 confirmed**：① 删号对未迁移旧表 `topic_plan` 漏删、verify 报 0，之后自动迁移把已删账号数据搬进 `thread_plan`（删号复活）；② 提醒部分受理被记完整送达且尾段永久丢失；③ `broadcast_proactive_voice.py` 二元解包三元返回直接崩；④ `complete_send` 无状态/认领者守卫 → 语音+文字双发；⑤ `CLAIM_TTL=60s` 短于慢 TTS → 重复语音；⑥ 空 `character_id` 归一 `default` 跨角色串写；⑦ 提醒控制面 50s 判死 vs reminders 3 分钟，离线恢复重复投；⑧ 失败回执前缀被丢弃 → 重试整条重发；⑨ `_peer_lock` 仅进程内，多 worker 语音/文字交错；⑩ 迁移脚本无 `sys.path` 全部命令 `ModuleNotFoundError`；⑪ 旧表缺 `consumed_at` 让写路径永久 `db_error`。
+- **修复**：`topic_state` purge/verify 白名单纳入旧表 + `purge_expired` 双表覆盖 + meta 谓词逐表检查；`_migrate_legacy_plan_table` 显式 `BEGIN IMMEDIATE` + 缺列按默认值补齐；迁移脚本补项目根 `sys.path` 与动态列复制；底层 API 空 `character_id` 一律 no-op（显式 `"default"` 仍可用）；提醒 `_send_via_plane` 返回 `(受理, 前缀, 完整)`，部分受理记前缀 + `add_reminder` 尾段续投、原提醒收口不重发，失败回执前缀同样消费，`claimed` 晚到再等一窗口，`requeue_send` 对 reminder 用 40 次上限；`complete_send` 加 `status='claimed' AND claimed_by=?` 守卫，`renew_claim` 语音合成前/发送前各续租 180s，`claim_next_send` 加同 `session_key` 跨进程互斥；广播脚本改三元解包。
+- **回归**：新增 `tests/test_adversarial_fixes_20261113.py` 12 例（旧表 purge/迁移缺列/脚本可执行/空角色/提醒前缀续投/晚到回执/回执守卫/续租/peer 互斥/广播契约）；受影响面 **321 passed**；全量八块 **587+654+634+759+661+702+488+543 = 5028 通过 + 2 跳过 / collect 5030**（317 文件，精确吻合）；`ruff check .` 0。
+- **保留未修（报告 low/unconfirmed，不阻塞）**：`owner_uid` 无直接单测、`outbound_commands` 无删号 purge 步骤、`proactive_voice` 缺 `[主动]` 标记、分段上限 TOCTOU、提醒串行 30s、对账线程无池化、三处回执超时常量分裂、裸 wxid IN、读路径遮蔽、`_committed` 泄漏、手动失败不推进冷却、`Speaker.record` 无 dedupe、`ALTER` 无跨进程互斥等 17 条。
+- **部署**：未 push、未部署、未压测（用户长期裁决）。
+
 ## 2026-11-13 — Speaker 统一出口原子施工批（A1→D1）
 
 - **范围**：把原「第3步：主链/主动/手动切换与 topic_plan 清场」巨型 hole 拆成 8 个原子施工：A1 主链拆条/受理单点、A2 控制面 kind 归一、B1 `_deliver` 渠道归属、B2 日期/手动 per-user 静默窗、B3 手动线生成/记账分离、C1 ThreadState 计划读写唯一入口、C2 topic_meta 清场 + 生命周期 owner 级 purge、D1 主动语音走控制面 + peer 锁。施工图 `docs/reports/2026-11-12-Speaker原子施工图.md`、验收报告 `docs/reports/2026-11-13-Speaker统一出口-验收报告.md`。

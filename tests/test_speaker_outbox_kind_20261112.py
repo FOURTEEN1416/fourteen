@@ -31,7 +31,8 @@ class _FakePlane:
     def claim_next_send(self, **kwargs):
         return self._rows.pop(0) if self._rows else None
 
-    def complete_send(self, cid, ok, reason="", slot=None, accepted_text=""):
+    def complete_send(self, cid, ok, reason="", slot=None, accepted_text="",
+                      claimed_by=None):
         self.completed.append(
             {
                 "id": cid, "ok": ok, "reason": reason, "slot": slot,

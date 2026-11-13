@@ -2019,9 +2019,12 @@ class WeChatConnector:
                 self._peer_wxid_from_session(session_key) if session_key else ""
             )
             cid = int(row["id"])
+            claimed_by = str(row.get("claimed_by") or "")
             if not text or not peer:
                 try:
-                    rp.complete_send(cid, ok=False, reason="no_target")
+                    rp.complete_send(
+                        cid, ok=False, reason="no_target", claimed_by=claimed_by,
+                    )
                 except Exception as e:  # noqa: BLE001
                     logger.debug("[wx][step=outbox_complete_failed] %s", e)
                 continue
@@ -2058,11 +2061,22 @@ class WeChatConnector:
                         else self.owner_user_id
                     )
                     character_id = str(row.get("character_id") or "")
+                    # 2026-11-13 对抗验收 H5：CLAIM_TTL=60s 短于慢速 TTS 合成 +
+                    # 上传，行会被另一宿主 reap 后重投 → 同一用户收两条语音。
+                    # 语音宿主在合成前与发送前各续租 180s（真实崩溃仍可回收）。
+                    try:
+                        rp.renew_claim(cid, ttl=180.0, claimed_by=claimed_by)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("[wx][step=outbox_renew_failed] %s", e)
                     with self._peer_lock(session_key):
                         audio = synthesize_audio(text, character_id, owner)
                         if audio is None:
                             ok = False
                         else:
+                            try:
+                                rp.renew_claim(cid, ttl=180.0, claimed_by=claimed_by)
+                            except Exception as e:  # noqa: BLE001
+                                logger.debug("[wx][step=outbox_renew_failed] %s", e)
                             audio_bytes, fmt = audio
                             ok, _err = send_voice_clip_to(
                                 peer,
@@ -2099,6 +2113,7 @@ class WeChatConnector:
                 rp.complete_send(
                     cid, ok=ok, reason="" if ok else "send_api_rejected",
                     slot=self.slot, accepted_text=accepted_body,
+                    claimed_by=claimed_by,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.debug("[wx][step=outbox_complete_failed] %s", e)

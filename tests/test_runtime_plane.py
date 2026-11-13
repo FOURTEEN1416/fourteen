@@ -86,7 +86,8 @@ class TestOutbound:
         # 认领**不**绑 slot（未点名命令退回后他宿主仍可投）；归属由受理回执落定
         assert row["slot"] is None
         assert row["owner_id"] == 7 and row["peer"] == "peer@im.wechat"
-        rp.complete_send(cid, ok=True, reason="delivered", slot=winner_slot)
+        rp.complete_send(cid, ok=True, reason="delivered", slot=winner_slot,
+                         claimed_by=row["claimed_by"])
         snap = rp.send_status(cid)
         assert snap["status"] == "accepted" and snap["slot"] == winner_slot
 
@@ -108,7 +109,7 @@ class TestOutbound:
                               session_key="1:web:abc", message="hi")
         row = rp.claim_next_send(channel="websocket")
         assert row and row["id"] == cid
-        rp.complete_send(cid, ok=True)
+        rp.complete_send(cid, ok=True, claimed_by=row["claimed_by"])
         final = rp.wait_for_receipt(cid, timeout=2)
         assert final["status"] == "accepted"
 
@@ -142,7 +143,10 @@ class TestOutbound:
 
     def test_recent_sends_cross_process_visible(self):
         cid = rp.enqueue_send(kind="manual", channel="wechat", owner_id=1, message="m")
-        rp.complete_send(cid, ok=False, reason="no_host")
+        row = rp.claim_next_send(channel="wechat", owner_id=1, slot=0)
+        assert row is not None
+        rp.complete_send(cid, ok=False, reason="no_host",
+                         claimed_by=row["claimed_by"])
         hist = rp.recent_sends("manual")
         assert hist and hist[0]["status"] == "failed"
 
@@ -355,8 +359,10 @@ class TestOutboxProducerConsumer:
     def test_requeue_on_already_acked_row_is_noop(self):
         cid = rp.enqueue_send(kind="reminder", channel="wechat",
                               session_key="7:o@im.wechat", owner_id=7, message="起床")
-        rp.claim_next_send(channel="wechat", owner_id=7, slot=0)
-        rp.complete_send(cid, ok=True, reason="delivered")
+        row = rp.claim_next_send(channel="wechat", owner_id=7, slot=0)
+        assert row is not None
+        rp.complete_send(cid, ok=True, reason="delivered",
+                         claimed_by=row["claimed_by"])
         assert rp.requeue_send(cid, reason="late_requeue") is False
         assert rp.send_status(cid)["status"] == "accepted"
 
@@ -369,6 +375,7 @@ class TestOutboxProducerConsumer:
                 if row:
                     rp.complete_send(
                         int(row["id"]), ok=True, reason="delivered=1", slot=0,
+                        claimed_by=str(row["claimed_by"]),
                     )
                     return
                 time.sleep(0.05)
@@ -394,6 +401,7 @@ class TestOutboxProducerConsumer:
                     rp.complete_send(
                         int(row["id"]), ok=True, reason="delivered=1", slot=0,
                         accepted_text="前半句",
+                        claimed_by=str(row["claimed_by"]),
                     )
                     return
                 time.sleep(0.05)
@@ -426,6 +434,7 @@ class TestOutboxProducerConsumer:
                 if row:
                     rp.complete_send(
                         int(row["id"]), ok=False, reason="channel_offline",
+                        claimed_by=str(row["claimed_by"]),
                     )
                     return
                 time.sleep(0.05)
