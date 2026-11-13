@@ -58,7 +58,7 @@
 
 > **D16 通道语义（2026-10-12）**：微信通道「谁扫码谁聊、一人一 bot」——注册用户扫码绑定 bot，bot 即其本人微信内的一对一角色化身；**非扫码人消息拒绝**，角色在网页控制台自由切换（`MAX_CHANNELS_PER_USER=1`）。
 >
-> **话题状态机（v1.58，2026-10-27/28，默认开启）**：确定性状态机每轮先行（`utils/topic_state.py` 三表 `topic_state/topic_plan/topic_meta` 唯一 owner）+ 稀疏 LLM judge 每 4 轮一次（8s 硬超时、失败保留原状态）；主链三接线：prompt 注入状态块（`render_topic_state_block` ≤160 字）→ `update_after_turn`（`optimized_orchestrator.py:1805`）→ 满轮触发 `run_llm_judge`（`:1785`）；parked 话题 ≥6h 经三重闸（≥6h+非静默+judge allow）由 `proactive/topic_recall.py` 复提；主动 `topic_plan` 全周期（决策线 skip 也存 `llm_proactive.py:875` → `scheduler.py` 到点 take → 发送成功才消费）。回滚走管理端显式 `topic_state.enabled=false`（关闭态零 DB）。
+> **话题状态机（v1.58，2026-10-27/28，默认开启）**：确定性状态机每轮先行（`utils/topic_state.py` 三表 `topic_state/thread_plan/topic_meta` 唯一 owner）+ 稀疏 LLM judge 每 4 轮一次（8s 硬超时、失败保留原状态）；主链三接线：prompt 注入状态块（`render_topic_state_block` ≤160 字）→ `update_after_turn`（`optimized_orchestrator.py:1805`）→ 满轮触发 `run_llm_judge`（`:1785`）；parked 话题 ≥6h 经三重闸（≥6h+非静默+judge allow）由 `proactive/topic_recall.py` 复提；主动 `thread_plan` 全周期（决策线 skip 也存 `llm_proactive.py:875` → `scheduler.py` 到点 take → 发送成功才消费）。回滚走管理端显式 `topic_state.enabled=false`（关闭态零 DB）。
 >
 > **零 token 骰子闸（4C，2026-10-28，默认关闭+dry_run 默认开）**：主动消息掷骰先于 LLM——`proactive/frequency.py` 纯函数 owner（`evaluate_dice_gate`），`scheduler.py:1580` live 决策前判定；配置走 `scheduler_config.json` 的 `dice_gate` 块（管理端 `/api/proactive/config` GET/POST 承载，无独立端点）；回退 `DICE_GATE_PRODUCTION_WIRED=False`。`scheduler.py` 的接线已由用户裁决接受为例外。
 
@@ -117,7 +117,7 @@
 ```
 
 > **主动线（决策与生成分离）**：`proactive/llm_proactive.py` 决策（skip 也存
-> `topic_plan`，`:875`）→ `scheduler.py` 到点 take → 发送成功才消费；决策前先过
+> `thread_plan`，`:875`）→ `scheduler.py` 到点 take → 发送成功才消费；决策前先过
 > **零 token 骰子闸**（`frequency.py::evaluate_dice_gate`，`scheduler.py:1580`，默认关闭）；
 > parked 话题复提候选由 `proactive/topic_recall.py` 组装（三重闸：≥6h + 非静默 + judge allow）。
 

@@ -197,15 +197,15 @@ def send_proactive_segmented(connector: Any, peer: str, msg: str) -> bool | None
 
 def direct_send_proactive_result(
     connector: Any, peer: str, msg: str,
-) -> tuple[bool, bool]:
-    """直发主动消息，返回 ``(是否有任意段被受理, 是否完整受理)``。"""
+) -> tuple[bool, bool, str]:
+    """直发主动消息，返回 ``(是否有任意段被受理, 是否完整受理, 已受理正文)``。"""
     if proactive_split_enabled(connector, peer):
         result = send_proactive_segmented_result(connector, peer, msg)
         if result is not None:
             accepted, expected = result
-            return bool(accepted), accepted == "\n".join(expected)
+            return bool(accepted), accepted == "\n".join(expected), str(accepted or "")
     ok = bool(connector.send_text(msg, to_user=peer))
-    return ok, ok
+    return ok, ok, (str(msg) if ok else "")
 
 
 def direct_send_proactive(connector: Any, peer: str, msg: str) -> bool:

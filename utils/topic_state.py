@@ -3,7 +3,7 @@
 真源与边界（逐条对应 `docs/reports/2026-10-27-话题状态机实施计划.md`）：
 
 - **三表**（``data/sqlite.db``，幂等 ``CREATE TABLE IF NOT EXISTS``）：
-  ``topic_state`` / ``topic_plan`` / ``topic_meta``。本模块是这三张表的
+  ``topic_state`` / ``thread_plan`` / ``topic_meta``。本模块是这三张表的
   **唯一 owner**，其他模块不得直接 ``sqlite3.connect`` 它们。
 - **六 API**：``get_topic_snapshot / update_after_turn / select_proactive_recall
   / save_next_plan / take_next_plan / purge_expired``；加 ``read/write_topic_config``
@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS topic_state (
 CREATE INDEX IF NOT EXISTS idx_topic_state_session_status
     ON topic_state(session_key, character_id, status, last_active_at DESC);
 
-CREATE TABLE IF NOT EXISTS topic_plan (
+CREATE TABLE IF NOT EXISTS thread_plan (
     session_key  TEXT NOT NULL,
     character_id TEXT NOT NULL,
     topic        TEXT NOT NULL DEFAULT '',
@@ -412,11 +412,38 @@ def _connect(
     if ensure_schema:
         try:
             conn.executescript(_SCHEMA)
+            _migrate_legacy_plan_table(conn)
             _ensure_recall_columns(conn)
         except Exception:
             conn.close()
             raise
     return conn
+
+
+def _migrate_legacy_plan_table(conn: sqlite3.Connection) -> None:
+    """把 v1.58 的 ``topic_plan`` 行迁移到 ``thread_plan`` 后删除旧表。
+
+    2026-11-13：topic_plan 表清场。幂等：旧表不存在即 no-op；``INSERT OR
+    IGNORE`` 保证新表已有同键行时不被旧值覆盖；单事务内复制 + DROP，失败
+    由调用方回滚。回滚脚本见 ``scripts/topic_plan_migration.py down``。
+    """
+    tables = {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if "topic_plan" not in tables:
+        return
+    conn.execute(
+        "INSERT OR IGNORE INTO thread_plan "
+        "(session_key, character_id, topic, intent, planned_at, next_at, "
+        " expires_at, consumed_at) "
+        "SELECT session_key, character_id, topic, intent, planned_at, next_at, "
+        "       expires_at, consumed_at FROM topic_plan"
+    )
+    conn.execute("DROP TABLE topic_plan")
+    logger.info("[topic_state][step=migrate_plan] topic_plan -> thread_plan done")
 
 
 def _ensure_recall_columns(conn: sqlite3.Connection) -> None:
@@ -518,6 +545,26 @@ def _empty_snapshot(*, enabled: bool, degraded: bool = False) -> dict[str, Any]:
     return snap
 
 
+def _plan_table_name(conn: sqlite3.Connection) -> str:
+    """当前库的计划表名（迁移前 ``topic_plan`` / 迁移后 ``thread_plan``）。
+
+    读路径 ``ensure_schema=False`` 不会触发建表/迁移；部署后若先发生读，仍能
+    从旧表读到计划，直到首次写路径完成迁移。
+    """
+    tables = {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name IN ('thread_plan', 'topic_plan')"
+        )
+    }
+    if "thread_plan" in tables:
+        return "thread_plan"
+    if "topic_plan" in tables:
+        return "topic_plan"
+    return "thread_plan"
+
+
 def _snapshot_from_conn(
     conn: sqlite3.Connection,
     session_key: str,
@@ -544,7 +591,8 @@ def _snapshot_from_conn(
         (session_key, character_id, now_ts),
     ).fetchall()
     plan_row = conn.execute(
-        "SELECT * FROM topic_plan WHERE session_key=? AND character_id=? AND consumed_at IS NULL AND expires_at > ?",
+        f"SELECT * FROM {_plan_table_name(conn)} WHERE session_key=? "
+        "AND character_id=? AND consumed_at IS NULL AND expires_at > ?",
         (session_key, character_id, now_ts),
     ).fetchone()
     snapshot: dict[str, Any] = {
@@ -1091,7 +1139,7 @@ def update_after_turn(
             (key, character, now_ts),
         )
         conn.execute(
-            "DELETE FROM topic_plan WHERE session_key=? AND character_id=? AND expires_at < ?",
+            "DELETE FROM thread_plan WHERE session_key=? AND character_id=? AND expires_at < ?",
             (key, character, now_ts),
         )
 
@@ -1447,7 +1495,7 @@ def save_next_plan(
     try:
         with closing(_connect(ensure_schema=True)) as conn, _write_tx(conn):
             conn.execute(
-                "INSERT INTO topic_plan (session_key, character_id, topic, intent, "
+                "INSERT INTO thread_plan (session_key, character_id, topic, intent, "
                 "planned_at, next_at, expires_at, consumed_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL) "
                 "ON CONFLICT(session_key, character_id) DO UPDATE SET "
                 "topic=excluded.topic, intent=excluded.intent, planned_at=excluded.planned_at, "
@@ -1503,7 +1551,8 @@ def take_next_plan(
                 plan = _read_plan_row_from_conn(conn, key, character, now_ts, due_only=True)
                 if plan is not None:
                     conn.execute(
-                        "UPDATE topic_plan SET consumed_at=? WHERE session_key=? AND character_id=?",
+                        f"UPDATE {_plan_table_name(conn)} SET consumed_at=? "
+                        "WHERE session_key=? AND character_id=?",
                         (now_ts, key, character),
                     )
                     plan["consumed_at"] = now_ts
@@ -1526,7 +1575,10 @@ def _read_plan_row_from_conn(
     *,
     due_only: bool,
 ) -> dict[str, Any] | None:
-    sql = "SELECT * FROM topic_plan WHERE session_key=? AND character_id=? AND consumed_at IS NULL AND expires_at > ?"
+    sql = (
+        f"SELECT * FROM {_plan_table_name(conn)} WHERE session_key=? "
+        "AND character_id=? AND consumed_at IS NULL AND expires_at > ?"
+    )
     params: list[Any] = [session_key, character_id, now_ts]
     if due_only:
         sql += " AND next_at <= ?"
@@ -1549,7 +1601,7 @@ def _existing_topic_tables(conn: sqlite3.Connection) -> set[str]:
     """当前库里真实存在的三张话题表（避免对未建表的库做 DDL/报错）。"""
     rows = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
-        "('topic_state', 'topic_plan', 'topic_meta')"
+        "('topic_state', 'thread_plan', 'topic_meta')"
     ).fetchall()
     return {str(row[0]) for row in rows}
 
@@ -1557,7 +1609,7 @@ def _existing_topic_tables(conn: sqlite3.Connection) -> set[str]:
 def purge_expired(*, now: datetime | None = None, force: bool = False) -> int:
     """删除过期话题数据（三表，同一事务）。
 
-    - ``topic_state`` / ``topic_plan``：``expires_at < now``；
+    - ``topic_state`` / ``thread_plan``：``expires_at < now``；
     - ``topic_meta``：``last_llm_at < cutoff``（cutoff = now - retention）
       **且**该 ``(session_key, character_id)`` 没有未过期的 state / plan。
       meta 只是轮次与 LLM 预算账本，存在未过期话题时不能丢（否则预算会被
@@ -1580,13 +1632,13 @@ def purge_expired(*, now: datetime | None = None, force: bool = False) -> int:
                     "DELETE FROM topic_state WHERE expires_at < ?", (now_ts,)
                 )
                 deleted += int(cur_state.rowcount or 0)
-            if "topic_plan" in tables:
+            if "thread_plan" in tables:
                 cur_plan = conn.execute(
-                    "DELETE FROM topic_plan WHERE expires_at < ?", (now_ts,)
+                    "DELETE FROM thread_plan WHERE expires_at < ?", (now_ts,)
                 )
                 deleted += int(cur_plan.rowcount or 0)
             # meta 谓词依赖 state/plan 两表；缺表时保守跳过（不猜未过期）。
-            if {"topic_state", "topic_plan", "topic_meta"} <= tables:
+            if {"topic_state", "thread_plan", "topic_meta"} <= tables:
                 cur_meta = conn.execute(
                     "DELETE FROM topic_meta WHERE last_llm_at < ? "
                     "AND NOT EXISTS ("
@@ -1596,10 +1648,10 @@ def purge_expired(*, now: datetime | None = None, force: bool = False) -> int:
                     "   AND topic_state.expires_at >= ?"
                     ") "
                     "AND NOT EXISTS ("
-                    " SELECT 1 FROM topic_plan"
-                    " WHERE topic_plan.session_key = topic_meta.session_key"
-                    "   AND topic_plan.character_id = topic_meta.character_id"
-                    "   AND topic_plan.expires_at >= ?"
+                    " SELECT 1 FROM thread_plan"
+                    " WHERE thread_plan.session_key = topic_meta.session_key"
+                    "   AND thread_plan.character_id = topic_meta.character_id"
+                    "   AND thread_plan.expires_at >= ?"
                     ")",
                     (cutoff_ts, now_ts, now_ts),
                 )
@@ -1651,7 +1703,7 @@ def purge_owner(
     with closing(_connect(ensure_schema=False, db_path=db_path)) as conn, _write_tx(conn):
         tables = _existing_topic_tables(conn)
         deleted = 0
-        for table in ("topic_state", "topic_plan", "topic_meta"):
+        for table in ("topic_state", "thread_plan", "topic_meta"):
             if table not in tables:
                 continue
             cur = conn.execute(
@@ -1678,7 +1730,7 @@ def count_owner(
     with closing(_connect(ensure_schema=False, db_path=db_path)) as conn:
         tables = _existing_topic_tables(conn)
         total = 0
-        for table in ("topic_state", "topic_plan", "topic_meta"):
+        for table in ("topic_state", "thread_plan", "topic_meta"):
             if table not in tables:
                 continue
             row = conn.execute(

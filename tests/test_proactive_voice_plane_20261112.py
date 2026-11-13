@@ -92,7 +92,7 @@ def test_switch_off_uses_direct_path_and_never_touches_plane(monkeypatch):
     plane_calls = _record_plane(monkeypatch)
     direct = _patch_direct(monkeypatch)
 
-    ok, reason = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
+    ok, reason, _cid = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
 
     assert (ok, reason) == (True, "")
     assert direct["creds"] == [(OWNER, PEER, pvd.DEFAULT_MAX_AGE_HOURS)]
@@ -110,7 +110,7 @@ def test_switch_on_enqueues_proactive_voice_with_context(monkeypatch):
     plane_calls = _record_plane(monkeypatch)
     direct = _patch_direct(monkeypatch)
 
-    ok, reason = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
+    ok, reason, _cid = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
 
     assert (ok, reason) == (True, "accepted")
     assert plane_calls == [
@@ -138,7 +138,7 @@ def test_plane_rejection_returns_false_with_reason(monkeypatch):
     _record_plane(monkeypatch, result=(False, "voice_send_rejected", 3))
     _patch_direct(monkeypatch)
 
-    ok, reason = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
+    ok, reason, _cid = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
 
     assert (ok, reason) == (False, "voice_send_rejected")
 
@@ -149,7 +149,7 @@ def test_no_live_connector_host_falls_back_to_direct(monkeypatch):
     plane_calls = _record_plane(monkeypatch)
     direct = _patch_direct(monkeypatch)
 
-    ok, reason = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
+    ok, reason, _cid = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
 
     assert (ok, reason) == (True, "")
     assert plane_calls == []
@@ -171,7 +171,7 @@ def test_plane_timeout_pending_row_cancelled_then_text_fallback(monkeypatch):
         lambda cid, reason="": cancelled.append((int(cid), reason)) or True,
     )
 
-    ok, reason = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
+    ok, reason, _cid = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
 
     assert (ok, reason) == (False, "timeout_cancelled")
     assert cancelled == [(7, "producer_timeout")]
@@ -188,7 +188,7 @@ def test_plane_timeout_claimed_row_returns_unconfirmed(monkeypatch):
     )
     monkeypatch.setattr(runtime_plane, "cancel_send_pending", lambda *a, **k: False)
 
-    ok, reason = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
+    ok, reason, _cid = pvd.send_proactive_voice(SESSION_KEY, TEXT, CHARACTER)
 
     assert (ok, reason) == (False, "unconfirmed_claimed")
 
@@ -208,9 +208,12 @@ class _FakePlane:
     def claim_next_send(self, **_kwargs):
         return self._rows.pop(0) if self._rows else None
 
-    def complete_send(self, cid, ok, reason="", slot=None):
+    def complete_send(self, cid, ok, reason="", slot=None, accepted_text=""):
         self.completed.append(
-            {"id": cid, "ok": ok, "reason": reason, "slot": slot}
+            {
+                "id": cid, "ok": ok, "reason": reason, "slot": slot,
+                "accepted_text": accepted_text,
+            }
         )
 
 
@@ -319,7 +322,10 @@ def test_connector_voice_branch_synthesizes_and_sends_inside_peer_lock(
     assert sent["duration_ms"] == min(60000, max(1500, len(TEXT) * 180))
     assert trace["text"] == [], "语音成功不得再发文字"
     assert plane.completed == [
-        {"id": 21, "ok": True, "reason": "", "slot": connector.slot}
+        {
+            "id": 21, "ok": True, "reason": "", "slot": connector.slot,
+            "accepted_text": TEXT,
+        }
     ]
 
 
@@ -334,5 +340,8 @@ def test_connector_voice_synth_failure_receipts_false_without_text_fallback(
     assert trace["send"] == [], "合成失败不得调用发送"
     assert trace["text"] == [], "回退文字由 scheduler 负责，连接器不得代发"
     assert plane.completed == [
-        {"id": 21, "ok": False, "reason": "send_api_rejected", "slot": connector.slot}
+        {
+            "id": 21, "ok": False, "reason": "send_api_rejected",
+            "slot": connector.slot, "accepted_text": "",
+        }
     ]

@@ -80,7 +80,7 @@ def _plan_row(key: str = KEY, character_id: str = CHAR) -> dict | None:
     conn.row_factory = sqlite3.Row
     try:
         row = conn.execute(
-            "SELECT * FROM topic_plan WHERE session_key=? AND character_id=?",
+            "SELECT * FROM thread_plan WHERE session_key=? AND character_id=?",
             (key, character_id),
         ).fetchone()
         return dict(row) if row else None
@@ -184,7 +184,7 @@ def test_parse_decision_defaults_empty():
         assert d["next_topic"] == "" and d["next_intent"] == ""
 
 
-# ── topic_plan 数据层 ─────────────────────────────────────────────
+# ── thread_plan 数据层 ─────────────────────────────────────────────
 
 
 def test_save_and_take_plan_roundtrip(plan_env):
@@ -216,7 +216,7 @@ def test_plan_survives_new_connection(plan_env):
     conn = sqlite3.connect(str(ts._DB_PATH))
     try:
         row = conn.execute(
-            "SELECT topic, intent FROM topic_plan WHERE session_key=? AND character_id=?",
+            "SELECT topic, intent FROM thread_plan WHERE session_key=? AND character_id=?",
             (KEY, CHAR),
         ).fetchone()
     finally:

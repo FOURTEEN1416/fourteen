@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS outbound_commands (
     claim_expires REAL   NOT NULL DEFAULT 0.0,
     attempts     INTEGER NOT NULL DEFAULT 0,
     fail_reason  TEXT    NOT NULL DEFAULT '',
+    accepted_text TEXT   NOT NULL DEFAULT '',
     created_at   REAL    NOT NULL,
     accepted_at  REAL
 );
@@ -174,6 +175,16 @@ def _conn() -> Any:
                 raw = sqlite3.connect(str(p), timeout=30)
                 try:
                     raw.executescript(_SCHEMA)
+                    # 2026-11-13 增量列：已受理前缀（提醒拆条回执）。
+                    cols = {
+                        str(row[1])
+                        for row in raw.execute("PRAGMA table_info(outbound_commands)")
+                    }
+                    if "accepted_text" not in cols:
+                        raw.execute(
+                            "ALTER TABLE outbound_commands "
+                            "ADD COLUMN accepted_text TEXT NOT NULL DEFAULT ''"
+                        )
                     raw.commit()
                     with contextlib.suppress(sqlite3.OperationalError):
                         raw.execute("PRAGMA journal_mode=WAL")
@@ -433,13 +444,21 @@ def claim_next_send(
         return dict(full) if full else None
 
 
-def complete_send(cmd_id: int, *, ok: bool, reason: str = "", slot: int | None = None) -> None:
-    """回写受理回执：``ok=True`` → accepted（受理确认，非 exactly-once）。"""
+def complete_send(
+    cmd_id: int, *, ok: bool, reason: str = "", slot: int | None = None,
+    accepted_text: str = "",
+) -> None:
+    """回写受理回执：``ok=True`` → accepted（受理确认，非 exactly-once）。
+
+    ``accepted_text`` 记录**通道已受理的正文/前缀**（提醒拆条用），不参与
+    成功判定；失败时也保留已受理前缀，供生产者避免重发。
+    """
     with _conn() as conn:
         conn.execute(
             "UPDATE outbound_commands SET status=?, fail_reason=?, accepted_at=?, "
-            "slot=COALESCE(?, slot) WHERE id=?",
+            "accepted_text=?, slot=COALESCE(?, slot) WHERE id=?",
             ("accepted" if ok else "failed", reason[:300], _now(),
+             str(accepted_text or "")[:4000],
              None if slot is None else int(slot), int(cmd_id)),
         )
         conn.commit()
@@ -515,6 +534,46 @@ def requeue_send(cmd_id: int, *, reason: str = "") -> bool:
         return False
 
 
+def enqueue_and_wait_text(
+    *,
+    kind: str,
+    channel: str,
+    session_key: str = "",
+    owner_id: int | None = None,
+    slot: int | None = None,
+    peer: str = "",
+    character_id: str = "",
+    turn_id: str = "",
+    message: str = "",
+    timeout: float = RECEIPT_WAIT_DEFAULT,
+) -> tuple[bool, str, int, str]:
+    """生产者入口：入队并等待回执，额外返回**已受理前缀**。
+
+    返回 ``(是否受理, 回执原因, 命令 id, 已受理正文)``；超时按未确认处理。
+    2026-11-13 提醒拆条：控制面回执必须把前缀带回来，否则部分受理时
+    reminder_delivery 只能记全文或整条重发。
+    """
+    cid = enqueue_send(
+        kind=kind, channel=channel, session_key=session_key, owner_id=owner_id,
+        slot=slot, peer=peer, character_id=character_id, turn_id=turn_id,
+        message=message,
+    )
+    try:
+        row = wait_for_receipt(cid, timeout=timeout)
+    except Exception as e:  # noqa: BLE001
+        # 入队已成功、等待阶段异常不能当作「没发」——行仍在 outbox，
+        # 宿主稍后可能真实投递。返回未确认 + cid 走同一套保护。
+        return False, f"unconfirmed_wait_error({type(e).__name__})", cid, ""
+    status = str((row or {}).get("status") or "")
+    reason = str((row or {}).get("fail_reason") or "")
+    accepted_text = str((row or {}).get("accepted_text") or "")
+    if status == "accepted":
+        return True, reason or "accepted", cid, accepted_text
+    if status == "failed":
+        return False, reason or "failed", cid, accepted_text
+    return False, f"unconfirmed_timeout(status={status or 'pending'})", cid, accepted_text
+
+
 def enqueue_and_wait(
     *,
     kind: str,
@@ -528,31 +587,13 @@ def enqueue_and_wait(
     message: str = "",
     timeout: float = RECEIPT_WAIT_DEFAULT,
 ) -> tuple[bool, str, int]:
-    """生产者入口：入队（保留归属快照）并**等待资源宿主的受理回执**。
-
-    返回 ``(是否受理, 回执原因, 命令 id)``。超时按**未确认**处理（行仍
-    pending/claimed，可被后续宿主投递），调用方不得记成功——这是"delivered=True
-    却无任何确认"（缺陷 E）的根治点。
-    """
-    cid = enqueue_send(
+    """向后兼容的三元组包装；新代码需要前缀时用 :func:`enqueue_and_wait_text`。"""
+    ok, reason, cid, _accepted_text = enqueue_and_wait_text(
         kind=kind, channel=channel, session_key=session_key, owner_id=owner_id,
         slot=slot, peer=peer, character_id=character_id, turn_id=turn_id,
-        message=message,
+        message=message, timeout=timeout,
     )
-    try:
-        row = wait_for_receipt(cid, timeout=timeout)
-    except Exception as e:  # noqa: BLE001
-        # 2026-11-12 终审修复：入队已成功、等待阶段异常不能当作「没发」——
-        # 行仍在 outbox，宿主稍后可能真实投递。返回未确认 + cid，让调用方
-        # 走 cancel/不回落文字的同一套保护。
-        return False, f"unconfirmed_wait_error({type(e).__name__})", cid
-    status = str((row or {}).get("status") or "")
-    reason = str((row or {}).get("fail_reason") or "")
-    if status == "accepted":
-        return True, reason or "accepted", cid
-    if status == "failed":
-        return False, reason or "failed", cid
-    return False, f"unconfirmed_timeout(status={status or 'pending'})", cid
+    return ok, reason, cid
 
 
 async def drain_once_async(

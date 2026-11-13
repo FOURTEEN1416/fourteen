@@ -2035,6 +2035,7 @@ class WeChatConnector:
                 continue
             kind = str(row.get("kind") or "")
             ok = False
+            accepted_body = ""
             try:
                 # A2（2026-11-12）：控制面 kind 归一——proactive / important_date /
                 # manual / reminder 四条本机出站线统一走
@@ -2074,30 +2075,30 @@ class WeChatConnector:
                                     60000, max(1500, len(text) * 180)
                                 ),
                             )
-                elif kind in ("proactive", "important_date", "manual"):
+                    accepted_body = text if ok else ""
+                elif kind in ("proactive", "important_date", "manual", "reminder"):
                     from utils.humanize_delivery import direct_send_proactive_result
 
-                    accepted_any, complete = direct_send_proactive_result(self, peer, text)
-                    ok = complete
+                    accepted_any, complete, accepted_body = direct_send_proactive_result(
+                        self, peer, text,
+                    )
+                    # 2026-11-13 提醒拆条：任一段受理即算提醒已投递（避免整条
+                    # 重发已受理前缀），并把已受理前缀写回回执供历史记账。
+                    ok = accepted_any if kind == "reminder" else complete
                     if accepted_any and not complete:
                         logger.warning(
                             "[wx][step=partial_delivery] kind=%s peer=%s 已受理前缀但未完整",
                             kind, peer,
                         )
-                elif kind == "reminder":
-                    # 2026-11-12 终审回退：提醒暂不进入拆条链——控制面回执只有
-                    # bool，部分受理无法把「已受理前缀」传回 reminder_delivery，
-                    # 会把未受理尾段写进历史。先保持整段直发；拆条待回执契约
-                    # 增加 accepted_text 后单列原子再做。
-                    ok = bool(self.send_text(text, to_user=peer))
                 else:
                     ok = self.send_text(text, to_user=peer)
+                    accepted_body = text if ok else ""
             except Exception as e:  # noqa: BLE001
                 logger.warning("[wx][step=outbox_send_error] %s", e)
             try:
                 rp.complete_send(
                     cid, ok=ok, reason="" if ok else "send_api_rejected",
-                    slot=self.slot,
+                    slot=self.slot, accepted_text=accepted_body,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.debug("[wx][step=outbox_complete_failed] %s", e)

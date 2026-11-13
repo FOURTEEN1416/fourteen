@@ -384,6 +384,29 @@ class TestOutboxProducerConsumer:
         snap = rp.send_status(cid)
         assert snap["character_id"] == "micai" and snap["slot"] == 0
 
+    def test_enqueue_and_wait_text_returns_accepted_prefix(self):
+        """2026-11-13 提醒拆条：回执必须带回已受理前缀。"""
+        def _consumer():
+            deadline = time.time() + 6
+            while time.time() < deadline:
+                row = rp.claim_next_send(channel="wechat", owner_id=7, slot=0)
+                if row:
+                    rp.complete_send(
+                        int(row["id"]), ok=True, reason="delivered=1", slot=0,
+                        accepted_text="前半句",
+                    )
+                    return
+                time.sleep(0.05)
+
+        th = threading.Thread(target=_consumer)
+        th.start()
+        ok, _reason, _cid, accepted_text = rp.enqueue_and_wait_text(
+            kind="reminder", channel="wechat", session_key="7:o@im.wechat",
+            owner_id=7, peer="o", message="整句提醒", timeout=10.0)
+        th.join()
+        assert ok is True
+        assert accepted_text == "前半句"
+
     def test_enqueue_and_wait_timeout_is_not_success(self):
         t0 = time.time()
         ok, reason, cid = rp.enqueue_and_wait(

@@ -208,28 +208,31 @@ def send_proactive_voice(
     character_id: str = "",
     *,
     max_age_hours: float = DEFAULT_MAX_AGE_HOURS,
-) -> tuple[bool, str]:
-    """给微信会话发一条语音条。返回 ``(ok, reason)``；失败原因不含隐私。
+) -> tuple[bool, str, int]:
+    """给微信会话发一条语音条。返回 ``(ok, reason, cid)``；原因不含隐私。
 
     D1（2026-11-12）：开关 ``PROACTIVE_VOICE_VIA_PLANE``（缺省开）且控制面
     可用时，改为 ``enqueue_and_wait(kind="proactive_voice")``，由连接器宿主在
     ``_peer_lock`` 内合成并投递（与主链发送同锁，避免同好友语音/文字交错）；
     本进程**不再**自己找凭据/合成/直发。只认 ``accepted`` 回执，超时/失败
-    一律 ``(False, reason)``，由 scheduler 走既有文字回落。开关关或控制面
+    一律 ``(False, reason, cid)``，由 scheduler 走既有文字回落。开关关或控制面
     不可用时，下面这条直发路径逐字保留（一行回滚）。
+
+    2026-11-13：返回值追加 ``cid``（控制面命令 id；直发路径为 0）——scheduler
+    在 ``unconfirmed_claimed`` 时用它做后台对账，晚到 accepted 补写历史。
     """
     try:
         from utils import session_key as sk_mod
 
         sk = str(session_key or "")
         if not sk_mod.is_wechat_key(sk):
-            return False, "not_wechat"
+            return False, "not_wechat", 0
         parsed = sk_mod.parse(sk)
         owner, peer = parsed.owner, parsed.peer
         if owner is None or not peer:
-            return False, "bad_session_key"
+            return False, "bad_session_key", 0
     except Exception:  # noqa: BLE001
-        return False, "bad_session_key"
+        return False, "bad_session_key", 0
 
     try:
         from utils.speaker_switches import proactive_voice_via_plane_enabled
@@ -242,8 +245,9 @@ def send_proactive_voice(
     if via_plane:
         plane = _control_plane_for(owner)
         if plane is not None:
+            cid = 0
             try:
-                ok, reason, _cid = plane.enqueue_and_wait(
+                ok, reason, cid = plane.enqueue_and_wait(
                     kind=PLANE_KIND,
                     channel="wechat",
                     session_key=sk,
@@ -254,16 +258,15 @@ def send_proactive_voice(
                     timeout=PLANE_RECEIPT_TIMEOUT,
                 )
             except Exception as e:  # noqa: BLE001
-                return False, f"{type(e).__name__}"
+                return False, f"{type(e).__name__}", 0
             if ok:
-                return True, str(reason or "accepted")
+                return True, str(reason or "accepted"), int(cid or 0)
             reason_text = str(reason or "send_rejected")[:120]
             # 2026-11-12 复核修复（超时双发）：生产者超时只代表「未确认」，
             # 行可能仍 pending（可安全取消）或已被宿主认领（可能正在发）。
-            # pending → 取消失败？取消失败按未确认处理；claimed → 明确回
-            # unconfirmed_claimed，调用方不得回落文字。
+            # pending → 取消成功则可回落；claimed → 明确回 unconfirmed_claimed。
             if reason_text.startswith("unconfirmed_"):
-                cid = int(_cid or 0)
+                cid = int(cid or 0)
                 try:
                     cancelled = bool(plane.cancel_send_pending(
                         cid, reason="producer_timeout",
@@ -279,16 +282,19 @@ def send_proactive_voice(
                     except Exception:  # noqa: BLE001
                         late = None
                     if str((late or {}).get("status") or "") == "accepted":
-                        return True, "accepted_late"
-                return (False, "timeout_cancelled") if cancelled else (False, "unconfirmed_claimed")
-            return False, reason_text
+                        return True, "accepted_late", cid
+                return (
+                    (False, "timeout_cancelled", cid) if cancelled
+                    else (False, "unconfirmed_claimed", cid)
+                )
+            return False, reason_text, int(cid or 0)
 
     creds = find_wechat_credentials(owner, peer, max_age_hours=max_age_hours)
     if creds is None:
-        return False, "no_credentials"
+        return False, "no_credentials", 0
     audio = synthesize_audio(text, character_id, owner)
     if audio is None:
-        return False, "tts_unavailable"
+        return False, "tts_unavailable", 0
     data, fmt = audio
     try:
         # 2026-11-08 语音送达批：形态决策（音频文件卡片 / 原生气泡）的唯一
@@ -304,6 +310,6 @@ def send_proactive_voice(
             base_url=creds.get("base_url") or "",
             duration_ms=min(60000, max(1500, len(str(text or "")) * 180)),
         )
-        return bool(ok), ("" if ok else str(err or "send_rejected")[:120])
+        return bool(ok), ("" if ok else str(err or "send_rejected")[:120]), 0
     except Exception as e:  # noqa: BLE001
-        return False, f"{type(e).__name__}"
+        return False, f"{type(e).__name__}", 0

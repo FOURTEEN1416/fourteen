@@ -156,9 +156,12 @@ class ReminderDeliveryTask:
             if self._plane is not None:
                 # 块3：投递经控制面 outbox —— 通道宿主可能在别的 worker（scheduler
                 # 与连接器/WS 各自选主），本地直发在跨 worker 拓扑下必然误判失败。
-                delivered = await self._send_via_plane(session_key, text, character_id)
+                delivered, delivered_text = await self._send_via_plane(
+                    session_key, text, character_id,
+                )
             else:
                 delivered = await self._send_to_session(session_key, text)
+                delivered_text = text if delivered else ""
         except ChannelNotReadyError as e:
             # 「通道没就绪」跳过本轮：不记 delivered、也不吃失败配额。
             logger.warning(
@@ -167,6 +170,9 @@ class ReminderDeliveryTask:
             )
             return
         if delivered:
+            # 2026-11-13 提醒拆条：只记**通道已受理的前缀**，未受理尾段
+            # 不得写进历史（否则下一轮模型会以为自己说完了）。
+            recorded_text = str(delivered_text or text)
             # 自问自答根治：她主动说的话必须进历史，否则下一轮她自己不记得提醒过
             # 🔴 2026-09-22：必须带 character_id（出站行此前无归属 → 切角色继承台词）
             recorder = getattr(self._memory, "record_outbound_message", None)
@@ -174,7 +180,7 @@ class ReminderDeliveryTask:
                 try:
                     await asyncio.to_thread(
                         recorder,
-                        message=text,
+                        message=recorded_text,
                         session_id=session_key,
                         character_id=character_id,
                         channel="reminder",
@@ -193,11 +199,11 @@ class ReminderDeliveryTask:
                     await asyncio.to_thread(
                         speaker.record,
                         UtteranceIntent("reminder", session_key, character_id),
-                        text,
+                        recorded_text,
                         DeliveryResult(
                             accepted=True,
-                            accepted_text=text,
-                            segments=(text,),
+                            accepted_text=recorded_text,
+                            segments=(recorded_text,),
                             channel="reminder",
                         ),
                     )
@@ -263,21 +269,19 @@ class ReminderDeliveryTask:
     async def _send_via_plane(
         self, sk: str, text: str, character_id: str = "",
         receipt_timeout: float = PLANE_RECEIPT_TIMEOUT,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """经控制面 outbox 投递：入队保留归属快照，等资源宿主的受理回执。
 
-        微信键 → ``channel=wechat`` 且**不点名 slot**：该 owner 任一在线连接器
-        宿主 CAS 认领并真实发送，天然杜绝"遍历本地 registry 逐 slot 直发"；
-        其余键 → ``channel=websocket``，由持有该连接的 WS worker 消费。
-        旧实现只在**同进程** registry 里找通道，scheduler 与连接器分属不同
-        worker 时本地必空 → 提醒被误判失败并 3 次判死（缺陷 A/C/E）。
+        返回 ``(是否受理, 已受理前缀)``。2026-11-13 提醒拆条：部分受理时
+        回执里的 ``accepted_text`` 是唯一能避免「整条重发/把尾段写进历史」的
+        真源；旧实现只回 bool。
         """
         rp = self._plane
         parsed = session_key_mod.parse(sk)
         is_wechat = session_key_mod.is_wechat_key(sk)
         if is_wechat and (parsed.owner is None or not parsed.peer):
             logger.warning("[reminder] 微信会话键无法解析为 owner:peer: %s", sk)
-            return False
+            return False, ""
         channel = "wechat" if is_wechat else "websocket"
         try:
             cid = await asyncio.to_thread(
@@ -289,21 +293,22 @@ class ReminderDeliveryTask:
             row = await asyncio.to_thread(rp.wait_for_receipt, cid, receipt_timeout)
         except Exception as e:  # noqa: BLE001
             logger.warning("[reminder] 控制面投递异常 session=%s: %s", sk, e)
-            return False
+            return False, ""
         status = str((row or {}).get("status") or "")
         reason = str((row or {}).get("fail_reason") or "")
+        accepted_text = str((row or {}).get("accepted_text") or "")
         if status == "accepted":
-            return True
+            return True, (accepted_text or text)
         if status == "failed":
             logger.warning(
                 "[reminder] 宿主回执投递失败 session=%s reason=%s", sk, reason,
             )
-            return False
+            return False, accepted_text
         logger.warning(
             "[reminder] %ss 内未获受理回执，按**未送达**处理 session=%s",
             receipt_timeout, sk,
         )
-        return False
+        return False, accepted_text
 
     def _resolve_character_id(self, session_key: str) -> str:
         """生成与落库共享同一角色快照；注入解析失败不冒认其他角色。"""

@@ -1,6 +1,6 @@
 """话题线程状态 facade（Speaker 第 1 刀，2026-11-12）。
 
-本类**只做转发**：三张话题表（``topic_state`` / ``topic_plan`` / ``topic_meta``）
+本类**只做转发**：三张话题表（``topic_state`` / ``thread_plan`` / ``topic_meta``）
 的唯一 SQL owner 仍是 ``utils.topic_state``。此处不复制任何 SQL、不缓存快照、
 不替调用方补归属键——所有 API 都显式传 ``(session_key, character_id)``，
 从结构上杜绝「A 会话的计划被 B 会话消费」。

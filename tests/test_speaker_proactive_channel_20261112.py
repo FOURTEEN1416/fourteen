@@ -605,3 +605,39 @@ def test_manual_and_date_channels_have_outbound_markers():
     assert out[0]["content"].startswith("[主动]")
     assert out[1]["content"].startswith("[重要日期]")
     assert out[2]["content"] == "普通回复"
+
+
+def test_voice_reconcile_writes_history_on_late_accepted(monkeypatch):
+    """2026-11-13：claimed 晚到 accepted 时后台对账补写历史。"""
+    import proactive.runtime_plane as rp
+    import proactive.scheduler as sched_mod
+
+    s, _mem = _delivery_scheduler(monkeypatch)
+    recorded: list[tuple] = []
+    monkeypatch.setattr(
+        s, "_record_outbound",
+        lambda *a, **k: recorded.append((a, k)),
+    )
+    monkeypatch.setattr(
+        rp, "wait_for_receipt",
+        lambda cid, timeout: {"status": "accepted"},
+    )
+    monkeypatch.setattr(
+        "agent_core.events.record_event", lambda *a, **k: "evt",
+    )
+
+    class _ImmediateThread:
+        def __init__(self, target=None, daemon=None, name=None):
+            self.target = target
+
+        def start(self):
+            if self.target:
+                self.target()
+
+    monkeypatch.setattr(sched_mod.threading, "Thread", _ImmediateThread)
+
+    s._spawn_voice_reconcile(9, "语音内容", SESSION, CHAR)
+
+    assert len(recorded) == 1
+    assert recorded[0][0][0] == "语音内容"
+    assert recorded[0][1]["channel"] == "proactive_voice"

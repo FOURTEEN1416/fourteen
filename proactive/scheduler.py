@@ -103,7 +103,7 @@ def _classify_deliver_error(err: str) -> str:
 #: 可覆盖；≤1 钳到 1 = 原串行内联路径，非法值回落本默认）。
 _TICK_CONCURRENCY_DEFAULT = 4
 #: A4：账本驱逐 TTL（秒）——next_ok 与退避盖章 sidecar 共用 7 天，与
-#: topic_plan 的 7 天 TTL 对齐；超期条目的 window_expired 消费路径（迟到
+#: thread_plan 的 7 天 TTL 对齐；超期条目的 window_expired 消费路径（迟到
 #: >7 天）被放弃，残余为可观测性微损（非投递语义变化）。
 _LEDGER_TTL_SECONDS = 7 * 86400.0
 #: A4：judge stash 上限——正常消费路径是 `_deliver` 投递时 pop（pop-at-
@@ -1545,7 +1545,7 @@ class ProactiveScheduler:
         """A4：每拍 tick 前清理「闸位比较必忽略」的账本条目（单线程、fan-out 前）。
 
         只删语义等价条目，行为零变化：day dict 删 value≠今天（闸位只判
-        ``== today``）；next_ok 删超 7 天 TTL（topic_plan 本身 7 天 TTL 自愈）；
+        ``== today``）；next_ok 删超 7 天 TTL（thread_plan 本身 7 天 TTL 自愈）；
         fail_counts 仅按 sidecar 盖章成对驱逐（本体不驱逐，P1-22 契约）。
         🔴 审阅 Q1：本方法异常必须自降级为 debug——驱逐是优化，绝不许经
         `_check_ase` 的 "ASE check failed" 把整拍**所有用户**炸掉（今天不
@@ -2505,7 +2505,7 @@ class ProactiveScheduler:
         if not decision.get("should_contact"):
             _false_reason = str(decision.get("reason") or "")
             # 2026-10-27 话题状态机 Q3/Q4：skip 也要落「下次准备聊什么」——
-            # 等待窗到点后的下一次决策靠它接续（跨进程重启仍在，见 topic_plan）。
+            # 等待窗到点后的下一次决策靠它接续（跨进程重启仍在，见 thread_plan）。
             # 2026-10-28 复核修复：两字段都空时，若本轮确实注入了旧计划
             # （_next_plan 非 None），必须消费它——否则旧计划下一 tick 会再次
             # 注入，形成「模型写空也无法放弃」的死循环。
@@ -2849,6 +2849,63 @@ class ProactiveScheduler:
 
         return run_on_shared_loop(coro_factory())
 
+    def _spawn_voice_reconcile(
+        self, cid: int, message: str, session_key: str, character_id: str,
+    ) -> None:
+        """语音回执未确认时的后台对账：晚到 accepted 补写历史与影子账本。
+
+        2026-11-13：``unconfirmed_claimed`` 意味着连接器已认领、可能仍在发送；
+        生产者不能回落文字（防双发），但也不能在语音真正送达后不留账。这里
+        起 daemon 线程等最终回执（最长 120s），只对 accepted 补写一次。
+        """
+        if not cid or not session_key:
+            return
+
+        def _worker() -> None:
+            try:
+                from proactive import runtime_plane
+
+                row = runtime_plane.wait_for_receipt(int(cid), timeout=120.0)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[主动消息] 语音对账等待失败 cid=%s: %s", cid, e)
+                return
+            if str((row or {}).get("status") or "") != "accepted":
+                return
+            try:
+                self._record_outbound(
+                    message, session_key, character_id=character_id,
+                    channel="proactive_voice",
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[主动消息] 语音对账回写历史失败 cid=%s: %s", cid, e)
+            try:
+                import hashlib
+
+                from agent_core import events
+
+                dedup = (
+                    f"proactive_voice_reconcile:{session_key}:"
+                    f"{hashlib.sha256(str(message or '').encode('utf-8')).hexdigest()[:16]}"
+                )
+                events.record_event(
+                    "agent_msg",
+                    session_key=session_key,
+                    character_id=str(character_id or ""),
+                    source="scheduler/voice_reconcile",
+                    dedupe_key=dedup,
+                    payload={
+                        "phase": "proactive_delivered",
+                        "channel": "proactive_voice",
+                        "text_len": len(str(message or "")),
+                        "character_id": str(character_id or ""),
+                        "turn_id": "",
+                    },
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("[主动消息] 语音对账影子账本失败 cid=%s: %s", cid, e)
+
+        threading.Thread(target=_worker, daemon=True, name="voice-reconcile").start()
+
     def _deliver(
         self, message: str, session_key: str | None = None, character_id: str | None = None,
         quiet_hours: tuple[int, int] | None = None, *, voice: bool = False,
@@ -3114,7 +3171,7 @@ class ProactiveScheduler:
                         _voice_char = str(self._resolve_character_id(str(session_key or "")) or "")
                     except Exception:  # noqa: BLE001
                         _voice_char = ""
-                    v_ok, v_reason = await asyncio.to_thread(
+                    v_ok, v_reason, v_cid = await asyncio.to_thread(
                         send_proactive_voice,
                         str(session_key or ""),
                         message,
@@ -3133,6 +3190,11 @@ class ProactiveScheduler:
                         logger.warning(
                             "[主动消息] 语音回执未确认且已被认领，跳过文字回落防双发 session=%s",
                             session_key,
+                        )
+                        # 2026-11-13：后台对账——晚到 accepted 时补写历史/影子账本，
+                        # 闭合「用户已收到语音但模型不记得」的窄窗。
+                        self._spawn_voice_reconcile(
+                            int(v_cid or 0), message, str(session_key or ""), _voice_char,
                         )
                         return False
                     logger.info(
@@ -3229,7 +3291,7 @@ class ProactiveScheduler:
 
     def _run_daily_maintenance(self) -> None:
         """每日维护"""
-        # 2026-10-27 话题状态机 Q4：topic_state/topic_plan 7 天 TTL 清理。
+        # 2026-10-27 话题状态机 Q4：topic_state/thread_plan 7 天 TTL 清理。
         # force=True：即使 enabled=false 也清过期行（避免「启用过再关闭」留残留）；
         # 普通 purge_expired() 在关闭态仍是零 DB 契约。
         try:

@@ -70,9 +70,12 @@ def test_reminder_wechat_delivery_enqueues_snapshot_and_acks():
 
     th = threading.Thread(target=_host)
     th.start()
-    ok = asyncio.run(task._send_via_plane("7:wx_b@im.wechat", "该喝水了", "micai"))
+    ok, accepted_text = asyncio.run(
+        task._send_via_plane("7:wx_b@im.wechat", "该喝水了", "micai")
+    )
     th.join()
     assert ok is True
+    assert accepted_text == "该喝水了"
     row = cid_box["row"]
     assert row["kind"] == "reminder"
     assert int(row["owner_id"]) == 7
@@ -96,9 +99,12 @@ def test_reminder_websocket_uses_plane_channel():
 
     th = threading.Thread(target=_host)
     th.start()
-    ok = asyncio.run(task._send_via_plane("7:web:aa", "开会提醒", "lin"))
+    ok, accepted_text = asyncio.run(
+        task._send_via_plane("7:web:aa", "开会提醒", "lin")
+    )
     th.join()
     assert ok is True
+    assert accepted_text == "开会提醒"
     sends = rp.recent_sends("reminder", limit=5)
     assert sends and sends[0]["channel"] == "websocket"
 
@@ -106,12 +112,13 @@ def test_reminder_websocket_uses_plane_channel():
 def test_reminder_unconfirmed_receipt_is_not_success():
     """无任何宿主受理 → 不得判送达（提醒 fail_count 继续累计，3 次判死语义保留）。"""
     task = _task(rp)
-    ok = asyncio.run(
+    ok, accepted_text = asyncio.run(
         task._send_via_plane(
             "7:wx_b@im.wechat", "早", "micai", receipt_timeout=0.3
         )
     )
     assert ok is False
+    assert accepted_text == ""
     rows = rp.recent_sends("reminder", limit=5)
     assert rows and rows[0]["status"] == "pending"
 
@@ -130,7 +137,9 @@ def test_reminder_failed_receipt_reason_visible():
 
     th = threading.Thread(target=_host)
     th.start()
-    ok = asyncio.run(task._send_via_plane("7:wx_b@im.wechat", "早", "micai"))
+    ok, _accepted_text = asyncio.run(
+        task._send_via_plane("7:wx_b@im.wechat", "早", "micai")
+    )
     th.join()
     assert ok is False
     assert rp.recent_sends("reminder", limit=5)[0]["fail_reason"] == "send_api_rejected"

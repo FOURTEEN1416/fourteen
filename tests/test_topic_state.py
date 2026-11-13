@@ -312,7 +312,7 @@ def test_schema_idempotent_create(tmp_path):
     with closing(ts._connect(ensure_schema=False)) as conn:
         names = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
         assert names.count("topic_state") == 1
-        assert names.count("topic_plan") == 1
+        assert names.count("thread_plan") == 1
         assert names.count("topic_meta") == 1
         state_cols = {row[1] for row in conn.execute("PRAGMA table_info(topic_state)")}
         assert {
@@ -332,7 +332,7 @@ def test_schema_idempotent_create(tmp_path):
             "updated_at",
             "expires_at",
         } <= state_cols
-        plan_cols = {row[1] for row in conn.execute("PRAGMA table_info(topic_plan)")}
+        plan_cols = {row[1] for row in conn.execute("PRAGMA table_info(thread_plan)")}
         assert {
             "session_key",
             "character_id",
@@ -678,7 +678,7 @@ def test_purge_expired_plan(tmp_path):
     _enable(tmp_path)
     with closing(ts._connect(ensure_schema=True)) as conn:
         conn.execute(
-            "INSERT INTO topic_plan (session_key, character_id, topic, intent, "
+            "INSERT INTO thread_plan (session_key, character_id, topic, intent, "
             "planned_at, next_at, expires_at, consumed_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
             (
                 KEY,
@@ -1016,7 +1016,7 @@ def test_take_does_not_consume_by_default(tmp_path):
     second = ts.take_next_plan(KEY, "default", now=_at(2))
     assert first is not None and second is not None
     with closing(ts._connect(ensure_schema=False)) as conn:
-        row = conn.execute("SELECT consumed_at FROM topic_plan").fetchone()
+        row = conn.execute("SELECT consumed_at FROM thread_plan").fetchone()
     assert row[0] is None
 
 
@@ -1063,7 +1063,7 @@ def test_plan_survives_new_connection(tmp_path):
     _enable(tmp_path)
     ts.save_next_plan(KEY, "default", "面试", "问问结果", planned_at=BASE)
     with sqlite3.connect(str(ts._DB_PATH)) as raw:
-        count = raw.execute("SELECT COUNT(*) FROM topic_plan").fetchone()[0]
+        count = raw.execute("SELECT COUNT(*) FROM thread_plan").fetchone()[0]
     assert count == 1
     assert ts.take_next_plan(KEY, "default", now=_at(1)) is not None
 
@@ -1277,3 +1277,40 @@ def test_logs_use_step_and_no_raw_text(tmp_path, caplog):
     ts.update_after_turn(KEY, "default", "绝密原文_面试细节_XYZ", now=BASE, turn_id="log-1")
     assert "[topic_state][step=" in caplog.text
     assert "绝密原文" not in caplog.text
+
+
+def test_legacy_topic_plan_migrates_to_thread_plan_and_drops_old(tmp_path, monkeypatch):
+    """2026-11-13 topic_plan 清场：旧表行迁移到 thread_plan 后删表。"""
+    db = tmp_path / "legacy-plan.db"
+    monkeypatch.setattr(ts, "_DB_PATH", db)
+    legacy = sqlite3.connect(str(db))
+    legacy.execute(
+        "CREATE TABLE topic_plan ("
+        "session_key TEXT NOT NULL, character_id TEXT NOT NULL, "
+        "topic TEXT NOT NULL DEFAULT '', intent TEXT NOT NULL DEFAULT '', "
+        "planned_at TEXT NOT NULL, next_at TEXT NOT NULL, "
+        "expires_at TEXT NOT NULL, consumed_at TEXT, "
+        "PRIMARY KEY (session_key, character_id))"
+    )
+    legacy.execute(
+        "INSERT INTO topic_plan VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
+        ("7:wx@im.wechat", "charA", "旧计划", "问问面试", ts._ts(BASE),
+         ts._ts(BASE), ts._ts(BASE + timedelta(days=1))),
+    )
+    legacy.commit()
+    legacy.close()
+
+    with closing(ts._connect(ensure_schema=True)) as conn:
+        tables = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "topic_plan" not in tables
+        assert "thread_plan" in tables
+        row = conn.execute(
+            "SELECT topic, intent FROM thread_plan "
+            "WHERE session_key=? AND character_id=?",
+            ("7:wx@im.wechat", "charA"),
+        ).fetchone()
+        assert row is not None and row[0] == "旧计划" and row[1] == "问问面试"

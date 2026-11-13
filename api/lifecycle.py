@@ -562,7 +562,7 @@ def _ase_states_verify(scope: AccountScope) -> dict:
 
 
 def _topic_state_purge(scope: AccountScope) -> dict:
-    """话题状态机三表（topic_state / topic_plan / topic_meta）按会话键清除。"""
+    """话题状态机三表（topic_state / thread_plan / topic_meta）按会话键清除。"""
     from utils import topic_state
 
     _chars, _kn, sqlite_db, _agent, _chroma = _default_paths(

@@ -844,7 +844,7 @@ def test_send_proactive_voice_rejects_non_wechat_and_missing_creds(tmp_path, mon
     from utils import proactive_voice_delivery as pvd
 
     monkeypatch.setattr(pvd, "SESSIONS_DIR", tmp_path)
-    ok, reason = pvd.send_proactive_voice("2:web:abc", "在吗")
-    assert ok is False and reason == "not_wechat"
-    ok2, reason2 = pvd.send_proactive_voice("2:p1@im.wechat", "在吗")
-    assert ok2 is False and reason2 == "no_credentials"
+    ok, reason, cid = pvd.send_proactive_voice("2:web:abc", "在吗")
+    assert ok is False and reason == "not_wechat" and cid == 0
+    ok2, reason2, cid2 = pvd.send_proactive_voice("2:p1@im.wechat", "在吗")
+    assert ok2 is False and reason2 == "no_credentials" and cid2 == 0

@@ -879,7 +879,7 @@ def build_proactive_context(
                     + "\n".join(f"- {f}" for f in _mem_facts)
                 )
     # 【上次决定的下一步】（2026-10-27 话题状态机 Q3/Q4）：取自上一条
-    # topic_plan（skip 时保存，到点后才由 scheduler take 出来）。它是「你
+    # thread_plan（skip 时保存，到点后才由 scheduler take 出来）。它是「你
     # 自己的计划」，不是新指令；语境已变时以自然衔接优先，不硬套。
     if next_plan:
         _plan_topic = str(next_plan.get("topic") or "").strip()
@@ -1087,7 +1087,7 @@ def parse_decision(raw: str) -> dict[str, Any]:
         "wait_minutes": wait_i,
         "candidates": candidates,
         # 下一步计划（2026-10-27 话题状态机 Q3/Q4）：should_contact=false 时
-        # 也要有字段；空串表示模型确实没有下一步。长度上限与 topic_plan 表一致。
+        # 也要有字段；空串表示模型确实没有下一步。长度上限与 thread_plan 表一致。
         # 2026-11-08 用户裁决：语音/文字由决策器自定。严格 True 才算
         # （字符串 "true"/1 之类一律按文字处理——宁可不发语音，不可误发）。
         "voice": data.get("voice") is True,

@@ -98,13 +98,13 @@
 ### `data/sqlite.db` 全量表清单（schema 真源合计 32 张；本地库只读实测 29 张业务表，2026-10-28，不含 FTS 影子表与 `sqlite_sequence`）
 
 `shisi/migrations.py` 建 12 张（上表）。同库另由 `structured_memory.py` /
-`utils/topic_state.py` / `utils/reply_mode.py` 等建表，**schema 真源合计 32 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）。本地 `data/sqlite.db` 2026-10-28 只读实测 **29 张业务表**（含 FTS 影子与 `sqlite_sequence` 后文件账 **35 张**）；两处惰性建表注记：**topic 三表**（v1.58，`utils/topic_state.py:85-128` `_SCHEMA`）本地未触发首次写入故不在实测数内，**生产已实例化**且 `topic_plan` 已有真实计划行：
+`utils/topic_state.py` / `utils/reply_mode.py` 等建表，**schema 真源合计 32 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）。本地 `data/sqlite.db` 2026-10-28 只读实测 **29 张业务表**（含 FTS 影子与 `sqlite_sequence` 后文件账 **35 张**）；两处惰性建表注记：**topic 三表**（v1.58，`utils/topic_state.py:85-128` `_SCHEMA`）本地未触发首次写入故不在实测数内，**生产已实例化**且 `thread_plan` 已有真实计划行：
 
 | 来源 | 表 |
 |------|-----|
 | `shisi/migrations.py`（12） | `characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version` |
 | `structured_memory.py` 等（17） | `chat_history`（**对话上下文真源，按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `daily_summaries` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_intents`（澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / `reminders`（+session_key/user_id/status/delivered_at/fail_count） / `memory_extraction_progress`（抽取租约 + 来源 id 水位） / `fact_deletion_watermarks`（删除水位，派生召回失效） / `memory_forwards`（转发） / `user_persona` / `user_persona_snapshots`（画像保序快照） / `user_profile`（用户画像） / `user_identity_map`（D15 显式身份组，v1.45；本地已实例化） / **`user_reply_mode`**（R7 按用户回复模式覆盖，v1.56；真源 `utils/reply_mode.py:224` 幂等 `CREATE TABLE IF NOT EXISTS`；`user_key` TEXT PK / `mode` TEXT NOT NULL / `updated_at` TEXT NOT NULL DEFAULT ''——本地库 DDL 亲测） |
-| `utils/topic_state.py`（3，v1.58，惰性建表·生产已实例化） | `topic_state` / `topic_plan` / `topic_meta`（schema 逐列见下节；**唯一 owner=`utils/topic_state.py`**，其他模块不得直接 `sqlite3.connect`） |
+| `utils/topic_state.py`（3，v1.58，惰性建表·生产已实例化） | `topic_state` / `thread_plan` / `topic_meta`（schema 逐列见下节；**唯一 owner=`utils/topic_state.py`**，其他模块不得直接 `sqlite3.connect`） |
 
 ### 话题状态机三表 schema（v1.58，真源 `utils/topic_state.py:85-128` `_SCHEMA`，逐列抄实 2026-10-28）
 
@@ -128,7 +128,7 @@
 | updated_at | TEXT | NOT NULL | 同上 |
 | expires_at | TEXT | NOT NULL | TTL 7 天（Q4-B 固化 `retention_days=7`） |
 
-**`topic_plan`** — 主动线下一步对话计划（PK `(session_key, character_id)`，单条 upsert）：
+**`thread_plan`** — 主动线下一步对话计划（PK `(session_key, character_id)`，单条 upsert）：
 
 | 字段 | 类型 | 约束/默认 | 说明 |
 |------|------|-----------|------|

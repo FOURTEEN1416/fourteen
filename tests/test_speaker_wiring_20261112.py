@@ -251,6 +251,58 @@ def test_reminder_delivery_records_agent_msg(clean_env, monkeypatch):
     assert kwargs["payload"]["phase"] == "speaker_delivered"
 
 
+def test_reminder_delivery_records_accepted_prefix_only(clean_env, monkeypatch):
+    """2026-11-13 提醒拆条：只把回执里的已受理前缀写进历史。"""
+    import api.consent as consent
+    from proactive import reminder_delivery as rd
+
+    async def _allow(session_key: str) -> bool:
+        return True
+
+    monkeypatch.setattr(consent, "outbound_allowed_for_session", _allow)
+
+    class _SM:
+        def __init__(self) -> None:
+            self.results: list[tuple[Any, bool]] = []
+
+        def mark_reminder_result(self, reminder_id, delivered):
+            self.results.append((reminder_id, delivered))
+
+    class _Plane:
+        def enqueue_send(self, **kwargs):
+            return 1
+
+        def wait_for_receipt(self, cid, timeout):
+            return {"status": "accepted", "accepted_text": "该吃", "fail_reason": ""}
+
+    class _Mem:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def record_outbound_message(self, **kwargs):
+            self.calls.append(kwargs)
+            return True
+
+    sm, mem = _SM(), _Mem()
+    task = rd.ReminderDeliveryTask(
+        structured_memory=sm,
+        llm=None,
+        character_id_resolver=lambda session_key: "charW",
+        memory=mem,
+        plane=_Plane(),
+    )
+
+    async def _stub_compose(reminder, *, character_id):
+        return "该吃药了"
+
+    task._compose_text = _stub_compose  # type: ignore[method-assign]
+    asyncio.run(task._deliver({"id": 7, "session_key": "4:web:wire", "content": "吃药"}))
+
+    assert sm.results == [(7, True)]
+    assert mem.calls[0]["message"] == "该吃"
+    assert mem.calls[0]["channel"] == "reminder"
+
+
 # ---------------------------------------------------------------------------
 # 重要日期线
 # ---------------------------------------------------------------------------

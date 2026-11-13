@@ -12,8 +12,8 @@
 - **范围**：把原「第3步：主链/主动/手动切换与 topic_plan 清场」巨型 hole 拆成 8 个原子施工：A1 主链拆条/受理单点、A2 控制面 kind 归一、B1 `_deliver` 渠道归属、B2 日期/手动 per-user 静默窗、B3 手动线生成/记账分离、C1 ThreadState 计划读写唯一入口、C2 topic_meta 清场 + 生命周期 owner 级 purge、D1 主动语音走控制面 + peer 锁。施工图 `docs/reports/2026-11-12-Speaker原子施工图.md`、验收报告 `docs/reports/2026-11-13-Speaker统一出口-验收报告.md`。
 - **关键修复**：`Speaker` 核心（`speaker/`）承接人设/能力/话题提示词、拆条、投递回执与双账本；`send_reply_segments_result` 返回 `DeliveryResult`，主链 `publish` 的 `complete/accepted_len` 同源；`_deliver` 按 `proactive/important_date/manual/proactive_voice` 记渠道；日期/手动按 `proactive_config.effective` 取 per-user 静默窗（`start==end` = 关闭）；手动线 `commit=False` 生成、受理后 `commit_sent`、只回滚日配额；`ThreadState` 收口 scheduler 6 处计划读写；`purge_owner/count_owner` 支持 `db_path + owner_uid` 前缀且异常不再吞；主动语音经 `runtime_plane kind=proactive_voice`、连接器 `_peer_lock` 内合成/发送，超时只取消 pending、claimed 不回落文字。
 - **独立终审**：首轮 1 high + 3 medium（生命周期漏 web 会话键 / 吞异常 / 渠道标记缺失 / 手动场景预提交 / 语音超时双发 / 提醒部分受理写全量历史）已修复或按证据回退；终审复核确认全量绿。
-- **全量回归**：四分块 **1095 + 1274 + 1283 + 1359 = 5011 通过 + 2 跳过 / 收集 5013**（`find` 递归 + NR%4，串行）；ruff 0。
-- **已知边界**：`topic_plan` 表未删（`agent_threads` 非等价替代：缺 parked/角色隔离/内容计划）；提醒线暂不拆条（控制面回执只有 bool，无法回传已受理前缀，待 `accepted_text` 单列原子）；主动语音 claimed 超 20s 晚到回执仍有「已发未记」窄窗口。
+- **全量回归**：四分块 **1095 + 1275 + 1285 + 1361 = 5016 通过 + 2 跳过 / 收集 5018**（`find` 递归 + NR%4，串行）；ruff 0。
+- **续推（同日）**：`topic_plan` → `thread_plan` 迁移并删除旧表（`utils/topic_state._migrate_legacy_plan_table` + `scripts/topic_plan_migration.py up/down`，旧表不再保留）；提醒线拆条启用（`outbound_commands.accepted_text` 回执贯通到 `reminder_delivery`，部分受理只记前缀）；主动语音 claimed 晚到回执由 `_spawn_voice_reconcile` 后台对账补写 chat_history/agent_msg。
 - **部署**：未部署、未压测（用户裁决「只合入不部署」「暂不压测」）。
 
 ## 2026-11-09 — 语音真人感根治批（v1.70）

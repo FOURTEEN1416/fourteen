@@ -60,7 +60,7 @@ def _seed_state(conn, session_key: str, character_id: str, *, expires_at: dateti
 
 def _seed_plan(conn, session_key: str, character_id: str, *, expires_at: datetime) -> None:
     conn.execute(
-        "INSERT INTO topic_plan "
+        "INSERT INTO thread_plan "
         "(session_key, character_id, topic, intent, planned_at, next_at, expires_at, consumed_at) "
         "VALUES (?, ?, '话题', '意图', ?, ?, ?, NULL)",
         (
@@ -113,7 +113,7 @@ def test_purge_expired_deletes_orphan_meta_and_keeps_active(topic_env):
 
     with closing(ts._connect(ensure_schema=False)) as conn:
         state_keys = {row[0] for row in conn.execute("SELECT session_key FROM topic_state")}
-        plan_keys = {row[0] for row in conn.execute("SELECT session_key FROM topic_plan")}
+        plan_keys = {row[0] for row in conn.execute("SELECT session_key FROM thread_plan")}
         meta_keys = {row[0] for row in conn.execute("SELECT session_key FROM topic_meta")}
     assert state_keys == {"1:active"}
     assert plan_keys == {"1:planned"}
@@ -156,7 +156,7 @@ def test_purge_owner_clears_three_tables_and_isolates_others(topic_env):
     assert ts.count_owner(["2:wx_b"]) == 3
     with closing(ts._connect(ensure_schema=False)) as conn:
         assert {r[0] for r in conn.execute("SELECT session_key FROM topic_state")} == {"2:wx_b"}
-        assert {r[0] for r in conn.execute("SELECT session_key FROM topic_plan")} == {"2:wx_b"}
+        assert {r[0] for r in conn.execute("SELECT session_key FROM thread_plan")} == {"2:wx_b"}
         assert {r[0] for r in conn.execute("SELECT session_key FROM topic_meta")} == {"2:wx_b"}
 
     # 空列表 / 空白键：0 且不误删他人。
