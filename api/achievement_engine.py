@@ -6,8 +6,10 @@
 - 重算幂等：重复触发不重复解锁，unlocked_at 保持首次达标时间；
 - 只展示统计结果，不读聊天原文；不用于提示词/亲密度/推荐决策。
 
-事实源（全部为已存在的生产数据）：
-- 长期记忆事实: data/character_memory/{id}.json（character_routes 同源）
+事实源（均为只读统计源；读不到时该指标记 0）：
+- 长期记忆事实: data/character_memory/{id}.json（**遗留 JSON 面**：生成侧从不读取，
+  仓库内已无写入者，目录通常不存在；character_routes 对应读写端点已按
+  `_FACT_SURFACE_GONE` 全部 410 作废。该指标仅为历史数据兼容口径，新部署恒为 0）
 - 角色日记: daily_summaries 表（跨进程真源，键 = `会话|角色|日期`，按角色段归属）
 - 角色知识库: CharacterKnowledgeService.get_stats
 - 重要日期: data/important_dates.json（utils.important_dates 同源）
@@ -32,7 +34,7 @@ from utils.project_paths import project_path
 
 logger = logging.getLogger("api.achievement_engine")
 
-# 锚定项目根，避免依赖进程 CWD（character_routes._facts_path 同源 —— 2026-09 全仓扫描）
+# 锚定项目根，避免依赖进程 CWD（遗留 JSON 面；生成侧不读取，生产通常无此目录）
 _MEMORY_FACTS_DIR = project_path("data", "character_memory")
 
 
@@ -62,10 +64,14 @@ ACHIEVEMENTS: tuple[AchievementDef, ...] = (
     AchievementDef("dates_first", "铭记之日", "配置第一个重要日期", "exploration", "dates", 1),
 )
 
-_ACH_BY_ID = {a.achievement_id: a for a in ACHIEVEMENTS}
-
 
 def _count_memory_facts(character_id: str) -> int:
+    """统计遗留 ``data/character_memory/{id}.json`` 的事实条数。
+
+    该 JSON 面已无生产写入者（character_routes 对应端点已 410 作废），目录通常
+    不存在，返回 0 属预期；现行事实真源是按用户归属的 ``user_facts``，不按角色
+    切分，因此本指标不能代表真实记忆量。
+    """
     safe_id = sanitize_id(character_id)
     if not safe_id:
         return 0

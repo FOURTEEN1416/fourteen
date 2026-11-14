@@ -2,7 +2,8 @@
 
 覆盖契约：
 - ``_drain_outbox`` 对 ``proactive`` / ``important_date`` / ``manual`` /
-  ``reminder`` 四种 kind 统一调用 ``utils.humanize_delivery.direct_send_proactive``；
+  ``reminder`` 四种 kind 统一调用 ``utils.humanize_delivery.direct_send_proactive_result``
+  （返回 ``(accepted_any, complete, accepted_body)``）；
 - 未知 kind 保持 ``self.send_text`` 路径；
 - ``send_text`` 抛异常时仍以 ``complete_send(ok=False)`` 回执，不向上抛。
 """
@@ -95,14 +96,14 @@ def _patch_send_text(monkeypatch, connector, *, result=True, raises=False):
 
 
 # ---------------------------------------------------------------------------
-# 四条出站线统一走 direct_send_proactive
+# 四条出站线统一走 direct_send_proactive_result
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     "kind", ["proactive", "important_date", "manual", "reminder"]
 )
-def test_known_kinds_go_through_direct_send_proactive(
+def test_known_kinds_go_through_direct_send_proactive_result(
     connector, monkeypatch, kind
 ):
     direct_calls = _patch_direct_send(monkeypatch)
@@ -111,7 +112,7 @@ def test_known_kinds_go_through_direct_send_proactive(
     plane = _drain(connector, monkeypatch, kind)
 
     assert direct_calls == [(connector, PEER, TEXT)], (
-        f"kind={kind} 未走 direct_send_proactive"
+        f"kind={kind} 未走 direct_send_proactive_result"
     )
     assert text_calls == [], f"kind={kind} 不得绕过统一真源直调 send_text"
     assert plane.completed == [

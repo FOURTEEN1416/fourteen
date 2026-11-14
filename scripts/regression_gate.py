@@ -23,9 +23,9 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND = os.path.join(ROOT, "frontend")
 TAIL_LINES = 3
-# 2026-10-31 门禁首轮失败根因：400s 对当前 276 测试文件的四分块不够
-# （块1 335s / 块3 351s / 块4 307s，负载高时贴边超时）。600s 保留约 70% 余量，
-# 四块全跑仍可控制在 workflow 25 分钟总预算内（实测总和约 20 分钟）。
+# 2026-10-31 门禁首轮失败根因：400s 对当时的 276 测试文件四分块不够
+# （块1 335s / 块3 351s / 块4 307s，负载高时贴边超时）。当前 317 个测试文件，
+# 仍用 600s：保留约 70% 余量，四块全跑可控制在 workflow 25 分钟总预算内（实测约 20 分钟）。
 PYTEST_TIMEOUT = 600
 # 门禁总预算（秒）：workflow 的 world.run 上限是 25 分钟（1_500_000ms）。
 # 留 2 分钟收尾/输出余量，超预算的项直接判失败并在 stderr 留下原因，

@@ -21,7 +21,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 _ASSISTANT_RAW = "（想了想）今天降温了，记得加衣服哦"
-_ASSISTANT_SCRUBBED = "今天降温了，记得加衣服哦"
 _DENIAL_USER = "我不是夏夏，别这么叫我"
 
 

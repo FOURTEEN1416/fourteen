@@ -1,7 +1,10 @@
 """主动线语音投递（2026-11-08 用户裁决：「让她拥有并且会驱动语音功能」）。
 
-唯一 owner：TTS 配置 / 角色音色契约 / 合成 / silk 转码 / 微信语音发送 /
-凭据定位。**常驻主动线（scheduler）与广播脚本共用本模块**——禁止两处各写
+唯一 owner：TTS 配置 / 角色音色契约 / 合成 / 微信语音投递编排 / 凭据定位。
+silk/amr 转码不在本模块：真实转码在
+``wechat_direct.wechat_connector.send_voice_clip_to`` 的原生气泡分支
+（本模块 ``synthesize_silk`` 为历史保留、当前零调用）。
+**常驻主动线（scheduler）与广播脚本共用本模块**——禁止两处各写
 一份（否则会出现「脚本能发、主动线发不出」这类漂移）。
 
 关键约束（踩过的坑）：
@@ -71,14 +74,6 @@ def get_tts_manager() -> Any:
             except Exception:  # noqa: BLE001
                 _TTS_MGR = None
         return _TTS_MGR
-
-
-def _reset_tts_manager() -> None:
-    """测试用：清空缓存。"""
-    global _TTS_MGR, _TTS_CFG
-    with _TTS_LOCK:
-        _TTS_MGR = None
-        _TTS_CFG = None
 
 
 def synthesize_audio(

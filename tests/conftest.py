@@ -35,8 +35,6 @@ if not (os.environ.get("APP_DATABASE_URL") or os.environ.get("DATABASE_URL")):
     )
     atexit.register(shutil.rmtree, _TEST_USERS_DB_DIR, ignore_errors=True)
 
-collect_ignore = ["real_e2e_test.py", "real_test.py"]
-
 
 @pytest.fixture(scope="session", autouse=True)
 def init_test_users_db_schema():

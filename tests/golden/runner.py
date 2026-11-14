@@ -350,12 +350,6 @@ def _live_judge_llm() -> Any | None:
 # ── 各类断言 ────────────────────────────────────────────────
 
 
-def _check_guard_changed(case: Case, guard_out: str, a: dict[str, Any]) -> list[str]:
-    if a.get("must_trigger") and guard_out == case.candidate_reply:
-        return [f"守卫未触发（输出与候选原文相同）：{guard_out!r}"]
-    return []
-
-
 def _check_no_semantic(case: Case, guard_out: str, a: dict[str, Any]) -> list[str]:
     """no_meta_memory / no_attribution_flip / no_ungrounded_reciprocal /
     no_stage_direction / no_system_marker / strip_verbatim_echo 共用骨架：

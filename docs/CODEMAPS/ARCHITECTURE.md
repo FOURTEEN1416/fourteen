@@ -1,8 +1,8 @@
 # 架构地图
 
-**最近更新:** 2026-10-30
+**最近更新:** 2026-11-14
 **演进阶段:** Phase 14 (投产准备) → Phase 15 (品牌清洗) → Phase 16 (P0 全面修复 + CI 加固) → Phase 17 (全仓性能/正确性扫描) → Phase 18 (每人独立微信通道) → Phase 19 (D16 通道语义对齐：谁扫码谁聊、一人一 bot `MAX_CHANNELS_PER_USER=1`、扫码人守卫、好友自选角色退役) → Phase 20 (聊天质量根治线：R4 真流式 + v1.57 拟人化 + v1.58 话题状态机 + v1.59 四项跟进批含 4C 骰子闸) → Phase 21 (前端体验批1–7 本地链（代码尾 `9815c27`，其后文档收口/验收修正/e2e 基础设施提交；精确链尾以 `git log -1` 为准）：admin 数据面/首日旅程/组件库收编/设计 token/用户列表排序全页化)
-**数据口径:** 端点与模块数均为 **2026-10-30 亲测**（`create_api_app()` 内省 AI_GF_ENV=dev + find 文件扫描），非文档估算值。**✅ 2026-10-30 复测**：端点 **249 APIRoute / 205 唯一路径 / `len(app.routes)`=253**（118 GET / 90 POST / 18 PUT / 23 DELETE；批6 净增 14，批7 零新端点）；api **51** 文件 / **26 routers**（+announcement_routes·批4）、前端 **20 pages / 16 api 模块 / 6 stores**、orchestrator 主类 **2464 行**。生产 @ **`c3ede77`**（批1–7 本地链未部署）。详见 `CODE_GRAPH.md`（10-28 口径 235/197 与更早见 git 历史）
+**数据口径:** 端点与模块数对齐 **2026-11-14 文档清理批**（端点沿用 v1.69.1 内省实测，v1.70–v1.72 零新增），非文档估算值：端点 **249 APIRoute / 207 唯一路径 / `len(app.routes)`=253**；api **52** 文件 / **27 routers**、前端 **18 pages / 18 api 模块 / 4 stores**、orchestrator 主类 **3001 行**。生产 @ **`cbb82aa`**（v1.70，2026-11-09 三端部署；v1.71/v1.72 本地未部署）。详见 `CODE_GRAPH.md`
 
 ---
 
@@ -17,7 +17,7 @@
 │                   前端 SPA (React + Vite)                        │
 │  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
 │  │ 页面组件     │  │ API 客户端    │  │ 状态管理              │  │
-│  │ (20 pages)  │──│ (16 modules) │──│ (Zustand stores x6)  │  │
+│  │ (18 pages)  │──│ (18 modules) │──│ (Zustand stores x4)  │  │
 │  └─────────────┘  └──────┬───────┘  └───────────────────────┘  │
 └───────────────────────────┼─────────────────────────────────────┘
                             │ /api/* (Vite proxy → :8000)
@@ -37,7 +37,7 @@
 │                                                                  │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
 │  │ shisi/   │ │ LLM     │ │ 安全     │ │shisi/    │ │shisi/ │  │
-│  │(116 文件) │ │ Provider│ │ (5 文件)  │ │knowledge │ │memory │  │
+│  │(117 文件) │ │ Provider│ │ (5 文件)  │ │knowledge │ │memory │  │
 │  └──────────┘ └─────────┘ └──────────┘ └──────────┘ └───────┘  │
 │  ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌───────┐  │
 │  │ TTS 语音 │ │ 人格提取 │ │ 工具系统  │ │ 编排器    │ │ 缓存  │  │
@@ -67,14 +67,14 @@
 ## 编排器架构
 
 > **注:** 编排逻辑位于 `orchestrator/` 包，包含 **9 个文件**（含 `__init__.py`）：
-> - `optimized_orchestrator.py` (**2464 行**，2026-10-30 wc 实测) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`；**v1.58 话题状态机三接线**：`get_topic_snapshot`（`:1156`，prompt 状态块）/ `run_llm_judge`（`:1785`，满 4 轮稀疏触发）/ `update_after_turn`（`:1805`，每轮确定性转换）
-> - `_init_mixin.py` (**589 行**，2026-10-30 wc 实测) — `_InitPhasesMixin`：`initialize` 直接调用 8 个 `_init_*` 阶段；其中 `_init_memory_and_rag` 再级联 `_init_ase_and_scheduler` / `_init_tools` / `_init_rag`，共 11 个阶段方法
-> - `_stream_mixin.py` (**607 行**，2026-10-30 wc 实测) — `_StreamPipelineMixin`：**按句边真流式下发**（R4，逐 token 喂 `utils.stream_guard.IncrementalReplyGuard`，完整句立即下发、不完整尾巴永不下发，流末 `_finalize_reply` 唯一全文终裁；`chat.stream_mode: buffered` 为旧路径回滚开关）
+> - `optimized_orchestrator.py` (**3001 行**，2026-11-14 wc 实测) — 主类 `OptimizedOrchestrator`：`__init__` / 会话锁 / `_prepare_context` / `process_message` / `_after_process` / `health_check`；**v1.58 话题状态机三接线**：`get_topic_snapshot`（`:1522`，prompt 状态块）/ `run_llm_judge`（`:2195`，满 4 轮稀疏触发）/ `update_after_turn`（`:2215`，每轮确定性转换）
+> - `_init_mixin.py` (**601 行**，2026-11-14 wc 实测) — `_InitPhasesMixin`：`initialize` 直接调用 8 个 `_init_*` 阶段；其中 `_init_memory_and_rag` 再级联 `_init_ase_and_scheduler` / `_init_tools` / `_init_rag`，共 11 个阶段方法
+> - `_stream_mixin.py` (**610 行**，2026-11-14 wc 实测) — `_StreamPipelineMixin`：**按句边真流式下发**（R4，逐 token 喂 `utils.stream_guard.IncrementalReplyGuard`，完整句立即下发、不完整尾巴永不下发，流末 `_finalize_reply` 唯一全文终裁；`chat.stream_mode: buffered` 为旧路径回滚开关）
 > - `session_locks.py` (175行) — 会话锁管理（`SessionLockManager`）
-> - `voice_detector.py` (108行) — 语音活动检测
+> - `voice_detector.py` (112行) — 语音活动检测
 > - `console_chat.py` (134行) — 控制台聊天通道
-> - **`tool_gate.py` (387行，09-20)** — 三级工具意图管线（L0 晋级线 / L1 LLM 终审 / 防假承诺）+ 工具结果 untrusted 信封
-> - **`context_budget.py` (666行，09-20)** — 上下文预算与去重、跨会话尾巴信封、工具结果注入位次
+> - **`tool_gate.py` (465行，09-20)** — 三级工具意图管线（L0 晋级线 / L1 LLM 终审 / 防假承诺）+ 工具结果 untrusted 信封
+> - **`context_budget.py` (669行，09-20)** — 上下文预算与去重、跨会话尾巴信封、工具结果注入位次
 >
 > `OptimizedOrchestrator` 继承 `_InitPhasesMixin` + `_StreamPipelineMixin`，通过 `self.components` 共享状态。公共 API 100% 兼容。
 >
@@ -194,10 +194,9 @@
 全局 (global)                     角色 (role)
 ┌────────────┐                   ┌───────────────────┐
 │ /intro     │                   │ /roles            │
-│ /wechat    │                   │ /templates        │
-│ /settings  │                   │ /roles/create     │
-│ /login     │                   │ /roles/:roleId/   │
-│ /psych     │                   │   settings[/:tab] │
+│ /wechat    │                   │ /roles/create     │
+│ /settings  │                   │ /roles/:roleId/   │
+│ /login     │                   │   settings[/:tab] │
 │ /help      │                   │ /roles/:roleId/   │
 │ /admin/*   │                   │   status          │
 └────────────┘                   │ /roles/:roleId/   │
@@ -208,7 +207,7 @@
 > **注:** 路由已从 `/users/:userId/roles/:roleId/...` 重构为 `/roles/:roleId/...`，
 > 移除了用户层级嵌套，角色直接挂在根路径下。`/demo` 已删（08-28 D1 裁决），
 > 公开门面为 `/intro`（SP-11 产品介绍页）；`/` 按登录态分流 `/wechat` 或 `/intro`；
-> `/help` 为批4 V2-4 教学导引页（HelpGuidePage，13 模块卡+进度持久化）；`/templates` 为 W12 角色模板页。
+> `/help` 为批4 V2-4 教学导引页（HelpGuidePage，13 模块卡+进度持久化）；`/templates` 已重定向 `/roles`、`/psych` 已重定向当前角色状态页，均不再有独立页面。
 
 ---
 

@@ -31,7 +31,6 @@ import pytest
 from proactive import frequency as fq
 
 # 2026-10-26 是周一（今日 2026-10-28 周三），用作峰/谷判定基准
-_MON = 0
 _SAT = 5
 
 

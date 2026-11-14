@@ -1,15 +1,15 @@
 # P1 Backlog — 唯一的你
 
-**Updated**: 2026-11-08（v1.65.2 对抗验收修复批：UXV-1/2/5/6/7/8/9/10/18④ 共 10 项销账（内置默认卡裁决根治 UXV-10；复提记账根治 UXV-5；URL 防线根治 UXV-2）；UXV-3/4 主体随部署生效（决策 reason 措辞校验与 answered 记账两项增量仍开放）；UXV-12~17 与 UXV-18①②③⑤⑥⑦ 保留未决；测试污染真实卡库族已由 conftest CHARACTERS_DIR 沙箱根治；详见 `LOG.md` 2026-11-08 条目）
+**Updated**: 2026-11-14（文档清理批：TOPIC-1 状态更新为已部署；测试基线改为 v1.72 口径；其余条目沿用 2026-11-08 记录）
 
-## 产品决策（待默默拍板；TOPIC-1 已实施待部署）
+## 产品决策（待默默拍板）
 
 1. **[MM-V3] 表情识别（人脸）**：真空缺——`multimodal/` 仅通用视觉（VisionHandler 走 LLM `image_url`），非表情识别模型。需调研+选型；敏感生物特征，本地优先、不落盘原图。
 2. **[MM-V4] 语音声学情绪**：真空缺——`voice/` 全是 TTS，ASRHandler 只取文本，声学信息被丢。需调研+选型。
 3. **[Q4] 生物特征采集是否启用**：合规方向已调研（端侧只出特征、不上传原图），产品内启用与否归默默裁决。
 4. **[OBS-2] 明文 HTTP（已裁决接受）**：2026-10-04 D13 裁决（DECISION_LEDGER）：生产维持裸 IP HTTP，不上 TLS，明文传输风险已知悉接受（微信扫码产品形态）。 nginx 模板已保留 certbot 升级路径与 X-Forwarded-Proto 头，若未来绑定域名可按注释直接启用；HSTS 仍严禁在纯 HTTP 下开启。
 5. **[P1-11] GitHub 仓库名**：`FOURTEEN1416/fourteen.git` vs 项目名 `ai-girlfriend`，可选改名，需默默决策。
-6. **[TOPIC-1] 话题状态机（已实施待部署）**：Q1–Q6 已裁决并全量落地——Q1-B 确定性状态机 + 每 4 轮稀疏 LLM（8s 硬超时、失败保留原状态）/ Q2 B+C 状态块 + 软化接续 / Q3-A parked 复提三重闸（≥6h + 非静默 + judge allow，closed 永不主动复提）/ Q4-B 全部状态 7 天 TTL / Q5 免费 API 不设每日 LLM 上限 / Q6-B 多 active 并行上限 3。落地：`utils/topic_state.py`（三表六 API）+ `proactive/topic_recall.py`（复提候选）+ 主链状态块 + 主动 `thread_plan` + 管理端三端点/前端「话题状态」区。实施结果见 `docs/reports/2026-10-27-话题状态机实施计划.md` §18。**测试 4,180 收集 / 4,174 通过 + 2 跳过 / 4 失败（既有）；前端 251/251；ruff 0；未部署；**默认开启**，回滚走管理端显式 `topic_state.enabled=false` / `llm_judge_enabled=false`）。
+6. **[TOPIC-1] 话题状态机（已实施并部署 @ `3fe2771`，2026-10-28）**：Q1–Q6 已裁决并全量落地——Q1-B 确定性状态机 + 每 4 轮稀疏 LLM（8s 硬超时、失败保留原状态）/ Q2 B+C 状态块 + 软化接续 / Q3-A parked 复提三重闸（≥6h + 非静默 + judge allow，closed 永不主动复提）/ Q4-B 全部状态 7 天 TTL / Q5 免费 API 不设每日 LLM 上限 / Q6-B 多 active 并行上限 3。落地：`utils/topic_state.py`（三表六 API）+ `proactive/topic_recall.py`（复提候选）+ 主链状态块 + 主动 `thread_plan` + 管理端三端点 + 角色设置「消息」tab 配置面（`CharacterSettingsPanel.tsx` ⑤/⑥）。实施结果见 `docs/reports/2026-10-27-话题状态机实施计划.md` §18。**测试口径见 `AGENTS.md` v1.72：5028 通过 + 2 跳过 / 收集 5030（317 文件）；ruff 0；已随 2026-10-28 收口批三端部署；默认开启**，回滚走管理端显式 `topic_state.enabled=false` / `llm_judge_enabled=false`）。
 
 ## 安全升级遗留（2026-10-04 P0 批后登记，来源=两轮攻击面审计 81 条发现中未入 P0 批的 confirmed 项）
 

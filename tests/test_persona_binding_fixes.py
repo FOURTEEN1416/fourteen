@@ -206,10 +206,8 @@ def test_scheduler_deliver_fallback_on_channel_error():
     sched._channel_instances["wechat"] = bad_sender
 
     sched._deliver("msg-x")
-    # 通道失败 → _send_to_all 内部会吞掉通道异常（标记失效），
-    # 但兜底 _send 不应被触发（_send_to_all 返回 False 时才走）；
-    # 这里主要断言不抛出、不崩溃
-    assert True
+    # 通道失败 → _send_to_all 吞掉通道异常并标记通道失效（置 None）；
+    # 无真实送达，消息仅落到 _send 日志兜底留痕。本用例主要断言不抛出、不崩溃。
 
 
 # ═══════════════════════════════════════════════════════════════

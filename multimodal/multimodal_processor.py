@@ -16,11 +16,6 @@ IMAGE_DESCRIBE_PROMPT = (
     "只写看得见的事实，不要总结、不要解说、不要推测拍摄者意图或情绪。"
 )
 
-# 描述注入主链的标记（connector._process_text_message 拼接）：「[图片：…]」
-# 改「[你亲眼看到：…]」——语义从「引用一份第三方报告」变为「这是你自己刚
-# 看见的东西」，配合 persona 侧图片铁则让角色以亲历口吻自然说起。
-IMAGE_WITNESS_TAG = "[你亲眼看到"
-
 # 图片无法归一化（损坏 base64 等）时的占位文本。必须保持「[收到一张图片」
 # 前缀——connector._describe_image 按该前缀过滤为空串。
 _IMAGE_UNAVAILABLE_PLACEHOLDER = "[收到一张图片，无法解析]"

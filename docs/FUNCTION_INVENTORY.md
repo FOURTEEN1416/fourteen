@@ -4,8 +4,8 @@
 > **基准声明（08-28 用户裁决）**：功能对齐的意图基准 = `docs/history/` 历史设计文档（05-19 立项核心特性、05-24 多用户设计——记录了产品所有者的原始想法）；实况基准 = 本清单所引代码。实拍截图不作对齐依据。
 > **编号规则**：`<页面KEY>-<序号>`，如 `ROLES-2`。对话时直接报编号 + 期望。
 > **维护纪律**：页面功能变更时同步本清单对应条目；新页面入册必须带代码证据（文件:行）。
-> **时效注记（2026-09-28 历遍批刷新）**：W12 阶段 2 + W16/W17 已落地——新增 **TPL（角色模板页 `/templates`）** 与 **ACCT（账号与数据 `/settings/account`）** 两节；自服务端点（consent/export/delete）前端已接入；注册分发钩子（register-invite 初始卡）已接通；W17 遗留①（RolesPage 激活后缓存失效键缺账号维度）已根治并锁测试；App.tsx `/templates` 重复路由声明已去重（`AppRoutes.test.ts` 静态守卫防再犯）。仍留注：本清单其余页面行数为 09-20 前口径，逐页行数刷新归 CODE_GRAPH。**引用本清单定位功能前，先对 `CODE_GRAPH.md` 与端点实况**。
-> **时效注记（2026-10-28 功能点组补录）**：§I 新增 **N-TOPIC-1~6（话题状态机）**、**N-DICE-1~5（零 token 骰子闸）**、**N-BEHAV-1~3（CSP 行为蒸馏）** 三组——分别随 `3fe2771`（2026-10-28 三端部署，默认开启）、`aabc867`+`1e9513e`（4C，已部署，默认关闭+dry_run 默认开）、`5dff923`+`1e9513e`（4B，已部署）落库；骰子闸与话题状态的**前端配置面**在角色设置 message tab（`RoleSettingsTabs.tsx`），后端能力归 §I 跨域组，不在 SETTINGS 表重复登记。
+> **时效注记（2026-09-28 历遍批刷新）**：W12 阶段 2 + W16/W17 已落地——新增 **TPL（角色模板页 `/templates`）** 与 **ACCT（账号与数据 `/settings/account`）** 两节；自服务端点（consent/export/delete）前端已接入；注册分发钩子（register-invite 初始卡）已接通；W17 遗留①（RolesPage 激活后缓存失效键缺账号维度）已根治并锁测试；App.tsx `/templates` 重复路由声明已去重（`AppRoutes.test.ts` 静态守卫防再犯）。仍留注：本清单其余页面行数为 09-20 前口径，逐页行数刷新归 CODE_GRAPH。**引用本清单定位功能前，先对 `CODE_GRAPH.md` 与端点实况**。**2026-11-07 更新**：TPL 与 PSYCH 前端页面已退役（`TemplatesPage.tsx` / `PsychProfilePage.tsx` 删除，`/templates` → `/roles`、`/psych` → 当前角色状态页），下文章节仅保留后端 API 能力口径。
+> **时效注记（2026-10-28 功能点组补录）**：§I 新增 **N-TOPIC-1~6（话题状态机）**、**N-DICE-1~5（零 token 骰子闸）**、**N-BEHAV-1~3（CSP 行为蒸馏）** 三组——分别随 `3fe2771`（2026-10-28 三端部署，默认开启）、`aabc867`+`1e9513e`（4C，已部署，默认关闭+dry_run 默认开）、`5dff923`+`1e9513e`（4B，已部署）落库；骰子闸与话题状态的**前端配置面**在角色设置「消息」tab（`CharacterSettingsPanel.tsx` ⑤/⑥ 组），后端能力归 §I 跨域组，不在 SETTINGS 表重复登记。
 
 ---
 
@@ -61,7 +61,7 @@
 | ROLES-5 | 入场动效（stagger CSS 级联 ≤12×60ms，prefers-reduced-motion 降级） |
 | ROLES-6 | **09-28 W17 遗留①收口**：激活成功后按 `queryKeys.characters.all`（含账号维度）失效缓存；`RolesPage.test.tsx` 锁真实键并反钉裸 `['characters']` 不得再用。SP-5 摘要化已实现（deriveCardSummary/anchorTone 在位），旧 ⚠️ 行撤销 |
 
-### TPL — 角色模板 `/templates`（TemplatesPage.tsx, 166 行；W12 阶段 2 API + W17 前端，09-28 入册）
+### TPL — 角色模板（前端页面已退役：`TemplatesPage.tsx` 已删除，`/templates` 重定向 `/roles`；后端模板 API 保留）
 | 编号 | 功能点 |
 |------|--------|
 | TPL-1 | 浏览策展模板（`GET /api/character-templates`，无 Bearer→401；清单真源 `config/character_templates.yaml`） |
@@ -115,7 +115,7 @@
 | STATUS-7 | **情绪洞察**（SP-1 收官，09-01）：强度趋势迷你折线（useEmotionTrend）+ 情绪分布条（GET /api/emotion/distribution，会话内存态诚实标注） |
 | ⚠️ | 无剩余 SP-1 缺口：情绪分布/趋势/成就均已落地（亲密度趋势=强度趋势折线呈现；如需按"亲密度数值"另画曲线待用户裁决） |
 
-### PSYCH — 心理画像 `/psych`（PsychProfilePage.tsx, 2026-09-01 新增）
+### PSYCH — 心理画像（前端页面已退役：`PsychProfilePage.tsx` 已删除，`/psych` 重定向当前角色状态页；画像卡并入状态页，后端 psych API 保留）
 | 编号 | 功能点 |
 |------|--------|
 | PSYCH-1 | 画像总览（psychProfile → GET /api/psych/profile，usePsychProfile React Query） |
@@ -123,7 +123,6 @@
 | PSYCH-3 | 心理健康摘要（psychMentalHealth → GET /api/psych/mental-health，非诊断声明+热线） |
 | PSYCH-4 | LIWC 维度（psychLiwc → GET /api/psych/liwc） |
 | PSYCH-5 | 画像重置（psychReset → DELETE /api/psych/profile，需确认） |
-| PSYCH-6 | 侧栏导航入口「心理画像」（navGroups.tsx:36）。**09-18 起需登录**：路由包 AuthGuard（2957f01，修未登录无条件调 usePsychProfile 等打 3×401 + 白屏闪烁） |
 
 ### ACH — 角色成就 `/api/characters/{id}/achievements`（ADR-0014 第一阶段，2026-09-01）
 | 编号 | 功能点 |
@@ -145,15 +144,15 @@
 | N-DIARY-2 | **日记种子端点**（T3，09-01）：POST /api/memory/diary/seed（E2E/演示可注入，misc_routes 15→16 端点） |
 | N-KSHARE-1 | **知识分享主动消息**（候选 C）：share 类消息优先从角色知识库（爬虫/文档来源）检索真实内容，LLM 包装角色口吻；无索引/无 LLM 回退模板 |
 | N-DATES-1 | **纪念日感知**（候选 D）：重要日期存储（data/important_dates.json）+ GET/PUT /api/characters/{id}/important-dates + 角色设置 Basic tab 编辑器 + 每日维护检查命中即 LLM 祝福（模板兜底） |
-| N-TOPIC-1 | **话题状态机·确定性核心**（2026-10-27 Q1-B/Q4-B/Q6-B，`3fe2771` 三端部署，默认开启）：`utils/topic_state.py`（1,769 行，三表唯一 owner）管 `data/sqlite.db` 三表 `topic_state`/`thread_plan`/`topic_meta`（幂等建表）+ 六 API（`get_topic_snapshot`/`update_after_turn`/`select_proactive_recall`/`save_next_plan`/`take_next_plan`/`purge_expired`）+ `read/write_topic_config`；每轮确定性状态机先跑，六类转换 continue/switch/park/resume/close/timeout + salience 衰减/重提强化；多 active 并行上限 3（Q6-B）、全部状态 7 天 TTL（Q4-B）；隐私红线=只存标题/摘要/≤3 条短锚点不存对话原文，日志 `[topic_state][step=…]` 只打 action/topic_id/计数 |
-| N-TOPIC-2 | **稀疏 LLM judge**（Q1-B）：LLM 每 4 轮一次（`judge_every_turns=4` 固化边界，管理端越界一律 400/422 绝不放宽），后台 daemon 线程 8s 硬超时（`utils/topic_state.py:1648`），失败/低置信度保留原状态（fail-open for state）；免费 API 不设每日 LLM 上限（Q5，`daily_llm_budget=0` 固化）；主链 `orchestrator/optimized_orchestrator.py:64` pre-turn 快照 `TOPIC_SNAPSHOT_TIMEOUT_SECONDS=0.2` 并行获取（本轮注入用 pre-turn 状态，零新增首字延迟），话题更新先于 `memory.after_chat`（`_safe_topic_then_after_chat`） |
+| N-TOPIC-1 | **话题状态机·确定性核心**（2026-10-27 Q1-B/Q4-B/Q6-B，`3fe2771` 三端部署，默认开启）：`utils/topic_state.py`（2,183 行，三表唯一 owner）管 `data/sqlite.db` 三表 `topic_state`/`thread_plan`/`topic_meta`（幂等建表）+ 六 API（`get_topic_snapshot`/`update_after_turn`/`select_proactive_recall`/`save_next_plan`/`take_next_plan`/`purge_expired`）+ `read/write_topic_config`；每轮确定性状态机先跑，六类转换 continue/switch/park/resume/close/timeout + salience 衰减/重提强化；多 active 并行上限 3（Q6-B）、全部状态 7 天 TTL（Q4-B）；隐私红线=只存标题/摘要/≤3 条短锚点不存对话原文，日志 `[topic_state][step=…]` 只打 action/topic_id/计数 |
+| N-TOPIC-2 | **稀疏 LLM judge**（Q1-B）：LLM 每 4 轮一次（`judge_every_turns=4` 固化边界，管理端越界一律 400/422 绝不放宽），后台 daemon 线程 8s 硬超时（`run_llm_judge` 内 `timeout: float = 8.0` @ `utils/topic_state.py:2060`，def @`:2053`），失败/低置信度保留原状态（fail-open for state）；免费 API 不设每日 LLM 上限（Q5，`daily_llm_budget=0` 固化）；主链 `orchestrator/optimized_orchestrator.py:64` pre-turn 快照 `TOPIC_SNAPSHOT_TIMEOUT_SECONDS=0.2` 并行获取（本轮注入用 pre-turn 状态，零新增首字延迟），话题更新先于 `memory.after_chat`（`_safe_topic_then_after_chat`） |
 | N-TOPIC-3 | **parked 复提三重闸**（Q3-A）：`proactive/topic_recall.py`（100 行，候选侧只读不判库）——闸① 仅 parked 且距上次 ≥6h（`recall_after_hours` 下限 6 固化）+ 非静默 + 最多 2 条（`recall_max` 上限 2），closed/active 永不返回；闸② 主动 judge allow（`post_draft_judge` 投递前终审，`topic_context` 非空且 LLM 不可用 fail-closed 拒发）；judge 关闭/不可调用 → 空候选，不靠 `judge_not_configured` 放行语义绕过；title/anchors 进 judge prompt 前统一走 `_sanitize_topic_text` 清洗真源 |
-| N-TOPIC-4 | **thread_plan 全周期**（主动线「下一步说什么」内容计划持久化）：决策 skip 且带 next 字段也存（`save_next_plan`，`proactive/scheduler.py:1811`）→ 落库跨进程重启仍在 → 到点注入下一轮决策上下文（`take_next_plan`，`:1703`）→ 发送成功才消费（`consume=True`，`:1932`；等待窗到点 `window_expired` 也消费旧计划）→ 每日维护 `purge_expired(force=True)`（`:2293`）。补齐此前「只存 float 时间戳、到点重判不携带内容计划」缺口（生产实证 user=2 连续 5 次 wait 合计 240 分钟零投递） |
-| N-TOPIC-5 | **管理端与前端话题状态区**：`/api/topic-state/config` GET（热读不缓存）/POST（锁内 partial merge 热写，越界 422 Pydantic 先行、跨字段冲突/未知字段 400，其余顶层配置块逐字保留）+ `/api/topic-state/{session_key}` 只读快照（不回传 prompt 文本）——`api/routers/topic_routes.py` 三端点，admin 门禁，`/config` 先于 `/{session_key}` 注册（路由序硬约束）；会话键沿用 `_normalize_admin_target_key`（2026-11-08 由 `_resolve_admin_target_key` 复名，`api/routers/training_routes.py:579`，`topic_routes.py:172` 消费；含 `:` 完整键原样用，纯数字仅当有微信绑定才还原 `N:wxid`，否则 400 不猜键）；前端 `TopicStateSection.tsx` + `topicStateStore.ts` 仍在仓库，但**自 2026-11-08 D-B 删除 `/settings/proactive` 后暂无挂载点**（原挂在被删运维页） |
-| N-TOPIC-6 | **回滚开关（默认开启）**：`DEFAULTS.enabled=true` / `llm_judge_enabled=true`（2026-10-28 主控收口改默认开，部署即生效；不以「默认关闭」作上线前提）；回滚=管理端显式 `topic_state.enabled=false`（六 API 首行短路零 DB、prompt 逐字回落旧 `TOPIC_CONTINUITY_RULE`，`shisi/application/persona_service.py:342-353`）或 `llm_judge_enabled=false`（停 judge、保留确定性状态）；主链有状态块走 `<context trust="untrusted" source="topic_state">` + 软化接续规则 `TOPIC_CONTINUITY_RULE_SOFT`（`utils/prompt_sanitize.py:560`，旧规则一字未改），状态块 ≤160 字且计入 `memory_chars_max` 预算扣减（`orchestrator/context_budget.py:228`） |
+| N-TOPIC-4 | **thread_plan 全周期**（主动线「下一步说什么」内容计划持久化；**读写唯一入口 = `speaker/thread_state.py`**，v1.71 C1 起 scheduler 全文零直接调用 topic_state 的 save/take）：决策 skip 且带 next 字段也存（`ThreadState.save_plan` → `save_next_plan`，scheduler 调用点 `:2506`/`:2712`）→ 落库跨进程重启仍在 → 到点注入下一轮决策上下文（`ThreadState.take_plan`，`:2264`/`:2513`）→ 发送成功才消费（`consume=True`，`:2057`/`:2514`/`:2711`；等待窗到点 `window_expired` 也消费旧计划）→ 每日维护 `purge_expired(force=True)`（`proactive/scheduler.py:3290`）。补齐此前「只存 float 时间戳、到点重判不携带内容计划」缺口（生产实证 user=2 连续 5 次 wait 合计 240 分钟零投递） |
+| N-TOPIC-5 | **管理端与前端话题状态区**：`/api/topic-state/config` GET（热读不缓存）/POST（锁内 partial merge 热写，越界 422 Pydantic 先行、跨字段冲突/未知字段 400，其余顶层配置块逐字保留）+ `/api/topic-state/{session_key}` 只读快照（不回传 prompt 文本）——`api/routers/topic_routes.py` 三端点，admin 门禁，`/config` 先于 `/{session_key}` 注册（路由序硬约束）；会话键沿用 `_normalize_admin_target_key`（2026-11-08 由 `_resolve_admin_target_key` 复名，`api/routers/training_routes.py:579`，`topic_routes.py:172` 消费；含 `:` 完整键原样用，纯数字仅当有微信绑定才还原 `N:wxid`，否则 400 不猜键）；前端 `TopicStateSection.tsx` + `topicStateStore.ts` **已于 `429f78e` 整删、不在仓库**（原挂载页 `/settings/proactive` 已于 2026-11-08 D-B 删除）；骰子闸/话题引擎配置面改由 `CharacterSettingsPanel.tsx`（⑤/⑥）承载 |
+| N-TOPIC-6 | **回滚开关（默认开启）**：`DEFAULTS.enabled=true` / `llm_judge_enabled=true`（2026-10-28 主控收口改默认开，部署即生效；不以「默认关闭」作上线前提）；回滚=管理端显式 `topic_state.enabled=false`（六 API 首行短路零 DB、prompt 逐字回落旧 `TOPIC_CONTINUITY_RULE`，`shisi/application/persona_service.py:397`，旧规则回落注释 `:387`）或 `llm_judge_enabled=false`（停 judge、保留确定性状态）；主链有状态块走 `<context trust="untrusted" source="topic_state">` + 软化接续规则 `TOPIC_CONTINUITY_RULE_SOFT`（`utils/prompt_sanitize.py:630`，旧规则一字未改），状态块 ≤160 字且计入 `memory_chars_max` 预算扣减（`orchestrator/context_budget.py:96` 字段，`:198` 扣减） |
 | N-DICE-1 | **零 token 骰子闸·判定纯函数与配置 owner**（2026-10-28 4C dsh-speak-up，`aabc867`+`1e9513e`，已部署）：`proactive/frequency.py`（+317 行）——峰谷基础命中线（`is_peak_time`：周一至五 09:00–12:00/14:00–18:00 峰时默认 20%、周末与夜间谷时 60%）× 空窗时机因子（`dice_timing_factor`：空闲 <20min→×0.15 克制 / >360min→×1.5 抬升，边界值取 1.0）+ 连没中加成（`dice_hit_line`：min(40, streak×10)，总命中线封顶 100%）；rng 可注入完全确定可测，rng 异常/非有限 → 100 fail-safe（骰子坏了宁放过不堵死主动链）；配置越界读侧回落默认、写侧 ValueError→API 400 / pydantic 422 |
-| N-DICE-2 | **引擎 tick 闸与状态记账**：`proactive/ase_engine.py` `tick()` **仅生成路径**（dry_run=False，`:1208`）掷骰，未中 `_last_skip_reason="dice_gate"` 不生成——生产决策链走 `tick(dry_run=True)`，骰子由 scheduler 钩子掷，此处不掷防同轮双掷（双掷双倍推进连没中）；`evaluate_dice_gate`（`:1287`）维护 dry/live 双桶状态（干跑推进不污染真拦截的连没中加成，切 live 首掷概率不失真）+ 账本 actor=proactive_dice（含 roll/line/streak，每 user\|reason 每日一条降噪）；config/health 端点透出 `dice_gate`/`dice_gate_effective`/`dice_gate_state` 三键 |
-| N-DICE-3 | **scheduler 生产钩子（用户一次性例外）**：`proactive/scheduler.py:1564` 起 +30 行块——在所有确定性闸（暂停/静默/模型/token 窗口/等待窗/节奏）**之后**、生产 LLM 决策**之前**掷骰，只在「本来真要调 LLM」那一次掷不浪费判定机会；未中按最小间隔进等待窗（`_llm_proactive_next_ok`），下一拍被既有前置检查抑制**不烧决策调用**；骰子异常 fail-open 开闸；`scheduler.py` 在用户禁改清单内，2026-10-28 用户裁决接受此例外（注释已同步「例外已成立」；回退开关 `DICE_GATE_PRODUCTION_WIRED=False`，置 False 管理端标「当前不生效」） |
+| N-DICE-2 | **引擎 tick 闸与状态记账**：`proactive/ase_engine.py` `tick()`（def `:1141`）**仅生成路径**（dry_run 分支 `:1187` 提前返回；骰子掷点 `:1211`）掷骰，未中 `_last_skip_reason="dice_gate"` 不生成——生产决策链走 `tick(dry_run=True)`，骰子由 scheduler 钩子掷，此处不掷防同轮双掷（双掷双倍推进连没中）；`evaluate_dice_gate`（`:1315`）维护 dry/live 双桶状态（干跑推进不污染真拦截的连没中加成，切 live 首掷概率不失真）+ 账本 actor=proactive_dice（含 roll/line/streak，每 user\|reason 每日一条降噪）；config/health 端点透出 `dice_gate`/`dice_gate_effective`/`dice_gate_state` 三键 |
+| N-DICE-3 | **scheduler 生产钩子（用户一次性例外）**：`proactive/scheduler.py:2129-2146` 例外 hook——`evaluate_dice_gate(requested_mode="live")` 调用 @`:2133`——在所有确定性闸（暂停/静默/模型/token 窗口/等待窗/节奏）**之后**、生产 LLM 决策**之前**掷骰，只在「本来真要调 LLM」那一次掷不浪费判定机会；未中按最小间隔进等待窗（`_llm_proactive_next_ok`），下一拍被既有前置检查抑制**不烧决策调用**；骰子异常 fail-open 开闸；`scheduler.py` 在用户禁改清单内，2026-10-28 用户裁决接受此例外（注释已同步「例外已成立」；回退开关 `DICE_GATE_PRODUCTION_WIRED=False`，置 False 管理端标「当前不生效」） |
 | N-DICE-4 | **骰子闸配置面**：真源 `data/scheduler_config.json` `dice_gate` 块热读零缓存（跨 worker 即时生效）；管理端 config 端点（`api/routers/training_routes.py:352-362` 读透出 / `:477-485` 写 partial merge）GET 透出配置+运行态、POST partial merge 只写 `dice_gate` 块其余配置逐字保留。**前端配置面已于 2026-11-08 D-B 随 `/settings/proactive` 删除**——只保留 API 与 `DICE_GATE_DEFAULTS` 常量；「用户 × 角色」面板里的骰子闸组（§⑤）是另一套按角色快照的字段，不是本条的全局 `dice_gate` 块 |
 | N-DICE-5 | **默认关闭 + dry_run 默认开（行为契约）**：`DICE_GATE_DEFAULTS.enabled=false`——不开闸零行为变化；开启后默认干跑只记账不拦截（先观测峰谷分布再真开）；dry/live 加成桶独立，防「从未真正发生过的连没中」污染真拦截概率；越界判非法边界表 `DICE_GATE_BOUNDS`（写侧拒、读侧回落）；测试 `tests/test_proactive_dice_gate.py`（+709 行，含时钟 `now_local` 对齐——UTC 主机差 8h 缺陷已由 `165504f` 根治） |
 | N-BEHAV-1 | **CSP 行为蒸馏·生成字段**（2026-10-28 4B，`5dff923`+`1e9513e`，已部署）：AI 人设生成 prompt（`api/routers/character_routes.py:1337`）增 `behavior_patterns`/`honesty_boundary` JSON 规格——3–7 条至少覆盖 3 个不同场景、每条三键 trigger ≤12 字 / behavior ≤16 字 / why ≤6 字、behavior 写「怎么做」（动作/态度）不写台词原文；生成结果经 `normalize_behavior_patterns` 归一化，空则不写键；与渲染侧共用同一套上限常量（卡上看到的=模型看到的，不做渲染时静默淘汰） |
@@ -236,7 +235,7 @@
 | GLOBAL-2 | **背景粒子画布** `components/common/ParticleCanvas.tsx` | 全屏 canvas，30fps 节流（8–18 粒子 + 距离连线），`visibilitychange` 暂停、resize 防抖、`prefers-reduced-motion` 下降级为 0 粒子。⚠️ **性能注记**：与 `backdrop-filter` 毛玻璃叠加时为**卡顿主因**（隔离实测 24.1fps / 86.1% 卡顿），且降模糊半径（12→6px）实测**无效**；解耦方案待裁决 |
 | GLOBAL-3 | **全站材质体系**（2026-09-20 用户裁决 A+B，`index.css` 令牌层） | 固定环境色场（暖黄/天蓝/薄荷四团径向渐变）+ 三档材质阶梯 `.mat-recess`（内凹）/.mat-raised（实体+彩色发丝线）/.mat-floating（玻璃特权层，Sidebar/Breadcrumb/MobileDrawer/Modal 壳层统一）；`.glass-card` 半透明玻璃重做；CreateRole 聊天 iOS Messages 语言（`.chat-channel`/`.chat-bubble-in,out`/`.chat-dock`）；全站输入框基态 `.input-macaron`；色板令牌级重映射（blue→sky/green→teal/gray→stone/purple→sky/orange→amber）。克隆重传假进度已撤除，改 `.progress-slide` 不定量滑条诚实表达（09-20） |
 
-> 两者均仅挂载于 `ProtectedLayout`（登录后的控制台）；`/intro` `/login` `/psych` 不含此组件（`/psych` 自 09-18 起需登录）。
+> 两者均仅挂载于 `ProtectedLayout`（登录后的控制台）；`/intro` `/login` 不含此组件（`/psych` 已重定向状态页）。
 > 性能诊断方法论见技能 `perf-isolation-lab`；注意无头浏览器走软件光栅化，性能数值不可信（同场景无头 24fps vs 真实 GPU 240fps）。
 
 ---

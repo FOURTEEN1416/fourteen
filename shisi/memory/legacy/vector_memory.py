@@ -31,10 +31,9 @@ class VectorScopeError(Exception):
     """B1 单点守卫：scoped 向量检索缺归属键（user_key/session_id）时抛出。"""
 
 
-# 归属元数据键分两级：强归属键（user_key/session_id）缺一即拒；
+# 归属元数据键：强归属键（user_key/session_id）缺一即拒；
 # character_id 不是用户边界（D16：多用户可绑同一角色卡），仅作附加过滤条件。
 _SCOPE_OWNER_KEYS = {"user_key", "session_id"}
-_SCOPE_META_KEYS = {"user_key", "session_id", "character_id"}
 
 
 def _scope_guard_enabled() -> bool:

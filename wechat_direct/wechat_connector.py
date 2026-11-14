@@ -1353,11 +1353,6 @@ class WeChatConnector:
             return update_session_state(self.owner_user_id, self.slot, updates)
         return _merge_state(updates)
 
-    def _load_local_state(self) -> dict:
-        if self.owner_user_id is not None:
-            return load_session_state(self.owner_user_id, self.slot)
-        return _load_state()
-
     def _save_local_qr(self, qrcode_url: str = "", status: str = "waiting") -> None:
         if self.owner_user_id is not None:
             save_session_qrcode(self.owner_user_id, self.slot, qrcode_url, status)
@@ -1980,8 +1975,9 @@ class WeChatConnector:
     def _drain_outbox(self) -> None:
         """消费点名本 (owner, slot) 或未点名 slot 的待投微信命令。
 
-        块1缺陷A/C：投递统一经控制面 outbox，CAS 认领保证一行恰由一个宿主
-        发送（同 owner 双 slot 不再混投）；回执写回后调用方以受理为准。
+        块1缺陷A/C：投递统一经控制面 outbox，CAS 认领保证同一时刻一行只由一个
+        宿主发送（同 owner 双 slot 不再混投；过期认领/退回可重投，非 exactly-once）；
+        回执写回后调用方以受理为准。
         由独立守护线程按 5 秒 tick 消费（原挂在追问守护线程上；追问链已
         退役，见 docs/DELETION_LOG.md 2026-10-12）—— 不能挂长轮询主循环
         （LONG_POLL_TIMEOUT=35 会让回执等待全部超时）。
@@ -2187,8 +2183,10 @@ class WeChatConnector:
 
         锁契约（单一口径）：本方法**不自持** ``_peer_lock`` —— 调用方负责持锁。
         主链由 ``_handle_message_serial`` 外层 ``with self._peer_lock(...)`` 覆盖
-        生成与发送全程；主动线由 ``main.send_proactive_segmented`` 在外部补同一把
-        可重入 RLock（RLock，重复获取不自死锁）。**不得在本方法内再持一半**。
+        生成与发送全程；主动线由 ``utils.humanize_delivery.send_proactive_segmented_result``
+        在外部补同一把可重入 RLock（RLock，重复获取不自死锁；``main`` 仅
+        re-export，微信 sender 实际走 ``direct_send_proactive``）。
+        **不得在本方法内再持一半**。
 
         2026-11-08 D-A：拆条上限与段间节奏同读一份「用户 × 角色」快照
         （``_humanize_for``）；拆条唯一入口为 ``Speaker.express``（其内部复用

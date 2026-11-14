@@ -202,7 +202,6 @@ def test_bracket_delay_inert_by_default_then_effective(hm_file):
     assert _segment_delay(bracket) == _segment_delay("啊" * len(bracket))
     humanize_config.write_humanize(bracket_delay_ms=1200)
     assert _segment_delay(bracket) == pytest.approx(1.2)
-    assert _segment_delay("啊" * len(bracket)) == _segment_delay("啊" * len(bracket))
 
 
 # ═══════════════════════════════════════════════════════════

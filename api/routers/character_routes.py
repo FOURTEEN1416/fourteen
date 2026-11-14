@@ -1407,39 +1407,8 @@ async def get_preset(
 
 # ── 记忆事实管理 ────────────────────────────────────────
 
-# 锚定项目根，避免依赖进程 CWD（achievement_engine._MEMORY_FACTS_DIR 同源）
+# 遗留 JSON 面路径锚点（生产已无读写；保留常量供测试夹具做沙箱隔离）
 MEMORY_FACTS_DIR = project_path("data", "character_memory")
-
-
-def _facts_path(character_id: str) -> Path:
-    safe_id = sanitize_id(character_id)
-    if not safe_id:
-        raise HTTPException(status_code=400, detail="Invalid character ID")
-    MEMORY_FACTS_DIR.mkdir(parents=True, exist_ok=True)
-    return MEMORY_FACTS_DIR / f"{safe_id}.json"
-
-
-def _load_facts(character_id: str) -> list[dict]:
-    path = _facts_path(character_id)
-    if path.exists():
-        try:
-            with open(path, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning("读取记忆事实失败: %s", e)
-    return []
-
-
-def _save_facts(character_id: str, facts: list[dict]) -> bool:
-    path = _facts_path(character_id)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(facts, f, ensure_ascii=False, indent=2)
-        return True
-    except Exception as e:
-        logger.error("保存记忆事实失败: %s", e)
-        return False
 
 
 @router.get("/characters/{character_id}/memory/facts")

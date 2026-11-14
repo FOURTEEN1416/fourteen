@@ -2,9 +2,13 @@
 REST API 应用工厂
 
 仅负责创建 FastAPI 实例、配置中间件、挂载子路由。
-业务路由按域拆分挂载（2026-09-29 内省实测：**229 个 APIRoute / 195 条唯一路径**，
-其中 111 GET / 82 POST / 16 PUT / 20 DELETE；`len(app.routes)=233` 另含 4 条框架路由
-`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`）。详细端点分布见 CODE_GRAPH.md §4.2。
+业务路由按域拆分挂载。当前口径（2026-11 清理，2026-11-14 复核）：`api/routers`
+静态路由装饰器 **214 个**，另 shisi 30 个 + health_routes 3 个（/api/health、
+/api/ready、/api/metrics）+ qrcode 1 个 + app_factory 自挂 shisi/status 1 个，
+合计约 **249 个端点 / 207 条唯一路径**；主路由块挂载 misc/chat/personality/
+users/training/tools/safety/clone/topic/announcement/announcement_admin 等固定
+域 router（agent-plane 条件挂载）。
+详细端点分布见 CODE_GRAPH.md §4.2。
 
 改路由后请同步本节与 CODE_GRAPH.md §4.2。
 """
@@ -272,18 +276,18 @@ def create_api_app(
     logger.info("健康检查路由已挂载 (/api/health, /api/ready)")
 
     # ═══════════════════════════════════════════════════
-    # 挂载主路由（已拆分为 8 个子路由，共 83 端点；2026-09-17 内省实测）
+    # 挂载主路由（按域拆分的多个 router；端点计数口径见文件头）
     # ═══════════════════════════════════════════════════
 
-    app.include_router(misc_router)         # 16 端点: health/stats/memory/logs/config/channels/routes
-    app.include_router(chat_router)         # 11 端点: chat/session + wechat channels
-    app.include_router(personality_router)  # 10 端点: emotion/persona/psych
-    app.include_router(users_router)        #  7 端点: users/*
-    app.include_router(training_router)     # 13 端点: training/* + proactive/*（含手动控制）
-    app.include_router(tools_router)        #  6 端点: tools/* + plugins/*
-    app.include_router(safety_router)       # 12 端点: safety/rag/voice/files/cache
-    app.include_router(clone_router)        #  8 端点: clone/*
-    app.include_router(topic_state_router)  #  3 端点: topic-state/config + 快照
+    app.include_router(misc_router)         # health/stats/memory/logs/config/channels/routes
+    app.include_router(chat_router)         # chat/session + wechat channels
+    app.include_router(personality_router)  # emotion/persona/psych
+    app.include_router(users_router)        # users/*
+    app.include_router(training_router)     # training/* + proactive/*（含手动控制）
+    app.include_router(tools_router)        # tools/* + plugins/*
+    app.include_router(safety_router)       # safety/rag/voice/files/cache
+    app.include_router(clone_router)        # clone/*
+    app.include_router(topic_state_router)  # topic-state/config + 快照
     app.include_router(announcement_router)  # V2-5 公告: active 读面 + 已读标记（2 端点）
     app.include_router(announcement_admin_router)  # V2-5 公告 admin CRUD（4 端点）
     try:
@@ -293,7 +297,7 @@ def create_api_app(
         logger.info("Agent Plane 路由已挂载 (/api/agent-plane/*)")
     except Exception as e:  # noqa: BLE001
         logger.warning("Agent Plane 路由挂载失败: %s", e)
-    logger.info("主路由已挂载（8 个子路由 + topic-state）")
+    logger.info("主路由已挂载（11 个固定域 router + 条件 agent-plane）")
 
     # ── 用户认证 API ──
     # 2026-08-31：去 try 静默吞——认证路由消失=登录全挂，必须 fail-fast 而非降级

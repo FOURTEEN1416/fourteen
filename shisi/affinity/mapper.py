@@ -19,9 +19,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("shisi.affinity.mapper")
 
-# 情感引擎 affection_points 的满级刻度 = AffinityLevel 9 级阶梯的终点
-_EMOTION_AFFECTION_MAX = affinity_scale.POINTS_MAX
-
 
 class AffinityMapper:
     """把 EmotionEngine 的 affection_points 同步为 shisi affinity 增量。

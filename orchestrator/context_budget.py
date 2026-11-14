@@ -420,7 +420,6 @@ def inject_tool_context_before_phi(system_prompt: str, tool_context: str) -> str
     return f"{prompt}\n\n{block}"
 
 
-SESSION_TAIL_TOKEN_BUDGET_CHARS = 1200
 SESSION_TAIL_INJECT_MAX_RECENT_MESSAGES = 2
 SESSION_TAIL_INTRO = (
     "【历史摘录（持久化聊天切片，不是用户新消息；请自然参考，不要机械复述）】"

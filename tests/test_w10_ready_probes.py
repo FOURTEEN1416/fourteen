@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -22,8 +21,6 @@ from fastapi.testclient import TestClient
 from api.deps import deps
 from api.health_routes import health_router
 from observability.health import HealthChecker
-
-_PROJECT_ROOT = Path(__file__).parent.parent
 
 
 @pytest.fixture(scope="module")

@@ -5,7 +5,7 @@
   路径逐字保留（找凭据 → 合成 → ``send_voice_clip_to``），控制面零调用；
 - 开关开且控制面可用（该 owner 有活跃连接器宿主）→ ``enqueue_and_wait``
   收到 ``kind="proactive_voice"`` 与文本/角色/session_key，只认 ``accepted``；
-- 回执被拒 → ``(False, reason)``；无活跃宿主 → 回旧直发路径；
+- 回执被拒 → ``(False, reason, cid)``；无活跃宿主 → 回旧直发路径；
 - 连接器 ``_drain_outbox`` 的 ``proactive_voice`` 分支在 ``_peer_lock`` 内
   合成并投递音频文件卡片；合成失败 ``ok=False`` 且不回退文字。
 """

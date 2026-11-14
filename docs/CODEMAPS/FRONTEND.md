@@ -1,9 +1,9 @@
 # 前端地图
 
-> **✅ 2026-10-30 口径刷新**：前端测试 **342 用例 / 47 测试文件**（342=主控收口实测；47=`src/tests` 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1；另有 e2e 5 个 spec）；页面 **20** / API 模块 **16** / stores **6** / TS·TSX **154**（2026-10-30 find 实测）。**批7 三项收编**：NEW-31 组件库收编（**`shared/SubTabBar.tsx` 删除 31 行**，ConfirmDialog/Button/RolesPage/SettingsVoice 统一到 Button+EmptyState+Skeleton）、NEW-32 设计 token 统一（Slider/UserBadges/Breadcrumb/RoleSettingsTabs/index.css + **新增 `DesignTokens.test.tsx`**）、NEW-22 用户列表排序全页化（`api/admin.ts` 增 `sort`/`sort_dir` 参数 + AdminUsersPage 全页排序，服务端白名单）；NEW-20 高危操作二次确认（Modal/UserForm/AdminProvidersPage/SettingsSecurity）。生产 @ `c3ede77`（批1–7 本地链未部署）。权威数字以 `CODE_GRAPH.md` 为准。上轮刷新（10-28：vitest 251/36）见 git 历史。
+> **✅ 2026-11-14 口径刷新**：前端测试 **283 用例 / 42 测试文件**（`429f78e` 死组件批删除 6 个专测 69 例后口径；另有 e2e spec）；页面 **18** / API 模块 **18** / stores **4** / TS·TSX **147**（2026-11-14 find 实测）。**批7 三项收编**：NEW-31 组件库收编（**`shared/SubTabBar.tsx` 删除 31 行**，ConfirmDialog/Button/RolesPage/SettingsVoice 统一到 Button+EmptyState+Skeleton）、NEW-32 设计 token 统一（Slider/UserBadges/Breadcrumb/RoleSettingsTabs/index.css + **新增 `DesignTokens.test.tsx`**）、NEW-22 用户列表排序全页化（`api/admin.ts` 增 `sort`/`sort_dir` 参数 + AdminUsersPage 全页排序，服务端白名单）；NEW-20 高危操作二次确认（Modal/UserForm/AdminProvidersPage/SettingsSecurity）。生产 @ `cbb82aa`（v1.70，2026-11-09 三端部署；v1.71/v1.72 本地未部署）。权威数字以 `CODE_GRAPH.md` 为准。
 > 功能级清单（页-功能点编号）见 `docs/FUNCTION_INVENTORY.md`。
 
-**最近更新:** 2026-10-30
+**最近更新:** 2026-11-14
 **技术栈:** React ^19.0.0 + Vite ^8.0.12 + TypeScript ~6.0.2 + Tailwind CSS ^4.1.0 + Zustand ^5.0.0
 **入口:** `frontend/index.html` → `frontend/src/main.tsx`
 
@@ -40,13 +40,12 @@ frontend/src/
 │                                SPEAKING_STYLE_LABELS/EMOTION_COLORS/AFFINITY_STAGES，
 │                                09-19「前端写死数据审计」批次新建）
 │
-├── pages/                ← 页面组件 (20 个 .tsx)
+├── pages/                ← 页面组件 (18 个 .tsx)
 │   ├── IntroPage.tsx          ← 产品介绍页 /intro（SP-11，公开静态门面）
 │   ├── LoginPage.tsx          ← 登录页
-│   ├── PsychProfilePage.tsx   ← 心理画像 /psych（09-18 起包 AuthGuard 需登录）
+│   ├── HelpGuidePage.tsx      ← 教学导引 /help（13 模块卡 + driver.js）
 │   ├── WeChatPage.tsx         ← 微信控制台
 │   ├── RolesPage.tsx          ← 角色列表
-│   ├── TemplatesPage.tsx      ← 角色模板 /templates（W12+W17，09-28 入册）
 │   ├── CreateRole.tsx         ← 创建角色
 │   ├── RoleSettings.tsx       ← 角色设置
 │   ├── StatusCenter.tsx       ← 状态中心（09-18 记忆体系「三层管线」重构）
@@ -101,15 +100,10 @@ frontend/src/
 │   │   └── KnowledgePreview.tsx    ← 知识预览（DATA tab 真实管理区）
 │   │
 │   └── admin/
-│       ├── RoleSettingsTabs.tsx   ← 角色设置**五 tab** 实现（basic/voice/message/data/timeline；
-│       │                             StickersTab 已于 09-19 撤除）；消息 tab 内含 **骰子闸（dice_gate）
-│       │                             配置面**（4C：enabled/dry_run/触发阈值等 + dry/live 运行态回显，
-│       │                             走 /api/proactive/config 的 dice_gate 块，默认关闭+dry_run 默认开）
-│       └── TopicStateSection.tsx  ← 控制台「话题状态」面板（v1.58，405 行）：11 个配置键
-│                                    （可调项滑条 + Q1/Q4/Q5/Q6 裁决固化项只读展示）+ 会话键查
-│                                    只读快照（正在聊/没聊完/已结束/下一次对话计划）；门禁沿用
-│                                    MessageTab（非 admin 不渲染不请求）；配套
-│                                    TopicStateSection.test.tsx
+│       └── RoleSettingsTabs.tsx   ← 角色设置 tab 容器（basic/voice/message/data；
+│                                     StickersTab 09-19 撤除、TimelineTab 2026-11-07 P9 并入剧情线）
+│   （「我 × 角色」面板在 components/roles/CharacterSettingsPanel.tsx：五组字段；
+│     消息 tab 含 ⑤ 骰子闸 / ⑥ 话题引擎，走 my-settings 快照）
 │
 ├── hooks/                ← 自定义 Hooks (5 文件)
 │   ├── index.ts                ← 统一导出
@@ -118,19 +112,17 @@ frontend/src/
 │   ├── useMousePosition.ts     ← 鼠标位置
 │   └── useQueries.ts           ← React Query 封装
 │
-├── store/                ← Zustand 状态管理 (6 stores)
+├── store/                ← Zustand 状态管理 (4 stores)
 │   ├── authStore.ts            ← 认证状态
 │   ├── characterBuilderStore.ts← 角色构建器
 │   ├── errorStore.ts           ← 错误状态
-│   ├── humanizeStore.ts        ← 拟人化配置（v1.57：阅读延迟/typing/口误等字段表）
-│   └── topicStateStore.ts      ← 话题状态配置+快照（v1.58，417 行；dirty 判定
-│                                  `topicStateIsDirty`、类型 TopicStateConfig/Item/Plan）
+│   └── globalViewStore.ts      ← 全局运维视图开关（V2-1）
 │
 ├── types/                ← TypeScript 类型定义
 │   ├── api.ts                  ← API 类型
 │   └── framework.ts            ← 框架类型
 │
-└── tests/                ← 前端测试（vitest 251 用例 / 36 文件，2026-10-28 收口实测全绿）
+└── tests/                ← 前端测试（vitest 283 用例 / 42 文件，2026-11-14 口径）
     ├── components/
     └── hooks/
 ```
@@ -142,12 +134,10 @@ frontend/src/
 | 页面 | 路径 | 认证 | API 源 |
 |------|------|------|--------|
 | IntroPage | /intro | 无（公开门面） | — |
-| PsychProfilePage | /psych | **需登录**（09-19 起并入控制台外壳，带侧栏/面包屑；更早 09-18 起即需登录） | psych/* |
 | LoginPage | /login | 无 | authStore |
 | RootRedirect | / | 无 | 登录→/wechat，未登录→/intro |
 | WeChatPage | /wechat | 需要 | wechat/status |
 | RolesPage | /roles | 需要 | characters |
-| **TemplatesPage** | /templates | 需要 | templates（角色模板浏览/克隆，W12+W17） |
 | CreateRole | /roles/create | 需要 | clone + characterBuilderStore |
 | RoleSettings | /roles/:roleId/settings[/:tab] | 需要 | useUnifiedCharacter |
 | StatusCenter | /roles/:roleId/status | 需要 | dashboardStats |
@@ -221,7 +211,7 @@ components/
 
 2026-09-18 由「圆环 + 圆点」重构为三层（`c755090`），品牌色保持海盐蓝 `#7DD3FC`
 （`--color-accent-200`），暖黄/薄荷青作 `data-hover` 变体。仅挂载于 `ProtectedLayout`，
-公开路由（`/intro` `/login` `/psych`）不含此组件。
+公开路由（`/intro` `/login`）不含此组件；`/psych` 已重定向到当前角色状态页。
 
 | 层 | 尺寸 | 跟随 | 说明 |
 |----|------|------|------|
@@ -253,7 +243,7 @@ components/
 axios.create(baseURL: '/api')
   → 请求拦截器: 添加 X-API-Key + JWT Bearer Token
   → 响应拦截器: 错误统一处理 + token 刷新逻辑
-  → 模块 API: 15 个 API 模块 (auth/admin/characters/clone/emotion/normalize/selfservice/templates 等)
+  → 模块 API: 18 个 API 模块 (auth/admin/characters/characterSettings/selfProfile/clone/emotion/normalize/selfservice/templates 等)
 ```
 
 **重要约束:**

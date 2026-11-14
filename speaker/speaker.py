@@ -1,6 +1,7 @@
 """Speaker 统一出口核心（第 1 刀，2026-11-12）。
 
-职责边界（本刀只做核心件，不接管主链/主动/手动投递）：
+职责边界（核心件；主链 ``send_reply_segments_result`` 已接 ``express``，
+提醒线/重要日期线已接 ``build_system_prompt``，提醒线已接 ``record``）：
 
 - ``build_system_prompt``：人设 → 能力 → 话题 → 调用方 base，段间双换行；
 - ``express``：唯一拆条入口（复用 ``wechat_connector.split_reply_for_wechat``）；

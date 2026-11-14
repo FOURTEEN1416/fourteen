@@ -216,11 +216,6 @@ def _auth_of(tokens: dict) -> dict:
     return {"Authorization": f"Bearer {tokens['access_token']}"}
 
 
-def _alice(sweep_app) -> tuple[AsyncClient, dict]:
-    client, *_ = sweep_app
-    return client, _auth_of(asyncio.run(_login(client, "alice")))
-
-
 # ── 手工 multipart（chunked 流式上传用：httpx 对流式 content 不发 Content-Length，
 #    恰好绕过 app_factory 的 request_size_limiter——真实攻击路径）──
 _BOUNDARY = "----sweepUploadVoiceLimits"

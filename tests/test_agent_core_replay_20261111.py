@@ -27,7 +27,6 @@ import pytest
 SESSION_A = "2:o9cq80@im.wechat"
 SESSION_B = "4:o9cq80other@im.wechat"
 OWNER_A = 2
-OWNER_B = 4
 
 RESULT_KEYS = {
     "ok",

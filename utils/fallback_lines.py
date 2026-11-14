@@ -295,10 +295,6 @@ _SYSTEMISH = (
 )
 
 
-# 兼容别名（旧代码/测试按原名 grep）：核心哨兵集，完整集见 _system_markers()
-_SYSTEM_MARKERS = _SYSTEM_MARKERS_CORE
-
-
 def is_system_fallback_line(reply: str | None) -> bool:
     """是否为系统旁路占位（空/超时/异常兜底），不得写成 assistant 发言。
 

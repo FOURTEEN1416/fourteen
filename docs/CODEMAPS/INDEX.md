@@ -1,10 +1,10 @@
 # 代码地图索引
 
-> **✅ 2026-10-30 批次刷新**：本地 HEAD = 批 7 收口链（代码尾 **`9815c27`**，其后为文档收口/验收修正/e2e 基础设施提交；精确链尾以 `git log -1` 为准；前端体验批 1–7 链：批1 `908db1c` → 批2 `38e517c` → 批3 `6d57e30` → 批4 `cbdaf96` → 批5 `a91ed34` → 批6 `69c1d71` → 批6 对抗验收收编 `69aecd2`/`f9ccfd4` → **批7 `d182b6c`(NEW-20 高危操作二次确认) → `c6ed735`(NEW-31 组件库收编·SubTabBar 移除) → `65e0fee`(NEW-32 设计 token 统一) → `9815c27`(NEW-22 用户列表排序全页化)**，批1–7 均本地提交未部署）；端点 **249 业务 APIRoute / 205 唯一路径 / `len(app.routes)`=253**（含 4 条框架路由 `/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`；**118 GET / 90 POST / 18 PUT / 23 DELETE**；2026-10-30 `create_api_app` 内省实测，AI_GF_ENV=dev；批6 净增 14=announcements 6+global-view 2+audit 1+llm-config/test 1+humanize 4，批7 零新端点）；.py 总量 **595**（模块包 **297** + `data/archive/` 1 + 根级 2 + `scripts/` **19** + `tests/` **273**（test_*.py **269**，find/git ls-files 双证）+ `deploy/` 3）；TS/TSX **154**；前端 **20 页面 / 16 API 模块 / 6 stores**；前端测试 **342 用例 / 47 文件**（vitest，342 为主控收口实测、47=src/tests 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1）；活跃 ADR **12** 不变。权威数字以 `CODE_GRAPH.md` 为准。更早刷新（10-28/10-12/10-11/09-27~09-29）见 git 历史与 `docs/history/INDEX.md`。
+> **✅ 2026-11-14 文档清理批口径刷新**：本地 HEAD **`83e8321`**（v1.72；工作区含并行域在制品；`origin/main` **`528644e`**，本地领先 **6 提交**，未 push/未部署）；生产 **`cbb82aa`**（v1.70，2026-11-09 三端部署）。端点 **249 业务 APIRoute / 207 唯一路径 / `len(app.routes)`=253**（含 4 条框架路由；v1.69.1 内省实测，v1.70–v1.72 零新增）；Python tracked **671 文件 / 189,870 行**（磁盘剔除 `frontend/` 与内嵌 `大创赛报名以及后期发展/` 后 **673 文件**；含该目录共 833）；TS/TSX **147**；前端 **18 页面 / 18 API 模块 / 4 stores**；测试 **317 文件 / 5028 通过 + 2 跳过 / 收集 5030 / 0 失败**；前端测试 **283 用例 / 42 文件**；角色卡 **45**；活跃 ADR **12** 不变。权威数字以 `CODE_GRAPH.md` 为准。
 
-**最近更新:** 2026-10-30
+**最近更新:** 2026-11-14
 **项目版本:** 3.1.0
-**项目规模:** **595** 个 Python 文件（模块包 **297** + `data/archive/` 归档遗物 1 + 根级 2 + `scripts/` **19** + `tests/` **273**（test_*.py **269**，find/git ls-files 双证）+ `deploy/` 3；**2026-10-30 find 实测**；**不含** `frontend/` 与内嵌 `大创赛报名以及后期发展/`） + **154** TS/TSX 文件（frontend/src，2026-10-30 find 实测） | 当前分支: `main`
+**项目规模:** **673** 个 Python 文件（磁盘剔除 `frontend/` 与内嵌 `大创赛报名以及后期发展/`，2026-11-14 实测；`git ls-files '*.py'` tracked **671**） + **147** TS/TSX 文件（frontend/src，2026-11-14 find 实测） | 当前分支: `main`
 **架构框架:** FastAPI (后端) + React/Vite (前端) + SQLite/ChromaDB (数据)
 
 ---
@@ -31,22 +31,22 @@
 | **后端** | Python ≥3.10 + FastAPI + Uvicorn | `:8000` |
 | **数据库** | SQLite (主, aiosqlite) + ChromaDB (向量) | `data/users.db` |
 
-### 项目目录结构（2026-10-30 实测）
+### 项目目录结构（2026-11-14 实测）
 
 ```
 unique-you/
-├── api/                    # FastAPI 路由层 (51 py 文件：app_factory/run_api/audit/26 routers/
+├── api/                    # FastAPI 路由层 (52 py 文件：app_factory/run_api/audit/27 routers/
 │                           #   achievement_engine/database/auth/auth_jwt/deps/
 #                           #   health_routes/main_routes/qrcode_store/websocket_server/state/...)
 ├── shisi/                  # DDD 核心域 (116 py 文件，v2 死模块删除后口径)
 ├── my_character/           # 情感引擎 (12 py 文件)
-├── frontend/               # React 前端 SPA (20 pages / 16 api 模块 / 6 stores)
+├── frontend/               # React 前端 SPA (18 pages / 18 api 模块 / 4 stores)
 ├── orchestrator/           # 编排包 (9 文件：主类+init/stream mixin+session_locks+voice_detector
 │                           #   +console_chat+tool_gate+context_budget)
 ├── persona_extractor/      # 人格提取 (13 文件)
 ├── tools/                  # 工具系统 (13 py 文件, 17 内置工具·默认注册 14
 │                           #   = config/system.yaml builtin_tools，2026-10-21 R3 批 +memory)
-├── utils/                  # 公共工具 (26 文件：local_time/fallback_lines/affinity_state/
+├── utils/                  # 公共工具 (31 文件：local_time/fallback_lines/affinity_state/
 │                           #   reply_mode/async_utils/important_dates/topic_state(话题状态机三表
 │                           #   唯一 owner)/stream_guard(主链增量出站守卫)/...)
 ├── observability/          # 可观测性 (8 py 文件)
@@ -62,12 +62,11 @@ unique-you/
 │                           #   reflection/reminder_delivery/llm_proactive/runtime_plane/runtime_assembly
 │                           #   /topic_recall(parked 复提候选))
 ├── multimodal/             # 多模态 (image_attachment + multimodal_processor)
-├── wechat_direct/          # 微信直连 (4 文件：每人独立通道·D16 谁扫码谁聊 registry/paths + connector)
+├── wechat_direct/          # 微信直连 (6 文件：每人独立通道·D16 谁扫码谁聊 registry/paths + connector)
 ├── plugins/                # 插件系统 (2 文件)
-├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（gitignore；本地实测 42 张
-│                           #   = 41 default 策展卡 + 1 张 user_id=1 林挽夏运行时克隆副本 99c89c39，
-│                           #   2026-10-09 落盘；与 LOG「41 卡」差异注记见 CODEMAPS/DATABASE.md）
-├── tests/                  # 测试 (test_*.py **269** 文件=find/git ls-files 双证；前端 342 用例/47 文件；批7 新增 test_admin_users_sort.py 29 例)
+├── config/                 # YAML/JSON 配置 + config/characters/ 角色卡库（gitignore；本地实测 45 张
+│                           #   = 41 策展卡 + 2026-11-08 用户自建 4 张「陈末」等）
+├── tests/                  # 测试 (test_*.py **317** 文件；后端 5028 通过 + 2 跳过 / 收集 5030；前端 283 用例/42 文件)
 └── docs/                   # 文档
     ├── CODEMAPS/           # ← 本目录
     ├── adr/                # 架构决策记录 (12 篇)
@@ -78,13 +77,13 @@ unique-you/
 
 > `weclone_adapter/` 已于 08-28 删除（克隆收敛为本地提取+JSON 上传，DECISION_LEDGER 08-28 行）。
 
-### 关键指标（2026-10-30 复测）
+### 关键指标（2026-11-14 复测）
 
 | 指标 | 值 |
 |------|-----|
-| API 端点 | **249 业务端点 / 205 唯一路径**（118 GET / 90 POST / 18 PUT / 23 DELETE；挂载口径 **30 挂载点 = 22 处字面 `include_router`（21 直接 + 1 在 `_mount_required_router` 内）+ 9 条件挂载**，另 `setup_shisi` 域路由组；`create_api_app` 内省 2026-10-30 实测（AI_GF_ENV=dev）；较 10-28 口径 235 净增 **14**=批6 announcements 6+global-view 2+audit 1+llm-config/test 1+humanize 4，**批7 零新端点**）；⚠️ `len(app.routes)`=253 含 4 条框架路由（`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`） |
-| 前端页面 | 20 页面文件（全部挂载；批4 +HelpGuidePage `/help`；2026-10-30 App.tsx 实测） |
-| 测试用例 | 前端 **342 用例 / 47 测试文件**（342=主控收口实测；47=`src/tests` 46 + `components/admin/TopicStateSection.test.tsx` 旁挂 1）+ 后端 test_*.py **269 测试文件**（find/git ls-files 双证；批6 新增 `test_character_behavior_distillation`/`test_proactive_dice_gate`/`test_announcements_api`，批7 新增 `test_admin_users_sort.py` 29 例+`test_admin_routes_last_admin` 扩充）；后端收集/通过口径随收口批主控实跑 |
+| API 端点 | **249 业务端点 / 207 唯一路径**（v1.69.1 `create_api_app` 内省实测，AI_GF_ENV=dev；v1.70–v1.72 零新增；⚠️ `len(app.routes)`=253 含 4 条框架路由） |
+| 前端页面 | 18 页面文件（全部挂载；`/templates` `/psych` 已重定向） |
+| 测试用例 | 前端 **283 用例 / 42 测试文件** + 后端 test_*.py **317 测试文件**（5028 通过 + 2 跳过 / 收集 5030 / 0 失败，v1.72 实测） |
 | 活跃 ADR | **12**（0001–0007 + 0011–**0015**；0008–0010 空缺未使用） |
 | Fitness Functions | 17 (12 CI + 5 手动) |
 | 总线因子 | 1 (唯一开发者: 默默) |

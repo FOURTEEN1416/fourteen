@@ -1,5 +1,55 @@
 # Code Deletion Log
 
+## [2026-11-14] 四域清理批：27 个零引用符号文件内删除（无整文件删除；原标 2026-11-13，与本批文档口径及「登记员复核 2026-11-14 实跑」统一）
+
+### 依据与范围
+- 本轮四个执行员报告：docs 域 12 个文件仅做文档对齐，**0 删除**；代码注释/死码域 5 个符号；API/工具域 11 个符号；测试域 11 个符号。合计 **27 个文件内符号，`files: []`（无整文件删除）**——`git status --porcelain` 无 `D` 状态行，`git diff --cached --name-only` 为空。
+- 删除判据（执行员报告）：每个符号删除前以 `git --no-pager grep -n` + 文件系统级 `grep -rn`（含未跟踪文件）双查，除定义行及历史文档（`docs/DELETION_LOG.md`、`LOG.md`）外零引用；`getattr` 动态引用检查无命中；删除后再次全仓扫描零残留。
+- 保留项（明确登记，避免误判漏删）：`api/routers/character_routes.py::MEMORY_FACTS_DIR` 保留（4 个测试夹具 monkeypatch 依赖），仅删 `_facts_path/_load_facts/_save_facts` 三个遗留 JSON helper；`utils/proactive_voice_delivery.py::synthesize_silk` 仍为零调用死码，但本批 action=comment 未要求删除，保留待后续单独清理。
+
+### 删除清单（27 项）
+**A. 注释/死码批（5）**
+- `proactive/scheduler.py:66` `_accepts_key` —— 回调签名探测 helper（`inspect.signature` 判断是否接受 `user_key/session_key/session_id`），全仓零调用。历史 `docs/DELETION_LOG.md` 的 2026-09-21「备注式删除与逻辑矛盾专项收口」条目曾记录其为零引用但因文件处于并行在制品未触碰，本批清除。
+- `utils/proactive_voice_delivery.py:76` `_reset_tts_manager` —— 测试用清空 TTS 缓存 helper（`_TTS_MGR/_TTS_CFG`），零调用方。
+- `wechat_direct/wechat_connector.py:1356` `WeChatConnector._load_local_state` —— owner/遗留双分支本地状态读取方法，全仓零调用。
+- `utils/fallback_lines.py:299` `_SYSTEM_MARKERS` —— `_SYSTEM_MARKERS_CORE` 的兼容别名（注释写明供旧代码/测试按原名 grep），零引用；真源 `_SYSTEM_MARKERS_CORE` 与 `_system_markers()` 保留。
+- `speaker/types.py:17` `UTTERANCE_SOURCES` —— 五条出站线来源集合（纯文档性常量，`UtteranceIntent` 构造期不校验），零引用；`UtteranceIntent.source` 字面量契约保留。
+
+**B. API/工具死符号批（11）**
+- `api/achievement_engine.py:65` `_ACH_BY_ID` —— 成就注册表按 id 索引 dict，零引用；`ACHIEVEMENTS` 元组保留为唯一注册表。
+- `api/routers/character_routes.py:1414` `_facts_path` —— 遗留 `data/character_memory/*.json` 路径 helper；端点已改读 `user_facts` 唯一真源，零调用。
+- `api/routers/character_routes.py:1422` `_load_facts` —— 遗留 JSON 读取 helper，零调用（另一命中为 `tests/test_memory_pipeline.py:733` 测试函数名子串，与本符号无关）。
+- `api/routers/character_routes.py:1433` `_save_facts` —— 遗留 JSON 写入 helper，零调用。
+- `api/lifecycle.py:162` `_is_wxid_like` —— 裸 peer 形态判断 helper（委托 `utils.session_key.parse`），零调用。
+- `api/routers/chat_routes.py:203` `_reset_chat_rate_limits` —— 测试用清空聊天频控两桶（分钟/日配额）helper，零调用。
+- `shisi/affinity/mapper.py:23` `_EMOTION_AFFECTION_MAX` —— affection 满级刻度常量（`= affinity_scale.POINTS_MAX`）；映射已统一走 `scale.points_to_shisi` / `scale.shisi_to_points`，零引用。
+- `shisi/memory/legacy/user_profile.py:29` `_OCC_PATTERNS` —— 用户职业陈述正则集，零引用。
+- `shisi/memory/legacy/vector_memory.py:37` `_SCOPE_META_KEYS` —— 归属元数据键全集；实际守卫只用 `_SCOPE_OWNER_KEYS`，零引用。
+- `multimodal/multimodal_processor.py:22` `IMAGE_WITNESS_TAG` —— 图片描述注入标记前缀常量；拼接处直接用字面量 `[你亲眼看到：…]`，常量零引用。
+- `orchestrator/context_budget.py:423` `SESSION_TAIL_TOKEN_BUDGET_CHARS` —— 会话尾巴字符预算常量（1200）；`format_session_tail` 走 `ContextBudget` 参数，常量零引用。
+
+**C. 测试死符号批（11）**
+- `tests/conftest.py:38` `collect_ignore` —— pytest 收集排除变量（`real_e2e_test.py` / `real_test.py`）；两目标文件均不存在（`ls` 证实），变量零生效。
+- `tests/golden/runner.py:353` `_check_guard_changed` —— 黄金集守卫变化检查 helper，零调用（`_check_no_semantic` 走 `_check_expect`）。
+- `tests/test_proactive_decision_history_scrub.py:24` `_ASSISTANT_SCRUBBED` —— 净化后期望文本常量，零引用。
+- `tests/test_proactive_dice_gate.py:34` `_MON` —— 周一常量（0），零引用（`_at` 用默认日期参数）。
+- `tests/test_proactive_window_tone_batch.py:283` `_SchedStub` —— 空调度器 stub 类，零引用（`_make_dedup_sched` 用 `ProactiveScheduler.__new__`）。
+- `tests/test_provider_call_latency_log.py:22` `_LOGGER` —— logger 名常量，零引用。
+- `tests/test_sweep_upload_voice_limits.py:219` `_alice` —— alice 登录 helper，零引用。
+- `tests/test_w7_voice_chain.py:504` `_clone_provider` —— clone provider 构造 helper，零引用。
+- `tests/test_agent_core_replay_20261111.py:30` `OWNER_B` —— owner 常量（4），零引用。
+- `tests/test_b2_proactive_ledger_20261111.py:36` `OWNER_ID` —— owner 常量（2），零引用。
+- `tests/test_w10_ready_probes.py:26` `_PROJECT_ROOT` —— 项目根常量，零引用；连带删除仅供其使用的 `from pathlib import Path`（现文件无 `Path` 命中）。
+
+### 验证（登记员复核，2026-11-14 实跑）
+- `git show HEAD:<file> | grep -nw <symbol>`：**27/27 均在 HEAD 定义行命中**（`proactive/scheduler.py:66`、`utils/proactive_voice_delivery.py:76`、`wechat_direct/wechat_connector.py:1356`、`utils/fallback_lines.py:299`、`speaker/types.py:17`、`api/achievement_engine.py:65`、`api/routers/character_routes.py:1414/1422/1433`、`api/lifecycle.py:162`、`api/routers/chat_routes.py:203`、`shisi/affinity/mapper.py:23`、`shisi/memory/legacy/user_profile.py:29`、`shisi/memory/legacy/vector_memory.py:37`、`multimodal/multimodal_processor.py:22`、`orchestrator/context_budget.py:423`、`tests/conftest.py:38`、`tests/golden/runner.py:353`、`tests/test_proactive_decision_history_scrub.py:24`、`tests/test_proactive_dice_gate.py:34`、`tests/test_proactive_window_tone_batch.py:283`、`tests/test_provider_call_latency_log.py:22`、`tests/test_sweep_upload_voice_limits.py:219`、`tests/test_w7_voice_chain.py:504`、`tests/test_agent_core_replay_20261111.py:30`、`tests/test_b2_proactive_ledger_20261111.py:36`、`tests/test_w10_ready_probes.py:26`），证明删除前确实存在。
+- 当前工作树 `grep -nw <symbol> <file>`：**27/27 全部 0 命中**；`git diff -U0` 对应文件均出现该符号的删除行。
+- 全仓 `grep -rnw --include='*.py' --include='*.ts' --include='*.tsx' --include='*.js'`：16 个代码符号零残留；11 个测试符号零残留。仅历史/文档文本命中：`docs/DELETION_LOG.md`（`_accepts_key` 旧遗留条目）、`LOG.md`（`_SYSTEM_MARKERS` 历史条目）、`aoci.code.txt`（`collect_ignore` 说明）；`OWNER_ID` / `_PROJECT_ROOT` 的同名命中来自其他文件的同名模块常量（`tests/test_agent_core_store_20261111.py`、`api/health_routes.py` 等），非本符号引用。
+- `git status --porcelain | grep -E '^( D|D |AD|RD)'` → 无输出（无整文件删除）；`git rev-parse --short HEAD` = `83e8321`；本批删除目前为工作树未提交改动（对应文件状态 `M`，未暂存）。
+- **未运行 pytest**（任务明确禁止）；执行员自检的 `ruff` / `ast.parse` / `git diff --check` 结果见其报告，本记录未复跑。
+
+**Reversible**: 全部为文件内删除，`git checkout -- <file>` 可整体恢复（当前工作树未提交）；被删符号原文见 `git show HEAD:<file>`。
+
 ## [2026-11-08] D-B 死组件退役批：运维页删除后的无挂载点组件/store/前端函数/专测（owner 裁决「没有用就可以删除」）
 
 ### 裁决依据

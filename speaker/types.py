@@ -12,12 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-#: 合法来源（五条出站线）。用于文档与可观测口径，不在构造期抛错——
-#: Speaker 全链 fail-open，未知来源也必须能被记录而不是阻断投递。
-UTTERANCE_SOURCES = frozenset(
-    {"reply", "proactive", "reminder", "important_date", "manual"}
-)
-
 
 @dataclass(frozen=True)
 class UtteranceIntent:

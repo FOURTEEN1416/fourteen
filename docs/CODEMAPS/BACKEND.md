@@ -1,8 +1,8 @@
 # 后端地图
 
-> **✅ 2026-10-30 口径刷新**：`create_api_app()` 内省亲测（AI_GF_ENV=dev）——**249 APIRoute / 205 唯一路径 / `len(app.routes)`=253**（**118 GET / 90 POST / 18 PUT / 23 DELETE**；4 条框架路由=`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`）。较 10-28 口径 235 净增 **14** = 批4 announcements 6 + 批3 global-view 2 + audit 1 + 批5 llm-config/test 1 + humanize 4；**批7 零新端点**（NEW-22 为 `GET /api/admin/users` 的 `sort`/`sort_dir` 查询参数扩展，400 行·内白名单 Literal 校验 + `_USER_SORT_COLUMNS` asc/desc 双列排序，非法值 422）。admin_routes 5→**8**（批3 并入 global-view×2+audit）。生产 @ **`c3ede77`**（批1–7 本地链 `9815c27` 未部署）。权威口径以 `CODE_GRAPH.md` 为准。更早增量（10-28/10-12/09-29）见 git 历史。
+> **✅ 2026-11-14 文档清理批口径刷新**：端点沿用 v1.69.1 `create_api_app()` 内省实测（AI_GF_ENV=dev）——**249 APIRoute / 207 唯一路径 / `len(app.routes)`=253**（4 条框架路由=`/openapi.json` `/docs` `/docs/oauth2-redirect` `/redoc`；v1.70–v1.72 零新增）。api **52 py 文件 / 27 routers**。生产 @ **`cbb82aa`**（v1.70，2026-11-09 三端部署；v1.71/v1.72 本地未部署）。权威口径以 `CODE_GRAPH.md` 为准。
 
-**最近更新:** 2026-10-30
+**最近更新:** 2026-11-14
 **版本:** 3.1.0
 **入口文件:** `api/run_api.py`, `api/app_factory.py`, `main.py`, `orchestrator/`
 
@@ -11,7 +11,7 @@
 ## 架构分层
 
 ```
-api/ (51 py 文件)            ← FastAPI 路由层
+api/ (52 py 文件)            ← FastAPI 路由层
 ├── run_api.py              ← 启动入口 (uvicorn + flock 调度器单例/微信连接自动恢复)
 ├── app_factory.py          ← APP 工厂 (create_api_app) — 唯一构造入口
 ├── auth.py                 ← X-API-Key 认证依赖

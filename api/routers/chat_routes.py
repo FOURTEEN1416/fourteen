@@ -200,12 +200,6 @@ def _chat_rate_guard(user_id: int) -> None:
         raise HTTPException(status_code=429, detail="发送太频繁，请稍后再试")
 
 
-def _reset_chat_rate_limits() -> None:
-    """清空两桶记账（测试隔离用）。"""
-    _chat_minute_limiter.reset()
-    _chat_daily_limiter.reset()
-
-
 # ═══════════════════════════════════════════════════════
 # Chat / Session
 # ═══════════════════════════════════════════════════════

@@ -1,8 +1,9 @@
 """
 数据库引擎 + User/Role 模型 — 用户登录和管理系统
 
-使用 SQLAlchemy async + aiosqlite，数据存储在 data/users.db。
-后续可切换 PostgreSQL，只需改 DATABASE_URL 环境变量。
+使用 SQLAlchemy async + aiosqlite，默认数据存储在 data/users.db。
+切换 PostgreSQL 除设置 APP_DATABASE_URL/DATABASE_URL 外，还需安装 asyncpg
+异步驱动（pyproject.toml 未声明该可选依赖，缺驱动时无法启动）。
 
 2026-08-31（T1 mypy 债清偿）：Column[] → Mapped[] 注解升级（SQLAlchemy 2.0 标准写法），
 实例属性类型由 mypy 完整推断，消除全库 30+ 处 Column 联合类型错误。运行时行为不变。
@@ -285,9 +286,10 @@ class WechatBinding(Base):
 
 
 class WechatChannelSession(Base):
-    """每人独立微信通道会话 — 凭证/状态/轮询按 user_id 隔离。
+    """每人一个 bot 通道会话 — 凭证/状态/轮询按 user_id 隔离。
 
-    一人最多两条（slot=0/1）；全局唯一 bot 通道模型已废弃。
+    D16「一人一 bot」：`MAX_CHANNELS_PER_USER=1`，slot 恒为 0；
+    全局唯一 bot 通道模型已废弃。
     """
 
     __tablename__ = "wechat_channel_sessions"
@@ -335,10 +337,10 @@ class WechatChannelSession(Base):
 
 
 class WechatPeerPreference(Base):
-    """通道内好友角色自选 — (通道所有者, 好友wxid) → 角色卡。
+    """遗留表：通道内好友角色自选（(通道所有者, 好友wxid) → 角色卡）。
 
-    与 wechat_bindings 区分：binding 表达「wxid↔注册用户」身份；
-    本表表达「在 U 的通道里，F 选了哪张卡」。
+    该机制已随 D16「谁扫码谁聊」整体退役，不再参与聊天路由；表结构仅为
+    历史数据保留，当前只在账号/角色删除时走清理路径。
     """
 
     __tablename__ = "wechat_peer_preferences"

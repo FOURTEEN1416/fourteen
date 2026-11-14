@@ -1,9 +1,9 @@
 """
-8 sub-router mount verification — migrated to api.routers/
+9 sub-router mount verification — migrated to api.routers/
 
-Each test verifies that endpoints from one of the 8 sub-routers
+Each test verifies that endpoints from one of the 9 sub-routers
 (api.routers.misc_routes, chat_routes, personality_routes, users_routes,
- training_routes, tools_routes, safety_routes, clone_routes)
+ training_routes, tools_routes, safety_routes, clone_routes, topic_routes)
 are correctly mounted in the FastAPI app with the right method+path.
 
 Static mount check is the primary proof of refactor correctness:

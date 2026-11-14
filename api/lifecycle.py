@@ -159,13 +159,6 @@ class OwnerStep:
     verify: Callable[..., Any]
 
 
-def _is_wxid_like(value: str) -> bool:
-    # 裸 peer 形态：自带 @im.wechat 或不含 "数字:" owner 前缀
-    from utils.session_key import parse
-
-    return parse(value).owner is None
-
-
 async def _freeze_revoke(scope: AccountScope, db_factory: Callable[[], Any]) -> dict:
     """冻结新写入 + 撤销会话（第一步，先于一切清除）。
 
@@ -562,7 +555,7 @@ def _ase_states_verify(scope: AccountScope) -> dict:
 
 
 def _topic_state_purge(scope: AccountScope) -> dict:
-    """话题状态机三表（topic_state / thread_plan / topic_meta）按会话键清除。"""
+    """话题状态机四表（topic_state / thread_plan / topic_meta / 遗留 topic_plan）按会话键清除。"""
     from utils import topic_state
 
     _chars, _kn, sqlite_db, _agent, _chroma = _default_paths(

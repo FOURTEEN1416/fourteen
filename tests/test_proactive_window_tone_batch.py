@@ -280,12 +280,6 @@ class TestEmptyHooksMarker:
 # ── 方向C：确定性闸账本每日降噪 ──────────────────────────
 
 
-class _SchedStub:
-    """最小调度器 stub：只带 _emit_skip_event_daily 所需属性。"""
-
-    pass
-
-
 def _make_dedup_sched(monkeypatch):
     import shisi.agent_plane.runtime as runtime_mod
     from proactive.scheduler import ProactiveScheduler

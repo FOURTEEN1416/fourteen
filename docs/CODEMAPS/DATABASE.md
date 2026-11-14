@@ -1,9 +1,9 @@
 # 数据库地图
 
-**最近更新:** 2026-10-30（批1–7 全链复核：`api/database.py` 模型 9→**13**（批3 +`operator_audit`/`operator_prefs`、批4 +`announcements`/`announcement_reads`），批5–7 零 schema 变更；`utils/topic_state.py` 三表 `_SCHEMA` 逐列抄实仍有效；下述 2026-10-28 库实测口径延续有效）
+**最近更新:** 2026-11-14（文档清理批：本地库实测刷新——`data/sqlite.db` **45 表**（含 `sqlite_sequence` 与 5 张 FTS 影子表）/ `data/users.db` **14 表**；`utils/topic_state.py` 三表逐列抄实，`topic_state` 补 `recall_count` / `last_recalled_at` 两列）
 **数据库:** SQLite (主, aiosqlite) + ChromaDB (向量) + 文件系统 (角色卡/知识库)
 
-> **✅ 2026-09-29 全仓历遍复核（三库实测）**：`data/users.db` **9 表**（api/database.py 模型；+`user_active_characters` W1 `94ed63d` 激活归属唯一 owner；`users.id` AUTOINCREMENT 表重建 + 引擎级 `PRAGMA foreign_keys=ON`，W9）；`data/sqlite.db` **27 张**（不含 FTS 影子表；较 09-20 口径 +`memory_extraction_progress`/`fact_deletion_watermarks`/`memory_forwards`/`user_persona`/`user_persona_snapshots`/`user_profile`，旧清单中 `sessions`/`working_memory`/`emotion_trajectory`/`pending_events`/`affinity_log` 五死表已不存在）；`data/runtime_plane.db` **8 表**（W3 运行平面跨进程 CAS 账，WAL）。文件账：`data/lifecycle_jobs/`（W9 五阶段作业账+坟场）、`data/runtime_switches.json`（W6 工具开关）、`data/voice_catalog.json`（W7 音色）、`config/character_templates.yaml`（W12 策展清单）。
+> **✅ 2026-11-14 库实测**：`data/users.db` **14 表**（`api/database.py` 模型 13 + `sqlite_sequence`）；`data/sqlite.db` **45 表**（含 `sqlite_sequence` 与 5 张 `user_facts_fts*` 影子表；业务表 **39 张**）；`data/runtime_plane.db` **8 表**（W3 运行平面跨进程 CAS 账，WAL）。文件账：`data/lifecycle_jobs/`（W9 五阶段作业账+坟场）、`data/runtime_switches.json`（W6 工具开关）、`data/voice_catalog.json`（W7 音色）、`config/character_templates.yaml`（W12 策展清单）。
 
 ---
 
@@ -95,18 +95,19 @@
 > `api/database.py` 中的 **13 表**是用户认证与控制面模型（`users` / `user_sessions` / `invite_codes` /
 > `consent_records` / `wechat_bindings` / `wechat_channel_sessions` / `wechat_peer_preferences` / `character_achievements` / `user_active_characters` / `operator_audit` / `operator_prefs` / `announcements` / `announcement_reads`，2026-10-30 逐类 grep 亲测）。
 
-### `data/sqlite.db` 全量表清单（schema 真源合计 32 张；本地库只读实测 29 张业务表，2026-10-28，不含 FTS 影子表与 `sqlite_sequence`）
+### `data/sqlite.db` 全量表清单（2026-11-14 实测：文件账 45 张，含 `sqlite_sequence` 与 5 张 FTS 影子表；业务表 39 张）
 
 `shisi/migrations.py` 建 12 张（上表）。同库另由 `structured_memory.py` /
-`utils/topic_state.py` / `utils/reply_mode.py` 等建表，**schema 真源合计 32 张**（不含 `sqlite_sequence` 与 `user_facts_fts*` FTS 影子表）。本地 `data/sqlite.db` 2026-10-28 只读实测 **29 张业务表**（含 FTS 影子与 `sqlite_sequence` 后文件账 **35 张**）；两处惰性建表注记：**topic 三表**（v1.58，`utils/topic_state.py:85-128` `_SCHEMA`）本地未触发首次写入故不在实测数内，**生产已实例化**且 `thread_plan` 已有真实计划行：
+`utils/topic_state.py` / `utils/character_settings.py` 等建表。本地 `data/sqlite.db` 2026-11-14 只读实测 **45 张**（含 `sqlite_sequence` 与 5 张 `user_facts_fts*` 影子表；业务表 **39 张**）；**topic 三表已实例化**（`topic_state` / `thread_plan` / `topic_meta`，`utils/topic_state.py:96-146` `_SCHEMA` 幂等建表）。`user_reply_mode` 为退役遗留表（读层已删，保留存量数据），不再由 `utils/reply_mode.py` 建表：
 
 | 来源 | 表 |
 |------|-----|
 | `shisi/migrations.py`（12） | `characters` / `characters_v2` / `affinity_records` / `affinity_unlocks` / `affinity_audit` / `emotion_stage_state` / `stickers` / `character_stickers` / `vital_signs_state` / `memory_favorites` / `memory_recycle_bin` / `shisi_schema_version` |
-| `structured_memory.py` 等（17） | `chat_history`（**对话上下文真源，按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `daily_summaries` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_intents`（澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / `reminders`（+session_key/user_id/status/delivered_at/fail_count） / `memory_extraction_progress`（抽取租约 + 来源 id 水位） / `fact_deletion_watermarks`（删除水位，派生召回失效） / `memory_forwards`（转发） / `user_persona` / `user_persona_snapshots`（画像保序快照） / `user_profile`（用户画像） / `user_identity_map`（D15 显式身份组，v1.45；本地已实例化） / **`user_reply_mode`**（R7 按用户回复模式覆盖，v1.56；真源 `utils/reply_mode.py:224` 幂等 `CREATE TABLE IF NOT EXISTS`；`user_key` TEXT PK / `mode` TEXT NOT NULL / `updated_at` TEXT NOT NULL DEFAULT ''——本地库 DDL 亲测） |
-| `utils/topic_state.py`（3，v1.58，惰性建表·生产已实例化） | `topic_state` / `thread_plan` / `topic_meta`（schema 逐列见下节；**唯一 owner=`utils/topic_state.py`**，其他模块不得直接 `sqlite3.connect`） |
+| `structured_memory.py` 等（16） | `chat_history`（**对话上下文真源，按 session 隔离读取**） / `user_facts`（+`user_facts_fts` 全文索引） / `daily_summaries` / `reflections` / `tool_call_log` / `trace_log` / `persona_evolution_log` / `pending_intents`（澄清状态机：槽位合并 / 两轮上限 / 15min TTL） / `reminders`（+session_key/user_id/status/delivered_at/fail_count） / `memory_extraction_progress`（抽取租约 + 来源 id 水位） / `fact_deletion_watermarks`（删除水位，派生召回失效） / `memory_forwards`（转发） / `user_persona` / `user_persona_snapshots`（画像保序快照） / `user_profile`（用户画像） / `user_identity_map`（D15 显式身份组，v1.45；本地已实例化） |
+| `utils/topic_state.py`（3，v1.58，本地已实例化） | `topic_state` / `thread_plan` / `topic_meta`（schema 逐列见下节；**唯一 owner=`utils/topic_state.py`**，其他模块不得直接 `sqlite3.connect`） |
+| 后续模块（8） | `user_character_settings`（v1.67 my-settings 快照）/ `user_character_overrides`（v1.64 公开卡私人覆盖）/ `user_humanize`（v1.57 历史表，读层已退役）/ `user_proactive_config`（v1.62）/ `agent_commitments` / `agent_events` / `agent_threads`（agent plane）/ `user_reply_mode`（v1.56 退役遗留表，读层已删） |
 
-### 话题状态机三表 schema（v1.58，真源 `utils/topic_state.py:85-128` `_SCHEMA`，逐列抄实 2026-10-28）
+### 话题状态机三表 schema（v1.58，真源 `utils/topic_state.py:96-146` `_SCHEMA`，逐列抄实 2026-11-14）
 
 **`topic_state`** — 话题状态行（PK `(session_key, character_id, topic_id)`；索引 `idx_topic_state_session_status(session_key, character_id, status, last_active_at DESC)`）：
 
@@ -123,6 +124,8 @@
 | turn_count | INTEGER | NOT NULL DEFAULT 0 | 轮数（每轮对本会话 active 行 +1） |
 | anchors | TEXT | NOT NULL DEFAULT '[]' | JSON 数组，≤3 条短锚点（各 ≤40 字） |
 | idle_turns | INTEGER | NOT NULL DEFAULT 0 | 连续未命中轮数（≥3 → parked） |
+| recall_count | INTEGER | NOT NULL DEFAULT 0 | parked 复提次数（冷却升级闸：2 次翻倍 / 4 次四倍） |
+| last_recalled_at | TEXT | NOT NULL DEFAULT '' | 最近一次复提时间（空串=从未复提） |
 | last_active_at | TEXT | NOT NULL | 北京墙钟 `%Y-%m-%d %H:%M:%S`（naive） |
 | created_at | TEXT | NOT NULL | 同上 |
 | updated_at | TEXT | NOT NULL | 同上 |

@@ -1,10 +1,17 @@
 """
 定时调度器 — 基于 APScheduler
 
-管理所有定时任务：
-1. ASE 检查（每5分钟）
-2. 每日维护（00:05）
-3. 每日重置（00:00）
+统一注册并管理后台定时任务（启动时十项 + 按开关动态挂载 ``vault_collect``）：
+- ``reminder_check`` 提醒到期投递检查（每分钟）
+- ``ase_check`` ASE 主动消息检查（每 5 分钟）
+- ``daily_maintenance`` 每日维护（00:05）
+- ``memory_curator`` 夜间记忆整理（02:17）
+- ``daily_reset`` 每日 ASE 重置（00:00）
+- ``save_state`` 状态持久化（每 10 分钟）
+- ``health_check_channels`` 通道健康检查（每 60 秒）
+- ``important_dates`` 重要日期补发检查（每小时）
+- ``hot_topics_collect`` 热点知识采集（每 60 分钟）
+- ``control_commands`` 跨 worker 控制命令消费（每 5 秒）
 
 早安/晚安由 ASE 场景触发处理，不再独立注册定时任务。
 """
@@ -61,23 +68,6 @@ def apply_wait_jitter(
     if jitter_seconds <= 0:
         return base
     return base + float(rng(0.0, float(jitter_seconds)))
-
-
-def _accepts_key(fn: Callable | None) -> bool:
-    """回调是否接受 user_key 参数（兼容旧零参/无 key 签名）。"""
-    if fn is None:
-        return False
-    import inspect
-
-    try:
-        params = inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        return False
-    return any(
-        p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY, p.VAR_KEYWORD)
-        and name in ("user_key", "session_key", "session_id")
-        for name, p in params.items()
-    ) or any(p.kind == p.VAR_KEYWORD for p in params.values())
 
 
 def _classify_deliver_error(err: str) -> str:

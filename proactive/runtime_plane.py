@@ -22,8 +22,10 @@ WS 端口（谁先 bind 谁驻留）三者**各自独立选主、互不知情**�
   ├ outbound_commands        **出站投递命令 + 受理回执**：投递方只 enqueue，
   │                          资源宿主（连接器 / WS 持有者）CAS 认领、真实
   │                          投递、回写 accepted/failed 回执；等待方凭回执判
-  │                          成败。一行只会被认领一次 ⇒ 同 owner 双 slot 天然
-  │                          不混投（缺陷 C），"delivered=True 无确认"消失
+  │                          成败。同一时刻一行只会被一个宿主 CAS 认领（过期
+  │                          认领由 ``_reap_expired`` 重置、宿主不归我可
+  │                          ``requeue_send`` 退回，均可重投）⇒ 同 owner 双
+  │                          slot 不会同时混投（缺陷 C），"delivered=True 无确认"消失
   │                          （缺陷 E）。不承诺 exactly-once：回执=受理确认。
   ├ control_commands         控制命令（如 proactive_manual）—— master 消费
   ├ inbound_seen             入站 message_id 幂等账（claim→done/release）

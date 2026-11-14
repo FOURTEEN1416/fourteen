@@ -1,15 +1,18 @@
-"""话题状态机 —— 三表 + 六 API（2026-10-27 实施计划 Task 1）。
+"""话题状态机 —— 四表 + 六 API（2026-10-27 实施计划 Task 1；2026-11-13 起清理/verify 覆盖遗留 topic_plan）。
 
 真源与边界（逐条对应 `docs/reports/2026-10-27-话题状态机实施计划.md`）：
 
-- **三表**（``data/sqlite.db``，幂等 ``CREATE TABLE IF NOT EXISTS``）：
+- **三张活跃表**（``data/sqlite.db``，幂等 ``CREATE TABLE IF NOT EXISTS``）：
   ``topic_state`` / ``thread_plan`` / ``topic_meta``。本模块是这三张表的
-  **唯一 owner**，其他模块不得直接 ``sqlite3.connect`` 它们。
+  **唯一 owner**，其他模块不得直接 ``sqlite3.connect`` 它们；清理与 verify
+  （``purge_owner`` / ``count_owner`` / ``purge_expired``）经
+  ``_existing_topic_tables`` 额外覆盖**遗留 ``topic_plan``**（迁移前存量库）
+  ——对外统一「话题状态机四表」口径。
 - **六 API**：``get_topic_snapshot / update_after_turn / select_proactive_recall
   / save_next_plan / take_next_plan / purge_expired``；加 ``read/write_topic_config``
   与复提记账 ``mark_topic_recalled``（2026-11-07 对抗验收残余缺口②：
   投递成功计数 + 冷却升级，堵「无回应话题每 ≥6h 周期性复提」）、生命周期
-  清场 ``purge_owner / count_owner``（2026-11-12 原子 C2：账号删除三表级联）。
+  清场 ``purge_owner / count_owner``（2026-11-12 原子 C2；2026-11-13 起四表级联，含遗留 topic_plan）。
 - **关闭态零 DB**：``enabled=false`` 时六个 API 首行短路，不 ``_connect``、
   不建表、不读表。例外是每日维护 ``purge_expired(force=True)`` 与账号删除
   ``purge_owner`` / ``count_owner``（删除义务不受功能开关影响）。
@@ -1659,7 +1662,7 @@ def _existing_topic_tables(conn: sqlite3.Connection) -> set[str]:
 
 
 def purge_expired(*, now: datetime | None = None, force: bool = False) -> int:
-    """删除过期话题数据（三表，同一事务）。
+    """删除过期话题数据（四表，同一事务；含迁移前遗留 topic_plan）。
 
     - ``topic_state`` / ``thread_plan``：``expires_at < now``；
     - ``topic_meta``：``last_llm_at < cutoff``（cutoff = now - retention）
@@ -1737,7 +1740,7 @@ def _owner_where(
     """构造 owner 归属谓词：显式会话键 ∪ （可选）``owner_uid:`` 前缀。
 
     2026-11-12 终审修复：生命周期只从绑定/偏好枚举到微信会话键，漏掉
-    ``N:web:hex`` 等未知 web 键；删号必须按 owner 前缀兜底，否则话题三表
+    ``N:web:hex`` 等未知 web 键；删号必须按 owner 前缀兜底，否则话题四表
     会残留。``LIKE 'N:%'`` 不会误伤 ``N0:``（有冒号分隔）。
     """
     clauses: list[str] = []
@@ -1758,9 +1761,9 @@ def purge_owner(
     session_keys: Any, *, db_path: str | Path | None = None,
     owner_uid: int | str | None = None,
 ) -> int:
-    """按 ``session_key`` + 可选 owner 前缀清空三表。
+    """按 ``session_key`` + 可选 owner 前缀清空话题状态机四表（含遗留 topic_plan）。
 
-    生命周期删除账号专用：**不读 enabled**（删号必须删干净），三表同一
+    生命周期删除账号专用：**不读 enabled**（删号必须删干净），四表同一
     事务；空列表且无 owner_uid → 0。数据库异常**不吞**：向上抛，让生命
     周期步骤明确失败——旧实现吞成 0 会让 verify 把「没删掉」报告成「0 残留」。
     """
@@ -1787,7 +1790,7 @@ def count_owner(
     session_keys: Any, *, db_path: str | Path | None = None,
     owner_uid: int | str | None = None,
 ) -> int:
-    """统计三表中属于给定会话键或 owner 前缀的残留行数（生命周期 verify）。
+    """统计四表中属于给定会话键或 owner 前缀的残留行数（生命周期 verify）。
 
     数据库异常**不吞**：向上抛，verify 不得把 IO 错误报告成 0 残留。
     """

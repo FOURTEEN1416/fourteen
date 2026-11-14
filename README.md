@@ -8,16 +8,16 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-4930-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-5312-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **当前状态（2026-10-28 全批三端部署，生产 @ `c3ede77`）**：话题状态机批 `3fe2771`（Q1–Q6 全量落地：**Q1-B** 确定性状态机 + 每 4 轮稀疏 LLM；**Q2** 状态块 + 软化接续；**Q3-A** parked 复提三重闸；**Q4-B** 全部状态 7 天 TTL；**Q5** 免费 API 不设每日 LLM 上限；**Q6-B** 多 active 上限 3；主动线 `thread_plan` 全周期；管理端 `/api/topic-state/*` 三端点 + 前端「话题状态」区；**默认开启**，回滚走管理端显式 `topic_state.enabled=false` / `llm_judge_enabled=false`）+ 四项跟进批（4A 测试债清零 `1d444d8` / 4B CSP 行为蒸馏 `5dff923` / 4C 零 token 骰子闸 `aabc867` / 4D BreezeTTS2 设计文档 `c0a4d2c`）+ CI 修复 `165504f`（骰子测试时区对齐 + npm audit fix）+ 沉浸式方括号动作段剥离 hotfix `c3ede77` **均已部署**（health/ready 200、blob 抽验一致）。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
+> **当前状态（2026-11-14 文档清理批）**：v1.70 语音真人感根治（`voice/voice_script.py` 唯一出口 + 情绪映射补全 + `pin_character_voice.py`）**已随 `cbb82aa` 三端部署（2026-11-09）**；v1.71 Speaker 统一出口原子施工（`speaker/` 承接人设/能力/话题提示词、拆条、投递回执与双账本）与 v1.72 六路对抗验收修复（**5 high + 6 medium** 全部修复：topic 旧表清场/迁移、提醒部分受理续投、语音回执守卫与续租、跨进程 peer 互斥、广播脚本契约）**本地已提交未 push、未部署**（本地领先 `origin/main` 6 提交）。全量 **5028 通过 + 2 跳过 / 收集 5030**（317 文件），ruff 0。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
 
-> **测试口径**（后端 = 2026-10-28 全量四分块门实测，生产 @ `c3ede77`）：后端 **4256 passed + 2 skipped / 4 failed**（收集 **4263** / **266 个测试文件**；现役角色卡 **42 张**；2 跳过=`test_cache.py:297` Redis 环境 + `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑）；4 失败=**骰子闸时区族**——测试钉 UTC 主机时钟与引擎 `now_local` 差 8h，根因已由 `165504f` 时区对齐根治，五文件新鲜复跑 **128/128** 全绿、CI 绿）。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
-> 前端 `251 passed`（vitest 5.0.3，36 文件）+ `tsc --noEmit` 0 错误；ruff 全仓 0 错（`All checks passed!`）。徽章口径 **4508**（4256 Py + 251 FE + 1 标记）。
+> **测试口径**（后端 = 2026-11-13 v1.72 实测）：后端 **5028 passed + 2 skipped / 0 failed**（收集 **5030** / **317 个测试文件**；现役角色卡 **45 张**；2 跳过=`test_cache.py:297` Redis 环境 + `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑））。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> 前端 `283 passed`（vitest 5，42 文件）+ `tsc --noEmit` 0 错误；ruff 全仓 0 错。徽章口径 **5312**（5028 Py + 283 FE + 1 标记）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
 ---
@@ -77,10 +77,10 @@ python main.py
 | **主动骰子闸** | 零 token 掷骰闸（dsh-speak-up）：主动发言先掷骰、命中才进 LLM 生成，未命中零成本跳过；默认关闭、dry_run 默认开，管理端与前端配置面可调 |
 | **语音合成** | 文字回复能自动转语音发到微信。MiMo Cloud TTS（基础合成 / 语音克隆 / 音色设计），云端失败可降级 Windows SAPI 本地兜底 |
 | **记忆系统** | 会记住你说过的事（三层记忆：短期+情景+长期） |
-| **工具** | 天气、搜索、日历、计算器、提醒、时间感知等 17 个内置工具（默认注册 13 个） |
+| **工具** | 天气、搜索、日历、计算器、提醒、时间感知等 17 个内置工具（默认注册 14 个） |
 | **剧情线** | 和角色的关系可以按"剧情"推进，有支线和进度追踪 |
 | **注册准入** | 开放注册为主链路（所有人可注册），邀请码注册并存可选（2026-10-04 D13 裁决），管理员在控制台生成邀请码 |
-| **管理控制台** | React 前端，19 个页面，角色管理/语音设置/系统配置一站式 |
+| **管理控制台** | React 前端，18 个页面，角色管理/语音设置/系统配置一站式 |
 
 > **语音引擎现状**：2026-08-28 起收敛为 **MiMo Cloud 单一引擎**，
 > Edge-TTS / GPT-SoVITS / CosyVoice / Bert-VITS2 已从代码库删除。
@@ -189,16 +189,16 @@ PYTHONPATH= python -m pytest --cov=. --cov-report=html
 ├── persona_extractor/    人格提取 / PAD 检测 / 网络画像增强
 ├── security/             4 安全模块（content_safety / encryption /
 │                         pii_anonymizer / prompt_injection）
-├── tools/                内置工具（已实现 17 个，默认注册 13 个）
+├── tools/                内置工具（已实现 17 个，默认注册 14 个）
 ├── frontend/             React 管理控制台
 │   └── src/
-│       ├── api/          15 个 API 模块（按域拆分）
-│       ├── pages/        19 个页面（含 TemplatesPage / SettingsAccount）
-│       ├── store/        Zustand 5 个（authStore / characterBuilderStore / errorStore / humanizeStore / topicStateStore）
+│       ├── api/          18 个 API 模块（按域拆分）
+│       ├── pages/        18 个页面（设置页含 SettingsAccount；/templates、/psych 已重定向）
+│       ├── store/        Zustand 4 个（authStore / characterBuilderStore / errorStore / globalViewStore）
 │       ├── hooks/        React Query hooks
 │       └── components/   layout + auth + shared + common + admin + llm + storyline
-├── tests/                4256 后端测试通过 + 2 跳过 / 4 失败（骰子闸时区族，根因已由 165504f 根治；2026-10-28 实测，收集 4263 / 266 文件）+ 251 前端测试（36 文件）
-├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 42 张 = 41 策展 + 1 张 user_id=1 林挽夏克隆变体，已定性 2026-10-12）
+├── tests/                5028 后端测试通过 + 2 跳过（2026-11-13 v1.72 实测，收集 5030 / 317 文件）+ 283 前端测试（42 文件）
+├── config/               YAML 配置（角色卡 config/characters/ 为 gitignore 本地/部署投递，非公开仓内容；现役 45 张 = 41 策展 + 2026-11-08 用户自建 4 张）
 └── main.py               入口
 ```
 

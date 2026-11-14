@@ -1,8 +1,9 @@
 """ConnectorRegistry — 按 (user_id, slot) 管理微信通道连接器实例。
 
-彻底取代进程级全局 `_connector` 单例：
+用户通道的统一入口（admin 兼容层仍保留进程级 `_connector` 单例，见
+``wechat_connector.get_connector()`` 的无 user_id 分支）：
 - 每个登录用户只看得见/操作得了自己的通道
-- 一人最多 MAX_CHANNELS_PER_USER（2）条
+- 一人最多 MAX_CHANNELS_PER_USER（当前 1 条，D16 一人一 bot）
 - 全局并发上限 WECHAT_MAX_CHANNELS（默认 100）
 """
 
@@ -62,7 +63,7 @@ class ConnectorRegistry:
             owned = {s for (u, s) in self._connectors if u == uid}
             if prefer is not None:
                 # 槽位合法性双向校验：负数 slot（如 -1）旧版直通返回（-1>=上限为假），
-                # 绕开「一人最多 2 条」硬限制并落盘 slot-1/slot-2 孤儿目录
+                # 绕开「一人最多 1 条」硬限制并落盘 slot-1/slot-2 孤儿目录
                 # （审计 medium，2026-10-05 收口）。
                 if prefer < 0 or prefer >= channel_paths.MAX_CHANNELS_PER_USER:
                     raise ChannelSlotError(

@@ -286,16 +286,17 @@ class TestApplicationFactory:
         assert app.debug is (not is_production())
 
     def test_create_api_app_registers_routers(self) -> None:
-        """Verify all 8 main sub-routers are mounted.
+        """Verify representative paths from the main sub-routers are mounted.
 
-        Each of the 8 router files contributes specific endpoint paths.
-        We check for a representative path from each router.
+        api.app_factory mounts at least 11 business sub-routers (incl.
+        topic_state_router and the two announcement routers); this test checks
+        one representative path from 8 of them.
         """
         from api.app_factory import create_api_app
         app = create_api_app()
         paths = _get_route_paths(app)
 
-        # Representative paths from each of the 8 main routers
+        # Representative paths from 8 of the main routers
         expected_paths = {
             "/api/health",                # misc_router
             "/api/chat",                  # chat_router

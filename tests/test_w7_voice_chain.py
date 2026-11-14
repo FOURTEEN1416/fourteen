@@ -501,12 +501,6 @@ def test_speakers_merge_catalog(voice_env, monkeypatch):
 #  7. MiMo 路由：clone 落 catalog / set-engine 类型分明 / 合成 MIME
 # ═══════════════════════════════════════════════════════════════
 
-def _clone_provider(fake_http) -> MiMoTTSProvider:
-    _FakeSession.next_response = _FakeResponse(
-        status=200, text=json.dumps({"voice_id": "vc_route_new"}),
-    )
-    return MiMoTTSProvider(api_key="k", model="mimo-v2.5-tts-voiceclone", voice_id="")
-
 
 class _FakeUpload:
     def __init__(self, data: bytes = b"ref-audio"):

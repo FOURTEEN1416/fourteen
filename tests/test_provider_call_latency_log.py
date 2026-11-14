@@ -19,7 +19,6 @@ import re
 import httpx
 import pytest
 
-_LOGGER = "llm_provider.openai_compatible_provider"
 _MARK = "provider_call"
 
 

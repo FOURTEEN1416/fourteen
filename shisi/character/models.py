@@ -1,6 +1,8 @@
-"""角色数据模型 — Pydantic V2模型，兼容chara_card_v2/V3与十四APP prompts格式。
+"""角色数据模型 — Pydantic V2 模型，兼容 chara_card_v2/V3 与十四 APP prompts 格式。
 
-@deprecated 此模块已弃用，请使用 shisi.core.models.character_aggregate.CharacterAggregate
+本模块是角色卡解析/导入导出模型（CharaCardV2 / CharacterData / CharacterState /
+ImportResult 等）的现役真源；`shisi.core.models.character_aggregate.CharacterAggregate`
+是运行时角色聚合根（人设/情感状态），两者职责不同，不是替代关系。
 """
 
 from __future__ import annotations

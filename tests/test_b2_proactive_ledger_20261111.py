@@ -33,7 +33,6 @@ from agent_core import commitment_gate as gate
 
 USER_KEY = "2:o9cq80@im.wechat"
 OTHER_KEY = "4:o9cq80other@im.wechat"
-OWNER_ID = 2
 
 
 def _modules():

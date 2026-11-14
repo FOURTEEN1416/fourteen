@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 
-def print_banner(version: str = "v1.1") -> None:
+def print_banner(version: str = "v3.0") -> None:
     print(f"""
     ╔══════════════════════════════════╗
     ║      💕 唯一的你 — AI 系统        ║

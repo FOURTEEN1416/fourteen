@@ -420,7 +420,7 @@ def _scheduler_source() -> str:
     return SCHEDULER_PATH.read_text(encoding="utf-8")
 
 
-def test_scheduler_has_no_direct_topic_plan_api_calls():
+def test_scheduler_has_no_direct_legacy_plan_api_calls():
     src = _scheduler_source()
     for forbidden in (
         "_topic_state.take_next_plan",

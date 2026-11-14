@@ -33,7 +33,7 @@ fi
 
 if [ ! -f "${ENV_FILE}" ]; then
     log "ERROR: .env file not found at ${ENV_FILE}"
-    log "Copy deploy/.env.production to ${ENV_FILE} and fill in values."
+    log "Copy .env.example to ${ENV_FILE} and fill in values."
     exit 1
 fi
 
