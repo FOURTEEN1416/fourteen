@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-11-14 — 部署前全面检查批（零代码变更）
+
+- **触发**：用户裁决「在部署前再次进行全面检查」。对本地领先的 7 个提交（`c2a4736→bcb2a62`，B-0/B-1→B-4 + v1.71 两笔 + v1.72 + 全仓清理批）做上线前核验。**零代码变更**（仅环境修复与只读核验）。
+- **全量回归（新鲜实跑，@ `bcb2a62`）**：collect **5030**（317 文件）；八块串行 **587+654+634+759+661+702+488+543 = 5028 通过 + 2 跳过 / 0 失败**，与 collect 精确吻合；`ruff check .` 全仓 0。
+- **环境缺陷两处（本机，非代码回归）**：① 临时目录 `pytest-of-FOUR` 下 `pytest-current` 悬空符号链接导致 pytest basetemp 解析 PermissionError，本机帐号无法删除该链接（RemoveDirectoryW/DeleteFileW/takeown 均 Access Denied）→ 改用 `--basetemp` 显式目录绕开；② `data/` 目录 ACL 被先前进程写成仅 (RX,W)（无写权限），`scheduler_config.json` 写入失败使 2 例测试红 → 经 UAC 提权 icacls 恢复 `BUILTIN\Users:(OI)(CI)F` 后全绿（LOG.md 同样被写坏，已一并恢复）。两处均为本机环境问题，不随代码部署传播；服务器部署前建议先验 `data/` 可写性。
+- **契约对账**：`.env.example` 10 个键全部在代码有真实消费点（0 unmatched）；4 个 Speaker 回滚开关 + `topic_state` purge API + `scripts/topic_plan_migration.py` 全部可导入；本地 `data/sqlite.db` 只读核对：`topic_plan` 已不存在、`thread_plan` 1 行（迁移已完成态），`python scripts/topic_plan_migration.py status` 输出一致。
+- **端点内省（dev 环境实跑）**：`APIRoute 249 / 唯一路径 207 / app.routes 253`，与文档统一口径一致；12 个关键新模块静默导入全过（含 JWT dev 兜底告警，属预期）。
+- **部署增量**：相对 origin/main **118 文件 / +14999 / −1044**（含 `utils/speaker_switches.py` 新增 117 行、`topic_state` +333、`wechat_connector` +360 等）。
+- **结论**：**可部署**。待用户裁决：① `git push origin main`（7 提交）；② 服务器 `git pull` + `remote_deploy.sh`；③ 生产库 `topic_plan→thread_plan` 迁移（`scripts/topic_plan_migration.py status/up`，首次写路径也会自动迁移）。
+- **部署**：未 push、未部署、未压测（等用户指令）。
+
 ## 2026-11-13 — Speaker 对抗验收修复批（v1.72）
 
 - **触发**：用户 `/workflow 进行对抗skills进行对抗验收！！！！`。dynamic workflow 六路透镜（多用户隔离/提醒拆条/语音超时/thread_plan 迁移/账本/公共契约）→ 归并 → 每条 medium/high 独立复现 → ruff + 八块全量门禁 → 终审；run `dwfrun-cbd220a3`（原 `dwfrun-b1cfafe2` 首阶段盘点员 34 分钟零进展，判定分页器挂起后 Amend 换轨，改为确定性 `git --no-pager diff --name-status`）。
