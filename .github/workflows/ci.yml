@@ -10,7 +10,12 @@ on:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    # 2026-11-15 钉镜像：ubuntu-latest 自 2026-10-19 起灰度迁 Ubuntu 26.04，
+    # CI #612 实证仓库内 playwright 版本无 ubuntu26.04-x64 的 chromium 构建
+    # （"Playwright does not support chromium on ubuntu26.04-x64"）→ 前端 job
+    # 在装浏览器步必红。钉 24.04 恢复 #611 已知好基线；升 playwright 支持新
+    # 镜像须专项验证后再解钉。
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -57,7 +62,8 @@ jobs:
         continue-on-error: true
 
   frontend:
-    runs-on: ubuntu-latest
+    # 同 backend：playwright chromium 需与镜像配套（见上方 2026-11-15 注记）。
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -209,7 +215,8 @@ jobs:
   ff-sub-router-mount:
     # FF-016/017: 8 子路由 mount 完整性 + main_routes.py 端点零残留
     # 跑 tests/test_api_routes.py 的 14 个用例：8 子路由 parametrize + 3 单测 + 2 live HTTP 烟测
-    runs-on: ubuntu-latest
+    # 同 backend：与主 pytest 门同镜像，避免依赖分辨率差异（见上方 2026-11-15 注记）。
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 

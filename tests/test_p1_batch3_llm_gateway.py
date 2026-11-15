@@ -293,7 +293,12 @@ def test_summarizer_reuses_identical_sources_and_updates_changed_sources():
 def test_vector_search_reflection_routes_with_where():
     from shisi.memory.legacy.vector_memory import VectorMemory
 
-    vm = VectorMemory.__new__(VectorMemory)
+    # object.__new__ 绕过单例注册表：VectorMemory.__new__ 会按默认路径
+    # 复用/登记共享实例，而本测试对实例直赋的 _search 不随用例结束还原——
+    # 2026-11-15 CI 实证：同进程后跑的 test_vector_scope_guard V1 拿回
+    # 同一单例，实例属性遮蔽类方法，守卫被打哑（DID NOT RAISE）。
+    # 本测试自足：裸实例即弃，不触碰共享状态。
+    vm = object.__new__(VectorMemory)
     vm._collections = {}
     seen: list = []
 

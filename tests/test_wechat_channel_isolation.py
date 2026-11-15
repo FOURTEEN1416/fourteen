@@ -127,7 +127,7 @@ def test_get_wechat_state_requires_user_for_isolation(tmp_path, monkeypatch):
     assert st.get("bot_id") in ("", None)
 
 
-def test_restore_uses_poll_lock_dedup(monkeypatch):
+def test_restore_uses_poll_lock_dedup(monkeypatch, tmp_path):
     """多 worker：restore 对同一 (user,slot) 只应有一个进程真正启动轮询。"""
     reg = ConnectorRegistry()
     calls = {"run": 0}
@@ -149,11 +149,15 @@ def test_restore_uses_poll_lock_dedup(monkeypatch):
         "wechat_direct.wechat_connector.WeChatConnector",
         lambda user_manager=None, **kw: Dummy(kw.get("owner_user_id"), kw.get("slot", 0)),
     )
-    monkeypatch.setattr(channel_paths, "PROJECT_ROOT", Path("/tmp/wx-lock-test"))
+    # tmp_path 夹具（2026-11-15）：旧实现硬编码 /tmp/wx-lock-test——CI(Linux) 恒绿，
+    # Windows 上解析到盘根 D:\tmp，目录不存在时 mkdir 被盘根权限拒（WinError 5）
+    # 且随宿主盘是否残留 D:\tmp 而随机翻红；改夹具后跨平台自足且无残留。
+    sandbox = tmp_path / "wx-lock-test"
+    monkeypatch.setattr(channel_paths, "PROJECT_ROOT", sandbox)
     monkeypatch.setattr(
-        channel_paths, "sessions_root", lambda: Path("/tmp/wx-lock-test/data/wechat_sessions")
+        channel_paths, "sessions_root", lambda: sandbox / "data" / "wechat_sessions"
     )
-    Path("/tmp/wx-lock-test/data/wechat_sessions/1/slot0").mkdir(parents=True, exist_ok=True)
+    (sandbox / "data" / "wechat_sessions" / "1" / "slot0").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(
         channel_paths,
         "list_user_slots_with_credentials",

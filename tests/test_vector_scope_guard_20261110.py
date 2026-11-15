@@ -45,8 +45,13 @@ class _StubSM:
 
 
 def _bare_vm(monkeypatch, coll_name: str = "chat_history"):
-    """绕过 __init__（不触发 chromadb 初始化），注入哨兵集合，测试后恢复。"""
-    vm = VectorMemory.__new__(VectorMemory)
+    """绕过 __init__（不触发 chromadb 初始化），注入哨兵集合，测试后恢复。
+
+    object.__new__ 绕过单例注册表：``VectorMemory.__new__`` 会按默认路径
+    返回共享实例，先行测试遗留在单例上的实例属性（如直赋的 ``_search``）
+    会遮蔽类方法把守卫打哑（2026-11-15 CI 实证）——本文件必须自足。
+    """
+    vm = object.__new__(VectorMemory)
     coll = _RecordingColl()
     monkeypatch.setattr(vm, "_collections", {coll_name: coll}, raising=False)
     return vm, coll

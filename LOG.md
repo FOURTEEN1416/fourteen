@@ -7,6 +7,18 @@
 
 ---
 
+## 2026-11-15 — CI #612 双根因修复批（零生产代码变更）
+
+- **触发**：用户指令「GitHub好像有ci报错处理一下」。CI #612（@ `7e357a4`，部署批 push 后首跑）backend + frontend 双红；前一次绿 = #611（11-10 @ `528644e`）。
+- **取证**：GitHub API 限流窗口期以公开 Actions/Issues 页取 job 级结论与注解；限流重置后 `gh api jobs/<id>/logs` 拿全量日志双根因定案。
+- **前端根因（runner 镜像迁移）**：`ubuntu-latest` 自 2026-10-19 起灰度迁 Ubuntu 26.04（run 页 notice；#611 尚在 24.04、#612 命中 26.04）→ 仓内 playwright 版本无 `ubuntu26.04-x64` 的 chromium 构建，`bunx playwright install chromium` 步必红（`ERROR: Playwright does not support chromium on ubuntu26.04-x64`）；其前 audit（12 moderate，high 门不触发）/tsc/build/vitest 四步全过。
+- **后端根因（单例测试污染）**：`test_vector_scope_guard_20261110.py::test_v1_scoped_without_where_raises - DID NOT RAISE VectorScopeError`（82% 处 `-x` 截停，CI 单进程全量）。机制 = `VectorMemory` 按 `abs_path(chroma_path)` 进程级单例；先行文件 `test_p1_batch3_llm_gateway.py::test_vector_search_reflection_routes_with_where`（字母序 p < v）用 `VectorMemory.__new__(VectorMemory)` 取默认路径单例并**直赋实例属性 `_search = fake_search`（不随用例还原）**；V1 取回同一单例时实例属性遮蔽类方法 → 守卫被打哑。守卫实现本身无缺陷（`_where_has_owner_key(None)` 恒 False、开关默认开）。守卫测试系本批 `c2a4736`（B-0）首次入库 → 首次与污染源在 CI 单进程同进程相遇。
+- **为什么本地全量一直绿**：八块分块跑把两文件分进块 6（NR=134）与块 4（NR=252）→ 不同进程。Windows 同序连跑本地复现红（DID NOT RAISE）→ 修复后 31/31 绿：与 OS/依赖版本无关，纯执行顺序问题。「本地绿 CI 红」第三类根因（继依赖漂移、UTC 时区之后：**分块掩盖的单进程顺序污染**）。
+- **修复**：① 污染源与 `_bare_vm` 均改 `object.__new__(VectorMemory)` 绕过单例注册表（裸实例即弃，测试自足，防同类复发）；② `test_wechat_channel_isolation.py:156` 硬编码 `/tmp/wx-lock-test` 改 `tmp_path` 夹具——本机 `D:\tmp` 被清理后盘根 mkdir WinError 5 令本地块 7 单红（CI Linux 不受影响，属跨平台可移植性修复）；③ ci.yml backend / frontend / ff-sub-router-mount 钉 `runs-on: ubuntu-24.04`（恢复 #611 已知好镜像；升 playwright 支持 26.04 须专项验证后再解钉）；④ `frontend/bun.lock` 补录 `driver.js` 依赖声明——package.json 自 v1.60（`cbdaf96`）起声明但 lock 漏锁，`CI=true bun install --frozen-lockfile` 实测报 `lockfile had changes, but lockfile is frozen`（当前 CI bun 版本未强制 frozen 故侥幸绿，属随 bun 升级会引爆的潜在地雷）；补录后 frozen install 实测 exit 0。
+- **WSL CI 同构复现基建（批内沉淀）**：全新 venv（unpinned 上界解析出 pytest 9.2.0 / pydantic 2.14.3 / SQLAlchemy 2.1.8 等 CI 同款）+ TZ=UTC + 单进程无 `-x` 全量；chroma 默认 embedding 首用联网下载 onnx 模型在 China 网络假死（py-spy 栈 = `EpollSelector.select`，实测 ~10KB/s）→ 拷 Windows `~/.cache/chroma`（167M）入 WSL 后跑通。
+- **验证**：本地八块 **587+654+634+759+661+702+488+543 = 5028 通过 + 2 跳过 / 0 失败**（317 文件，与 v1.72 基线逐块精确吻合）；WSL CI 同构全量 **4917 通过 + 25 跳过 / 0 失败**（26:37；克隆无角色卡 → persona 参数化少 90 例 + fresh 环境多 23 跳过，即 CI 预期口径；**覆盖 CI `-x` 82% 截停后从未执行的尾段 18%，无隐藏红**）；ruff 0；前端 bun 1.4.4 本地 install(frozen)/tsc/build/vitest 全绿。
+- **部署**：仅测试与 workflow 变更（零生产代码），push 后服务器 `git pull` 对齐 A 档即可，生产服务无需重启。
+
 ## 2026-11-14 — 部署前全面检查批（零代码变更）
 
 - **触发**：用户裁决「在部署前再次进行全面检查」。对本地领先的 7 个提交（`c2a4736→bcb2a62`，B-0/B-1→B-4 + v1.71 两笔 + v1.72 + 全仓清理批）做上线前核验。**零代码变更**（仅环境修复与只读核验）。
