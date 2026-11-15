@@ -1276,3 +1276,11 @@ equire() in MessageList.tsx even though MessageList is unused
 - **未删除（明确登记，避免误判漏删）**：`frontend/src/components/admin/HumanizeSection.tsx`、`frontend/src/components/admin/TopicStateSection.tsx` 及其 store（`humanizeStore`/`topicStateStore`）与专测**保留**——它们原挂载于被删运维页，现无挂载点；是否随 D-B 一并退役超出本任务书列举范围，交主控裁决。
 - **可恢复性**：全部为 git 跟踪文件，`git show <commit>^:<path>` 可取回；无数据删除（无 schema/DB 写）。
 - **效果**：`/settings/proactive` 全链清零（页面/路由/侧栏/守卫条目/内容组件/专测）；账号页只剩「协议与同意 / 我的数据 / 注销账号」三块；回复模式改由「我 × 角色」快照承载（D-C）。
+
+## 2026-11-15 — 收尾批：data/knowledge 累积测试垃圾清理（untracked，gitignore 全覆盖）
+
+- **对象**：`data/knowledge/sources/<test-cid>.json` + `.json.lock` + `data/knowledge/<test-cid>.json`（BM25 派生索引）三件套 × **157 对**，另有非卡死派生索引 8 个（索引在、真源不在、非现存卡 id）。
+- **依据**：conftest `isolate_runtime_state_files` 此前不含 knowledge store（`character_knowledge_service._DEFAULT_INDEX_DIR` / `source_store._DEFAULT_ROOT` / 单例构造），角色设置/注销/公开覆盖等用例的测试角色（「Bob 的卡」「Alice 的卡」等夹具命名）每次全量都把真源+索引写进真实 `data/knowledge/`，随跑次累积。本批同步补 conftest 沙箱（根治再发）。
+- **删除前核验**：① 全部候选与 `config/characters` 真实卡 id **零重叠**（45 卡 + default）；② 今日 17 对 birthtime=今日全量跑时刻，uuid4 新建**非覆写**，零数据损失；③ 第一版孤儿清理曾把 39 个真实卡卡派生索引（无上传源、仅卡名/锚点 chunk 的合法态）误判为垃圾——「真实卡重叠即中止」断言拦截，人工复核后保留；④ 删除脚本走 UTF-8 落盘文件执行（bash 内联中文匹配三次跑出 157/0/105 的编码不稳定教训，见 LOG 本批条目）。
+- **可恢复性**：全部为 gitignore 未跟踪文件，git 历史无轨迹；测试角色由夹具随时可再造，派生索引由 `ensure_index` 重建——无需备份。
+- **终态**：sources=1553 / 派生索引=1592 / 孤儿=39（全为真实卡合法派生）；标记残留 0、今日残留 0。

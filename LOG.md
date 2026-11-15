@@ -7,6 +7,17 @@
 
 ---
 
+## 2026-11-15 — 仓库收尾批（测试卫生 + 状态文件污染清理，零生产代码变更）
+
+- **触发**：用户指令「再次整理一下仓库，做一下收尾」。对部署批 + CI 修复批之后的仓库做整理与收口。
+- **发现①（conftest 隔离缺口）**：本地全量跑后 `data/knowledge/` 出现 51 个当日新写文件——**知识库真源与派生索引不在 conftest 沙箱清单**。取证：`character_knowledge_service._DEFAULT_INDEX_DIR = data/knowledge`（索引 `<cid>.json` 与 `sources/` 真源同根）+ `source_store._DEFAULT_ROOT` + 单例 `get_knowledge_service()` 构造即烤路径；角色设置/注销/公开覆盖等用例实例化默认服务即直写真实目录。**零数据损失**（17 个今日文件 birthtime=今日创建时刻=两轮全量跑时段，uuid4 新建非覆写）；单例注释里预留的 `AI_GF_KNOWLEDGE_INDEX_DIR` 测试钩子从未接线。
+- **发现②（历史积攒）**：以测试内容标记（Bob 的卡/全局活跃卡/名字是bob/称呼她bob）全扫 1721 个真源文件，命中 **157 对**测试角色垃圾（真源+`.lock`+派生索引三件套），与 `config/characters` 真实卡 id **零重叠**。
+- **修复（conftest）**：`isolate_runtime_state_files` 补 knowledge store 三处重定向（两常量 + 单例重置），与 hot_topics 同域同型防线；格式沿既有事故注记风格。
+- **清理**：① 157 对标记垃圾（含今日 17 对）三件套全删；② 孤儿索引（索引在、真源不在）47 个中 **39 个为真实卡卡派生知识**（卡名/锚点 chunk，无上传源=合法态）保留，8 个非卡死派生索引删除——第一版脚本曾把 39 个合法卡派生索引当垃圾，**断言拦截后人工复核放行**（「真实卡 id 重叠即中止」判据起了作用）；终态 sources=1553 / 索引=1592 / 孤儿=39（全合法）。③ TEMP basetemp 目录 ×17（两轮全量 + 复现轮产物）、`frontend/dist`（本地 build 产物）、`.ruff_cache` 删除。
+- **教训（工具层）**：bash 双引号内传中文标记做 `python -c` 匹配，**同一命令三次跑出 157/0/105 三个结果**——终端编码对中文参数不稳定（有时 intact 有时 mojibake），shell 内联中文匹配不可信；改 UTF-8 脚本文件落盘 + `python -I` 执行后行为确定（105 全中）。删除类操作一律走脚本文件。
+- **验证**：conftest 补丁语法 AST 校验过；标记残留 0、今日残留 0、孤儿 39 全合法；`git ls-files` 对 data/ 零命中（gitignore 全覆盖，DELETION_LOG 按 untracked 类别登记）；README 徽章 `Tests-5312` 与现口径一致不动；受影响面（conftest 全量沙箱行为）随下轮全量自然覆盖——本批零生产代码、测试计数不变（5028+2 / 收集 5030）。
+- **文档收尾**：AGENTS v1.73 版本头 + 修订历史行（v1.72 追注「已随整链三端部署 @ 7e357a4」）；QA Owner Map 行与 §4.3 质量门槛的 stale 引用刷新（83e8321→316afeb）；HANDOFF 顶栏快照重写（部署 @ 7e357a4 / A 档 @ 316afebc / CI #613 绿）+ 已闭环的「待用户裁决 push/部署」条目删除。
+
 ## 2026-11-15 — CI #612 双根因修复批（零生产代码变更）
 
 - **触发**：用户指令「GitHub好像有ci报错处理一下」。CI #612（@ `7e357a4`，部署批 push 后首跑）backend + frontend 双红；前一次绿 = #611（11-10 @ `528644e`）。

@@ -295,6 +295,29 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
     except Exception:
         pass
 
+    # 知识库真源与派生索引（2026-11-15 收尾批实证）：`character_knowledge_service`
+    # 默认 `_DEFAULT_INDEX_DIR = data/knowledge`（派生索引 `<cid>.json` 与
+    # `sources/` 真源子目录同根），`source_store` 另有独立默认 `_DEFAULT_ROOT`；
+    # 单例 `get_knowledge_service()` 构造一次即把路径烤进实例。角色设置/注销/
+    # 公开覆盖等用例实例化默认服务即直写真实 data/knowledge——本机一次全量
+    # 实锤新增 17 对「Bob 的卡」测试角色真源+索引（uuid4 新建、零覆写、零
+    # 数据损失，但随跑次累积；gitignore 掩盖）。与上方 hot_topics 同域补齐，
+    # 三处一并：两常量 + 单例重置（构造期已预留 AI_GF_KNOWLEDGE_INDEX_DIR
+    # 测试钩子，注释宣称 conftest 据此收口，实际一直未补）。
+    try:
+        from shisi.knowledge import character_knowledge_service as _cks
+        from shisi.knowledge import source_store as _sstore
+
+        monkeypatch.setattr(
+            _cks, "_DEFAULT_INDEX_DIR", sandbox / "knowledge", raising=False,
+        )
+        monkeypatch.setattr(
+            _sstore, "_DEFAULT_ROOT", sandbox / "knowledge" / "sources", raising=False,
+        )
+        monkeypatch.setattr(_cks, "_knowledge_service", None, raising=False)
+    except Exception:
+        pass
+
     # shisi 迁移/角色存储/收藏转发（2026-11-07 对抗验收 High 缺口）：
     # create_api_app() 无参调用 setup_shisi(run_migrate=True) 时 db_path=None，
     # run_migrations(None) 会落到 shisi.migrations._DB_DEFAULT（真实
