@@ -14,6 +14,7 @@
 - **实施（六域 92 文件）→ 独立验收 19 条高优先 → 修复轮 6 组并行**：全部 19 条闭环 + 五项用户裁决落地（回声守卫白名单重设计/无绑定即跳过/昵称逐行判别迁移+JSONL 备份/一个冷停窗口打包/免费限流优化+nex-n2.6 接入）。修复轮另抓出 2 个真缺陷：网关 `api_base` 缺省需回落 `DEFAULT_PROVIDER_CONFIG`（否则 hermetic 构造全跳过）、回声剥除误伤招呼正文（生产原句「哈喽 你刚说的那个咳」回归钉死，`ECHO_INTIMACY_LEXICON` 扩招呼词且白名单回声不剥）。
 - **验证**：定向 568 例 + 全量八块 328 文件块级全绿（收集 **5238**；首轮 5 失败=4 处测试侧写错 + 网关 api_base 回归，均已修正复跑）+ ruff 0（仅并行进程 `out/` 未跟踪产物 5 错，非本批）+ 前端 vitest **284/42** + tsc 0。 nex 凭据经 `~/.zcode/v2/provider_config.json`（Mosi - Nex N2.6，api.mosi.cn 实测 OpenAI 兼容 `/v1` 可用且 `nex-n2.6` 在列）搬入本地 `.env`/local overlay，**未回显未入 git**。
 - **未决（下一窗口）**：生产停机窗口执行——冷停 → 四库备份 → `scripts/migrate_time_columns_to_utc.py --apply` → `scripts/purge_e2e_accounts.py --apply`（wbtest1027/TEST）→ `scripts/retire_tool_call_log.py --apply` → 代码部署 → 健康核验。**次序硬约束：先迁移后启动新代码**（`utils/time_caliber.py` 版本闸生产 fail-closed）。安全闸（未成年防护）按用户裁决暂缓。
+- **生产窗口执行（2026-11-22 凌晨，全部完成）**：冷停（MainPID=0）→ 四库冷备 integrity ok → UTC 迁移 `--apply`（sqlite **2252** + agent_plane **7584**；回收站 791 对全配对）→ 测试账号 9/14 删除（13 面 SQL 级零残留；角色维度 affinity 65/vital 2/recycle 24/diary 3 一并清除；命名空间规则匹配不到 `wbtest1027`（前缀后跟数字），故用显式 `--user-id`，与演练一致）→ tool_call_log DROP（0 行）→ nex 环境变量写入服务器 `.env`（不回显）→ `remote_deploy.sh`（前端 729ms、nginx reload、启动）。**核验**：/api/health 200、/api/ready 200、openapi **208/250**（与本地一致）、重启后 apscheduler 噪声 0 行、0 ERROR、链 `agnes→nex→zhipu→xunfei→baidu`、4 文件 blob 三端一致。**教训**：健康/openapi 核验必须直连 `127.0.0.1:8000`——**8001 是 fastrun 容器**（docker-proxy），本轮误探 8001 一度误判「路由缺失」；冷停闸在真实窗口按设计拦下未过期租约（等服务端重试到租约过期即通过）。
 
 ---
 

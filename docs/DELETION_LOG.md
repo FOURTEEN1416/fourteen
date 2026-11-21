@@ -1,5 +1,86 @@
 # Code Deletion Log
 
+## [2026-11-22] e2e/测试命名空间账号清理批（脚本 `scripts/purge_e2e_accounts.py`）
+
+### 依据
+- 主动线治理审计：历史 ASE 索引键含 e2e/wbtest 账号，死会话每 5 分钟
+  写 vital_signs、烧决策 LLM 与 post-draft judge；测试账号无命名空间约束。
+- 本批为**一次性数据清理**，不改变正常账号注销 API 的语义。
+
+### 目标账号
+- user_id=9，username=`(显式指定)`
+- user_id=14，username=`TEST`
+
+### 删除范围（4 库 + 控制面/通道/ASE/私有角色实例逐表计数）
+- **users.db**
+  - `announcement_reads`: 0
+  - `character_achievements`: 0
+  - `consent_records`: 2
+  - `operator_prefs`: 0
+  - `user_active_characters`: 2
+  - `user_sessions`: 2
+  - `users`: 2
+  - `wechat_bindings`: 1
+  - `wechat_channel_sessions`: 2
+  - `wechat_peer_preferences`: 0
+- **sqlite.db**
+  - `affinity_audit`: 36
+  - `affinity_records`: 65
+  - `affinity_unlocks`: 0
+  - `chat_history`: 71
+  - `daily_summaries`: 3
+  - `emotion_stage_state`: 2
+  - `fact_deletion_watermarks`: 24
+  - `memory_extraction_progress`: 2
+  - `memory_recycle_bin`: 24
+  - `pending_intents`: 0
+  - `reflections`: 0
+  - `reminders`: 0
+  - `thread_plan`: 1
+  - `topic_meta`: 0
+  - `topic_state`: 0
+  - `user_character_overrides`: 0
+  - `user_character_settings`: 3
+  - `user_facts`: 8
+  - `user_humanize`: 0
+  - `user_identity_map`: 0
+  - `user_persona`: 0
+  - `user_persona_snapshots`: 0
+  - `user_proactive_config`: 0
+  - `user_profile`: 1
+  - `user_reply_mode`: 0
+  - `vital_signs_state`: 2
+- **agent_plane.db**
+  - `event_ledger`: 580
+- **runtime_plane.db**
+  - `rows`: 93
+- **character_instances**
+  - `achievements`: 20
+  - `cards`: 2
+  - `knowledge`: 1
+- **ase_states**
+  - `index_rows`: 2
+- **wechat_channels**
+  - `connectors`: 0
+  - `disk_dirs`: 2
+- **scheduler_config.json**
+  - `throttle_entries`: 6
+
+### 备份（`/opt/ai-girlfriend/data/archive/purge_e2e_20261122_012853`）
+- `/opt/ai-girlfriend/data/agent_plane.db` → `/opt/ai-girlfriend/data/archive/purge_e2e_20261122_012853/agent_plane.db`（integrity_check=ok）
+- `/opt/ai-girlfriend/data/runtime_plane.db` → `/opt/ai-girlfriend/data/archive/purge_e2e_20261122_012853/runtime_plane.db`（integrity_check=ok）
+- `/opt/ai-girlfriend/data/sqlite.db` → `/opt/ai-girlfriend/data/archive/purge_e2e_20261122_012853/sqlite.db`（integrity_check=ok）
+- `/opt/ai-girlfriend/data/users.db` → `/opt/ai-girlfriend/data/archive/purge_e2e_20261122_012853/users.db`（integrity_check=ok）
+- `scheduler_config.json` → `/opt/ai-girlfriend/data/archive/purge_e2e_20261122_012853/scheduler_config.json`（JSON 配置快照；含将被清除的 throttle 账本段）
+
+### 验证
+- 删除后跨表残留扫描：**0**（0 = 零残留；-1 = 读数失败按残留处理）
+- 二次执行：目标集合为空（幂等）。
+- 不含聊天正文、密钥或 token；仅计数与账号 id。
+
+**Reversible**: 从上述备份恢复 4 库与 `scheduler_config.json` 即可回滚（恢复前先停服务）。
+
+
 ## [2026-11-21] 可观测性批：tool_call_log 零引用表退役（迁移脚本已备，本轮未执行 DROP）
 
 ### 结论
