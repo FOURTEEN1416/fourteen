@@ -48,6 +48,33 @@ QR_LOGIN_TIMEOUT_S = 480
 QR_MAX_REFRESHES = 5
 QR_POLL_INTERVAL = 1
 
+# ── 死会话治理（2026-11-21）──
+# 显式连接状态机：旧实现只有 status=connected/idle/error 的散装字符串，
+# -14 后直接在轮询循环里自动扫码重登（无上限、无终态、失败不回写状态）。
+# 六个状态是通道生命周期的唯一口径：任何状态写入都必须经 _set_auth_state()。
+AUTH_STATE_IDLE = "idle"              # 未启动 / 已正常停止
+AUTH_STATE_CONNECTING = "connecting"  # 登录进行中（用户扫码或凭证探测）
+AUTH_STATE_CONNECTED = "connected"    # 轮询健康、可收发
+AUTH_STATE_DEGRADED = "degraded"      # 近期 -14 / 鉴权失败，仍在重试窗口
+AUTH_STATE_NEEDS_REAUTH = "needs_reauth"  # 终态：凭证已确认失效，必须用户重新扫码
+AUTH_STATE_DISABLED = "disabled"      # 用户主动停用（desired=disabled）
+AUTH_STATES = frozenset(
+    {
+        AUTH_STATE_IDLE,
+        AUTH_STATE_CONNECTING,
+        AUTH_STATE_CONNECTED,
+        AUTH_STATE_DEGRADED,
+        AUTH_STATE_NEEDS_REAUTH,
+        AUTH_STATE_DISABLED,
+    }
+)
+# -14 连续累计达到该值才进入非交互自动重认证；之前只做短退避重试。
+MAX_AUTH_FAILURES = 3
+# 自动重认证最多探测几轮（每轮 login(interactive=False)，绝不生成二维码）。
+MAX_REAUTH_ROUNDS = 3
+# 每轮自动重认证前的退避（秒）；长度必须覆盖 MAX_REAUTH_ROUNDS。
+REAUTH_BACKOFF_S = (5, 15, 30)
+
 # ── 消息轮询 ──
 LONG_POLL_TIMEOUT = 35
 MAX_CONSECUTIVE_FAILURES = 5
@@ -492,7 +519,65 @@ def token_window_state(owner_user_id: int | str, slot: int = 0) -> dict:
     except Exception:  # noqa: BLE001
         return result
 
-# ═══════════════════════════════════════════════════════════════
+
+# 语音出站的「会话死」状态集合（2026-11-21 死会话治理）：终态会话上任何
+# 发送都不可能成功，而语音还要先烧一次 TTS 合成 + CDN 上传。
+_VOICE_DEAD_SESSION_STATES = frozenset({AUTH_STATE_NEEDS_REAUTH, AUTH_STATE_DISABLED})
+
+# 语音出站的「窗口死」探针状态集合：dead 之外，empty/missing（从未有过
+# 窗口）对语音同样必败（空 context_token 发送 = prepare failed）。比文本/
+# 媒体闸（``_auth_send_blocked`` 只拦 dead，宁宽勿误）更紧——语音烧的是
+# TTS，死会话上白烧只会产生「日志成功、用户零接收」的静默失败。
+_VOICE_DEAD_WINDOW_STATES = frozenset({"dead", "empty", "missing"})
+
+
+def voice_send_blocked(
+    owner_user_id: int | str | None,
+    slot: int = 0,
+    *,
+    kind: str = "语音",
+    session_state: str = "",
+) -> bool:
+    """语音出站 auth 闸（模块级唯一 owner，无连接实例上下文也可用）。
+
+    ``send_voice_clip_to`` 与主动语音直发路径没有连接器实例，无法复用实例
+    方法 ``_auth_send_blocked``；本函数以**落盘状态 + token 窗口探针**做
+    同源判定，实例调用方（``_drain_outbox``）把内存态经 ``session_state``
+    传入叠加。命中只记一条 warning，由调用方按失败收尾、不重试（防风暴）。
+
+    判据（任一命中即拦）：
+    ① 会话处于 needs_reauth / disabled 终态（内存态优先，其次 state.json）；
+    ② context token 窗口 dead / empty / missing——语音必被平台拒收，不烧 TTS。
+    owner 未知（None）时不拦（宁宽勿误，与 ``_auth_send_blocked`` 一致）。
+    """
+    if owner_user_id is None:
+        return False
+    state = str(session_state or "")
+    if state not in _VOICE_DEAD_SESSION_STATES:
+        try:
+            st = load_session_state(int(owner_user_id), int(slot))
+            state = str(st.get("auth_state") or st.get("status") or "")
+        except Exception:  # noqa: BLE001 —— 状态读不到按未知放行
+            state = ""
+    if state in _VOICE_DEAD_SESSION_STATES:
+        logger.warning(
+            "[wx][step=voice_gate_blocked] kind=%s owner=%s slot=%s reason=session_%s",
+            kind, owner_user_id, slot, state,
+        )
+        return True
+    try:
+        window = token_window_state(owner_user_id, slot)
+    except Exception:  # noqa: BLE001 —— 探针故障按未知放行
+        return False
+    if window.get("state") in _VOICE_DEAD_WINDOW_STATES:
+        logger.warning(
+            "[wx][step=voice_gate_blocked] kind=%s owner=%s slot=%s reason=token_window_%s",
+            kind, owner_user_id, slot, window.get("state"),
+        )
+        return True
+    return False
+
+# ═══════════════════════════════════════════════
 #  「一句一句发」拆条（上限 2 条，2026-10-12 用户裁决收敛）
 #
 #  2026-09-19 用户反馈：「一个正常人，怎么会一次性发那么回一大段？」
@@ -1086,15 +1171,23 @@ def _send_audio_file_message(to, audio_data_b64, file_name, context_token,
 
 def send_voice_clip_to(to, audio_bytes, fmt="mp3", *, context_token="",
                        token="", base_url=DEFAULT_BASE_URL,
-                       duration_ms=3000) -> tuple[bool, str]:
+                       duration_ms=3000,
+                       owner_user_id: int | str | None = None,
+                       slot: int = 0) -> tuple[bool, str]:
     """无连接实例的语音投递（主动线 / 一次性脚本共用唯一入口）。
 
     与 ``WeChatConnector.send_voice_clip`` 同一套形态决策：默认音频文件卡片，
     ``WECHAT_NATIVE_VOICE_BUBBLE=1`` 才走原生气泡。返回 ``(ok, reason)``，
     reason 不含用户隐私。
+    2026-11-21 死会话治理：带 owner 上下文时先过语音 auth 闸
+    （``voice_send_blocked``）——needs_reauth/disabled 终态或 context token
+    窗口已死（dead/empty/missing）的会话直接拒发。调用方应在**合成前**用
+    同一闸判定，避免白烧 TTS。
     """
     if not audio_bytes:
         return False, "empty_audio"
+    if voice_send_blocked(owner_user_id, slot, kind="语音"):
+        return False, "auth_blocked"
     try:
         audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
         if native_voice_bubble_enabled():
@@ -1286,6 +1379,11 @@ class WeChatConnector:
         self._credentials_path = credentials_path or (
             str(self.session_dir / "credentials.json") if self.session_dir else CREDENTIALS_PATH
         )
+        # 2026-11-21 死会话治理：只有「本通道自有」的凭证文件才允许在终态删除。
+        # 未显式传 credentials_path 且无 session_dir 的旧构造会落到用户主目录的
+        # 全局凭证（~/.weixin_cow_credentials.json）——那不是本通道的资产，
+        # 绝不能因一次 -14 就删除开发机/运维机的共享凭证。
+        self._owns_credentials_file = bool(credentials_path) or self.session_dir is not None
         self._state_path = state_path or (
             str(self.session_dir / "state.json") if self.session_dir else str(_STATE_FILE)
         )
@@ -1301,6 +1399,18 @@ class WeChatConnector:
         self.bot_id = ""
         self.started_at = 0
         self._stop = False
+        # 2026-11-21 死会话治理：显式状态机 + 重认证记账（字段全部落 state.json）。
+        self._stop_reason = ""
+        # 是否允许交互式扫码 login。默认 False —— 只有用户主动 start_login()
+        # 才置 True；restore_on_boot / 自动重连一律非交互，绝不自动弹二维码。
+        self.allow_interactive_login = False
+        self.auth_state = AUTH_STATE_IDLE
+        self.auth_failures = 0
+        self.reauth_attempts = 0
+        self.last_error = ""
+        self.reauth_required_at = 0.0
+        # 终态标记：needs_reauth 后 run()/stop() 均不得覆盖状态文件。
+        self._terminal_state = False
         self._get_updates_buf = ""
         # P1-审查 item26：去重表 / context_tokens / _last_user_id / 计数
         # 都在 _msg_executor 多线程里被读写，旧实现裸奔（OrderedDict 的
@@ -1359,6 +1469,198 @@ class WeChatConnector:
         else:
             _save_qr_to_file(qrcode_url, status)
 
+    # ── 死会话治理：状态机 / 重认证 / 终态（2026-11-21） ──
+
+    def _set_auth_state(self, state: str, *, error: str | None = None,
+                        persist: bool = True) -> dict:
+        """写入显式连接状态（唯一状态写入口，同时落 state.json）。
+
+        旧实现状态散落在 login/run/_poll_loop 各自的 `_merge_session_state`
+        字面量里，互相覆盖（例如轮询 -14 分支不清 connected）。本方法保证
+        每次状态迁移都同步 connected/status/auth_state/重认证记账五个字段。
+        """
+        if state not in AUTH_STATES:
+            raise ValueError(f"非法连接状态: {state!r}")
+        self.auth_state = state
+        if error is not None:
+            self.last_error = str(error)[:500]
+        updates = {
+            # 只有 connected 才是「在线」；degraded/needs_reauth 一律不算。
+            "connected": state == AUTH_STATE_CONNECTED and bool(self.token),
+            "status": state,
+            "auth_state": state,
+            "auth_failures": int(self.auth_failures),
+            "reauth_attempts": int(self.reauth_attempts),
+            "last_error": self.last_error,
+            "reauth_required_at": self.reauth_required_at or None,
+        }
+        if persist:
+            return self._merge_session_state(updates)
+        return updates
+
+    def _auth_send_blocked(self, kind: str) -> bool:
+        """回复链/媒体链的确定性 auth 闸。
+
+        两道判据：
+        ① 本连接器已进入 needs_reauth 终态（或已停止）——任何发送都不可能成功；
+        ② 磁盘 context_token 窗口已死（``token_window_state == "dead"``）——
+           平台必然回 ``prepare failed``，烧一次网络请求不如直接失败并留痕。
+        ``missing/empty/error`` 不拦（宁宽勿误：探针故障不能阻断真实收发）。
+        """
+        if self._terminal_state or self.auth_state == AUTH_STATE_NEEDS_REAUTH:
+            logger.warning(
+                "[wx][step=auth_gate_blocked] kind=%s owner=%s state=%s reason=needs_reauth",
+                kind, self.owner_user_id, self.auth_state,
+            )
+            return True
+        if self.owner_user_id is None:
+            return False
+        try:
+            window = token_window_state(self.owner_user_id, self.slot)
+        except Exception:  # noqa: BLE001 —— 探针故障按未知放行
+            return False
+        if window.get("state") == "dead":
+            logger.warning(
+                "[wx][step=auth_gate_blocked] kind=%s owner=%s slot=%s reason=token_window_dead",
+                kind, self.owner_user_id, self.slot,
+            )
+            return True
+        return False
+
+    def _delete_invalid_credentials(self) -> bool:
+        """删除本通道已确认无效的 credentials（不碰非本通道的全局凭证）。"""
+        if not self._owns_credentials_file:
+            logger.info(
+                "跳过删除非本通道凭证 path=%s owner=%s",
+                self._credentials_path, self.owner_user_id,
+            )
+            return False
+        try:
+            path = Path(self._credentials_path)
+            if path.exists():
+                path.unlink()
+                logger.info(
+                    "已删除无效微信凭证 owner=%s slot=%s", self.owner_user_id, self.slot
+                )
+                return True
+        except OSError as e:  # noqa: BLE001
+            logger.warning("删除无效微信凭证失败 path=%s: %s", self._credentials_path, e)
+        return False
+
+    def _record_channel_state_event(self, state: str, **extra: Any) -> None:
+        """写 agent_plane ``channel_state`` 事件（终态审计；失败不阻断治理）。"""
+        if self.owner_user_id is None:
+            return
+        try:
+            from shisi.agent_plane.event_ledger import (
+                EVENT_CHANNEL_STATE,
+                default_ledger,
+            )
+
+            payload = {
+                "state": state,
+                "owner_user_id": int(self.owner_user_id),
+                "slot": int(self.slot),
+                "auth_failures": int(self.auth_failures),
+                "reauth_attempts": int(self.reauth_attempts),
+                "last_error": self.last_error,
+                "at": time.time(),
+            }
+            payload.update(extra)
+            default_ledger().append(
+                session_key=f"channel:{int(self.owner_user_id)}:{int(self.slot)}",
+                event_type=EVENT_CHANNEL_STATE,
+                actor="wechat_connector",
+                payload=payload,
+            )
+        except Exception as e:  # noqa: BLE001 —— 账本故障不能阻断通道治理
+            logger.debug("写 channel_state 事件失败 owner=%s: %s", self.owner_user_id, e)
+
+    def _auto_reauth(self) -> bool:
+        """-14 达阈值后的**非交互**自动重认证。
+
+        只探测内存 token / 已保存 credentials（``login(interactive=False)``），
+        **不生成二维码、不等待扫码**。每轮前按 ``REAUTH_BACKOFF_S`` 退避，
+        最多 ``MAX_REAUTH_ROUNDS`` 轮；全部失败由调用方进入 needs_reauth 终态。
+        """
+        self._set_auth_state(AUTH_STATE_DEGRADED, error=self.last_error or "session_expired")
+        for attempt in range(1, MAX_REAUTH_ROUNDS + 1):
+            if self._stop:
+                return False
+            delay = REAUTH_BACKOFF_S[min(attempt - 1, len(REAUTH_BACKOFF_S) - 1)]
+            if delay > 0:
+                time.sleep(float(delay))
+            if self._stop:
+                return False
+            self.reauth_attempts = attempt
+            self._merge_session_state({"reauth_attempts": attempt})
+            logger.info(
+                "自动重认证第 %d/%d 轮（非交互探测，不生成二维码）owner=%s slot=%s",
+                attempt, MAX_REAUTH_ROUNDS, self.owner_user_id, self.slot,
+            )
+            if self.login(interactive=False):
+                self.auth_failures = 0
+                self.reauth_attempts = 0
+                self._set_auth_state(AUTH_STATE_CONNECTED, error="")
+                logger.info("自动重认证成功 owner=%s slot=%s", self.owner_user_id, self.slot)
+                return True
+        logger.error(
+            "自动重认证 %d 轮全部失败 owner=%s slot=%s", MAX_REAUTH_ROUNDS,
+            self.owner_user_id, self.slot,
+        )
+        return False
+
+    def _enter_needs_reauth(self, *, error: str = "") -> None:
+        """进入 needs_reauth 终态（幂等）：本连接器生命周期内不再自动重登。
+
+        动作顺序（每一步都必须发生，失败不互相阻断）：
+        清 token → 删无效凭据 → 写状态文件 → 写 channel_state 事件 →
+        释放 presence → registry.retire（摘对象 + 释放 poll flock）→ 置 _stop。
+        """
+        if self._terminal_state:
+            return
+        self._terminal_state = True
+        self.token = ""
+        self.bot_id = ""
+        self.auth_state = AUTH_STATE_NEEDS_REAUTH
+        self.last_error = str(error or "session_expired")[:500]
+        self.reauth_required_at = time.time()
+        self._delete_invalid_credentials()
+        self._merge_session_state(
+            {
+                "connected": False,
+                "status": AUTH_STATE_NEEDS_REAUTH,
+                "auth_state": AUTH_STATE_NEEDS_REAUTH,
+                "bot_id": "",
+                "last_error": self.last_error,
+                "reauth_required_at": self.reauth_required_at,
+                "reauth_attempts": int(self.reauth_attempts),
+                "auth_failures": int(self.auth_failures),
+            }
+        )
+        self._record_channel_state_event(AUTH_STATE_NEEDS_REAUTH)
+        if self.owner_user_id is not None:
+            try:
+                from proactive import runtime_plane
+
+                runtime_plane.presence_release(int(self.owner_user_id), int(self.slot))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("终态释放 presence 失败 owner=%s: %s", self.owner_user_id, e)
+            try:
+                from wechat_direct.connector_registry import get_registry
+
+                get_registry().retire(
+                    int(self.owner_user_id), int(self.slot), connector=self
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("终态回收 registry 失败 owner=%s: %s", self.owner_user_id, e)
+        self._stop = True
+        self._stop_reason = AUTH_STATE_NEEDS_REAUTH
+        logger.error(
+            "[wx][step=needs_reauth] 通道进入终态，需用户重新扫码 owner=%s slot=%s error=%s",
+            self.owner_user_id, self.slot, self.last_error,
+        )
+
     def _resolve_send_target(self, to_user: str, kind: str) -> str:
         """主动发送目标解析（P1-审查 item30：隔离护栏补腿）。
 
@@ -1379,6 +1681,8 @@ class WeChatConnector:
         target = self._resolve_send_target(to_user, "文本")
         if not target:
             return False
+        if self._auth_send_blocked("文本"):
+            return False
         with self._peer_lock(self._session_key(target)):
             return self._send_text_unlocked(text, target)
 
@@ -1391,6 +1695,8 @@ class WeChatConnector:
         """
         target = self._resolve_send_target(to_user, "typing")
         if not target or not self.token:
+            return False
+        if self._auth_send_blocked("typing"):
             return False
         try:
             resp = _send_typing(
@@ -1412,6 +1718,8 @@ class WeChatConnector:
         target = self._resolve_send_target(to_user, "文本")
         if not target or not self.token:
             logger.warning("微信主动发送失败: 无目标用户或未登录")
+            return False
+        if self._auth_send_blocked("文本"):
             return False
         try:
             context_token = self._get_context_token(target)
@@ -1444,6 +1752,8 @@ class WeChatConnector:
         if not target or not self.token or not audio_bytes:
             logger.warning("发送语音失败: 无目标用户或未登录或无音频数据")
             return False
+        if self._auth_send_blocked("语音"):
+            return False
         try:
             audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
             context_token = self._get_context_token(target)
@@ -1475,6 +1785,8 @@ class WeChatConnector:
         target = self._resolve_send_target(to_user, "语音")
         if not target or not self.token or not audio_bytes:
             logger.warning("发送语音失败: 无目标用户或未登录或无音频数据")
+            return False
+        if self._auth_send_blocked("语音文件"):
             return False
         name = file_name or f"voice.{(fmt or 'mp3').lstrip('.')}"
         try:
@@ -1532,6 +1844,8 @@ class WeChatConnector:
         if not target or not self.token or not image_bytes:
             logger.warning("发送图片失败: 无目标用户或未登录或无图片数据")
             return False
+        if self._auth_send_blocked("图片"):
+            return False
         try:
             image_b64 = base64.b64encode(image_bytes).decode("utf-8")
             context_token = self._get_context_token(target)
@@ -1560,6 +1874,8 @@ class WeChatConnector:
         if not target or not self.token or not emoji_md5:
             logger.warning("发表情失败: 无目标用户或未登录或无表情数据")
             return False
+        if self._auth_send_blocked("表情"):
+            return False
         try:
             context_token = self._get_context_token(target)
             resp = _send_emoji_message(
@@ -1582,8 +1898,14 @@ class WeChatConnector:
 
     # ── 登录 ──
 
-    def login(self):
-        """登微信 — 先放二维码，再试保存的凭证（per-user 路径）"""
+    def login(self, interactive: bool = True):
+        """登微信 — 试现有 token / 保存的凭证；``interactive`` 控制是否允许扫码。
+
+        - ``interactive=True``（默认，兼容旧调用）：无可用凭证时生成二维码并
+          等待扫码。**只应由用户主动 ``start_login()`` 触发**。
+        - ``interactive=False``：非交互探测——只验证内存 token / credentials，
+          不生成二维码、不写 qrcode.json、不等待扫码。用于 -14 自动重认证。
+        """
         # D16：扫码人身份预载——凭证里有 ilink_user_id 就先装上（token 快速
         # 重连路径不触碰凭证字段，但新建实例必须能识别本人）
         try:
@@ -1598,29 +1920,34 @@ class WeChatConnector:
                 test = _get_updates("", self.token, self.base_url, timeout=5)
                 if test.get("ret") != -14 and test.get("errcode") != -14:
                     logger.info("现有 token 仍有效，重连成功")
-                    self._save_local_qr("", "connected")
+                    self.auth_failures = 0
+                    self.reauth_attempts = 0
+                    self._set_auth_state(AUTH_STATE_CONNECTED, error="")
+                    if interactive:
+                        self._save_local_qr("", "connected")
                     return True
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"快速重连测试失败: {e}")
-            logger.warning("现有 token 已失效，需要重新扫码")
+            logger.warning("现有 token 已失效，尝试保存的凭证")
             self.token = ""
 
-        # 1. 先生成二维码（确保前端随时能读到）
+        # 1. 只有交互式登录才生成二维码（自动重认证绝不弹码）
         qrcode = None
         qrcode_url = ""
-        try:
-            qr_resp = _fetch_qr_code(self.base_url)
-            qrcode = qr_resp.get("qrcode", "")
-            qrcode_url = qr_resp.get("qrcode_img_content", "")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(f"生成二维码失败（不影响后续）: {e}")
+        if interactive:
+            try:
+                qr_resp = _fetch_qr_code(self.base_url)
+                qrcode = qr_resp.get("qrcode", "")
+                qrcode_url = qr_resp.get("qrcode_img_content", "")
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"生成二维码失败（不影响后续）: {e}")
 
-        # 2. 有二维码就先写到文件
-        if qrcode_url:
-            self._save_local_qr(qrcode_url, "waiting")
-            print(f"\n二维码已就绪: {qrcode_url}\n")
-        else:
-            self._save_local_qr("", "idle")
+            # 2. 有二维码就先写到文件（前端随时可读）
+            if qrcode_url:
+                self._save_local_qr(qrcode_url, "waiting")
+                print(f"\n二维码已就绪: {qrcode_url}\n")
+            else:
+                self._save_local_qr("", "idle")
 
         # 3. 再试保存的凭证
         creds = _load_credentials(self._credentials_path)
@@ -1634,14 +1961,26 @@ class WeChatConnector:
                 test = _get_updates("", self.token, self.base_url, timeout=3)
                 if test.get("ret") != -14 and test.get("errcode") != -14:
                     logger.info("保存的凭证有效，跳过扫码")
-                    self._save_local_qr(qrcode_url or "", "connected")
+                    self.auth_failures = 0
+                    self.reauth_attempts = 0
+                    self._set_auth_state(AUTH_STATE_CONNECTED, error="")
+                    if interactive:
+                        self._save_local_qr(qrcode_url or "", "connected")
                     return True
             except Exception as e:  # noqa: BLE001
                 logger.debug(f"凭证快速测试失败: {e}")
-            logger.warning("保存的凭证已过期，等待扫码登录")
+            logger.warning("保存的凭证已过期")
             self.token = ""
 
-        # 4. 没有可用凭证 → 等扫码
+        # 4. 非交互探测没有可用凭证：直接失败，由调用方决定是否进入终态
+        if not interactive:
+            logger.info(
+                "非交互登录探测失败：无可用 token/凭证（不生成二维码）owner=%s slot=%s",
+                self.owner_user_id, self.slot,
+            )
+            return False
+
+        # 5. 没有可用凭证 → 等扫码（仅交互式）
         if not qrcode:
             logger.error("没有二维码也没有凭证，无法登录")
             return False
@@ -1713,6 +2052,8 @@ class WeChatConnector:
                 self.bot_id = bot_id
                 self.scanner_wxid = str(status_resp.get("ilink_user_id") or "")
                 self._reconnect_attempts = 0
+                self.auth_failures = 0
+                self.reauth_attempts = 0
                 # D-D（2026-11-08 用户裁决）写侧根治：扫码登录是 D16「谁扫码谁聊」
                 # 的唯一正规入口，必须在此补写 wechat_bindings（幂等 upsert，挂该
                 # 用户当前激活角色）。否则「先网页激活 → 后扫码登录」的用户在
@@ -1722,10 +2063,9 @@ class WeChatConnector:
                 from wechat_direct.binding_sync import sync_login_binding
 
                 sync_login_binding(self.owner_user_id, self.scanner_wxid)
+                self._set_auth_state(AUTH_STATE_CONNECTED, error="")
                 self._merge_session_state({
-                    "connected": True,
                     "bot_id": bot_id,
-                    "status": "connected",
                     "last_activity": time.time(),
                 })
                 return True
@@ -1734,7 +2074,7 @@ class WeChatConnector:
 
         print("二维码登录超时")
         self._save_local_qr("", "expired")
-        self._merge_session_state({"connected": False, "status": "idle"})
+        self._set_auth_state(AUTH_STATE_IDLE, error="qr_login_timeout")
         return False
 
     # ── 主循环 ──
@@ -1746,20 +2086,34 @@ class WeChatConnector:
             # 仅遗留全局通道写入单例；用户通道用 Registry
             _connector = self
 
-        if not self.login():
-            logger.error("微信登录失败 owner=%s", self.owner_user_id)
+        # 2026-11-21 死会话治理：交互式扫码只允许用户主动 start_login() 触发。
+        # restore_on_boot / 其他自动恢复路径 allow_interactive_login=False，
+        # 无有效凭证时直接进入 needs_reauth 终态，绝不自行生成二维码等待扫码。
+        interactive = bool(getattr(self, "allow_interactive_login", False))
+        self._set_auth_state(AUTH_STATE_CONNECTING)
+        if not self.login(interactive=interactive):
+            logger.error("微信登录失败 owner=%s slot=%s", self.owner_user_id, self.slot)
             self._reconnect_attempts += 1
-            self._merge_session_state({
-                "connected": False,
-                "status": "error",
-                "reconnect_attempts": self._reconnect_attempts,
-            })
+            if self._terminal_state:
+                # login() 内部已判定凭证失效并进入终态：不得覆盖。
+                return
+            if self._stop_reason == AUTH_STATE_DISABLED:
+                # 用户在扫码等待期间主动断开：保持 disabled，不得回写成 degraded。
+                self._set_auth_state(AUTH_STATE_DISABLED)
+                return
+            if not interactive:
+                # 非交互启动没有可用凭证 → 终态；等待用户从网页重新扫码。
+                self._enter_needs_reauth(error="no_valid_credentials")
+                return
+            # 用户主动扫码但未完成（超时/过期）：保持可再次发起，不进入终态。
+            self._set_auth_state(AUTH_STATE_DEGRADED, error=self.last_error or "login_failed")
+            self._merge_session_state({"reconnect_attempts": self._reconnect_attempts})
             return
 
         self.started_at = time.time()
+        self.auth_failures = 0
+        self._set_auth_state(AUTH_STATE_CONNECTED, error="")
         self._merge_session_state({
-            "connected": True,
-            "status": "connected",
             "started_at": self.started_at,
             "bot_id": self.bot_id,
             "reconnect_attempts": 0,
@@ -1775,14 +2129,23 @@ class WeChatConnector:
                 target=self._outbox_thread, name="wx-outbox", daemon=True,
             ).start()
         self._poll_loop()
-        # 轮询退出时持久化断开状态（保留 started_at 方便排查）
-        self._merge_session_state({"connected": False, "status": "disconnected"})
+        # 2026-11-21 死会话治理：needs_reauth 是终态，run 尾段绝不能把它覆盖成
+        # disconnected（旧实现正是这一行让终态永远显示不出、只能靠人肉发现）。
+        if self._terminal_state:
+            logger.info(
+                "轮询因终态退出，保留 needs_reauth owner=%s slot=%s",
+                self.owner_user_id, self.slot,
+            )
+            return
+        # 正常退出：用户主动停用写 disabled，其余（线程被外部 stop）同样按停用处理。
+        self._set_auth_state(
+            AUTH_STATE_DISABLED if self._stop_reason == "disabled" else AUTH_STATE_IDLE
+        )
 
     def _poll_loop(self):
         """消息轮询循环"""
         logger.info("进入消息轮询")
         consecutive_failures = 0
-        session_errors = 0
 
         while not self._stop:
             # 块2缺陷B：desired state 是跨进程全局真源 —— 用户从任一 worker 停用
@@ -1798,6 +2161,7 @@ class WeChatConnector:
                             self.owner_user_id, self.slot,
                         )
                         self._stop = True
+                        self._stop_reason = "disabled"
                         with suppress(Exception):
                             rp.presence_release(self.owner_user_id, self.slot)
                         # 回收本进程持有的实例与 flock —— 否则别的 worker 重连
@@ -1837,27 +2201,41 @@ class WeChatConnector:
 
                 if ret != 0 or errcode != 0:
                     if errcode == -14 or ret == -14:
-                        session_errors += 1
-                        if session_errors < 3:
+                        # 2026-11-21 死会话治理：-14 累计 auth_failures 并落状态；
+                        # 达阈值走非交互 _auto_reauth()（绝不生成二维码）；
+                        # 全部失败进入 needs_reauth 终态并退出循环。
+                        self.auth_failures += 1
+                        self._set_auth_state(
+                            AUTH_STATE_DEGRADED,
+                            error=f"session_expired ret={ret} errcode={errcode}",
+                        )
+                        self._merge_session_state(
+                            {"auth_failures": int(self.auth_failures)}
+                        )
+                        if self.auth_failures < MAX_AUTH_FAILURES:
                             logger.warning(
-                                "会话错误 -14（%d/3），%d秒后重试...",
-                                session_errors, RETRY_DELAY * session_errors
+                                "会话错误 -14（%d/%d），%d秒后重试...",
+                                self.auth_failures, MAX_AUTH_FAILURES,
+                                RETRY_DELAY * self.auth_failures,
                             )
-                            time.sleep(RETRY_DELAY * session_errors)
+                            time.sleep(RETRY_DELAY * self.auth_failures)
                             continue
-                        logger.error("会话过期（连续%d次-14），重新登录...", session_errors)
-                        self._save_local_qr("", "idle")
-                        if os.path.exists(self._credentials_path):
-                            os.remove(self._credentials_path)
-                        if self.login():
+                        logger.error(
+                            "会话过期（累计%d次-14），进入非交互自动重认证...",
+                            self.auth_failures,
+                        )
+                        if self._auto_reauth():
                             self._get_updates_buf = ""
                             consecutive_failures = 0
-                            session_errors = 0
+                            self.auth_failures = 0
                             continue
-                        else:
-                            logger.error("重新登录失败，5分钟后重试")
-                            time.sleep(300)
-                            continue
+                        # 用户在自动重认证期间主动断开：保持 disabled，不得进入终态。
+                        if self._stop_reason == AUTH_STATE_DISABLED:
+                            break
+                        self._enter_needs_reauth(
+                            error=f"session_expired ret={ret} errcode={errcode}"
+                        )
+                        break
 
                     consecutive_failures += 1
                     logger.error(f"轮询错误: ret={ret} errcode={errcode}")
@@ -1868,7 +2246,10 @@ class WeChatConnector:
                     continue
 
                 consecutive_failures = 0
-                session_errors = 0
+                # 健康轮询：从 degraded 回到 connected（并清空失败累计）。
+                if self.auth_failures or self.auth_state != AUTH_STATE_CONNECTED:
+                    self.auth_failures = 0
+                    self._set_auth_state(AUTH_STATE_CONNECTED, error="")
 
                 new_buf = resp.get("get_updates_buf", "")
                 if new_buf:
@@ -2057,34 +2438,47 @@ class WeChatConnector:
                         else self.owner_user_id
                     )
                     character_id = str(row.get("character_id") or "")
-                    # 2026-11-13 对抗验收 H5：CLAIM_TTL=60s 短于慢速 TTS 合成 +
-                    # 上传，行会被另一宿主 reap 后重投 → 同一用户收两条语音。
-                    # 语音宿主在合成前与发送前各续租 180s（真实崩溃仍可回收）。
-                    try:
-                        rp.renew_claim(cid, ttl=180.0, claimed_by=claimed_by)
-                    except Exception as e:  # noqa: BLE001
-                        logger.debug("[wx][step=outbox_renew_failed] %s", e)
-                    with self._peer_lock(session_key):
-                        audio = synthesize_audio(text, character_id, owner)
-                        if audio is None:
-                            ok = False
-                        else:
-                            try:
-                                rp.renew_claim(cid, ttl=180.0, claimed_by=claimed_by)
-                            except Exception as e:  # noqa: BLE001
-                                logger.debug("[wx][step=outbox_renew_failed] %s", e)
-                            audio_bytes, fmt = audio
-                            ok, _err = send_voice_clip_to(
-                                peer,
-                                audio_bytes,
-                                fmt,
-                                context_token=self._get_context_token(peer) or "",
-                                token=self.token,
-                                base_url=self.base_url,
-                                duration_ms=min(
-                                    60000, max(1500, len(text) * 180)
-                                ),
-                            )
+                    # 2026-11-21 死会话治理：语音 auth 闸——needs_reauth/disabled
+                    # 终态或 context token 窗口已死（dead/empty/missing）的会话，
+                    # 合成与发送都不做（TTS/上传高成本，死会话上只会白烧），
+                    # 直接按投递失败收尾，不 requeue（防重试风暴）。旧实现只查
+                    # bot token（self.token），拦不住死会话。
+                    if voice_send_blocked(
+                        self.owner_user_id, self.slot,
+                        kind="主动语音", session_state=self.auth_state,
+                    ):
+                        ok = False
+                    else:
+                        # 2026-11-13 对抗验收 H5：CLAIM_TTL=60s 短于慢速 TTS 合成 +
+                        # 上传，行会被另一宿主 reap 后重投 → 同一用户收两条语音。
+                        # 语音宿主在合成前与发送前各续租 180s（真实崩溃仍可回收）。
+                        try:
+                            rp.renew_claim(cid, ttl=180.0, claimed_by=claimed_by)
+                        except Exception as e:  # noqa: BLE001
+                            logger.debug("[wx][step=outbox_renew_failed] %s", e)
+                        with self._peer_lock(session_key):
+                            audio = synthesize_audio(text, character_id, owner)
+                            if audio is None:
+                                ok = False
+                            else:
+                                try:
+                                    rp.renew_claim(cid, ttl=180.0, claimed_by=claimed_by)
+                                except Exception as e:  # noqa: BLE001
+                                    logger.debug("[wx][step=outbox_renew_failed] %s", e)
+                                audio_bytes, fmt = audio
+                                ok, _err = send_voice_clip_to(
+                                    peer,
+                                    audio_bytes,
+                                    fmt,
+                                    context_token=self._get_context_token(peer) or "",
+                                    token=self.token,
+                                    base_url=self.base_url,
+                                    duration_ms=min(
+                                        60000, max(1500, len(text) * 180)
+                                    ),
+                                    owner_user_id=self.owner_user_id,
+                                    slot=self.slot,
+                                )
                     accepted_body = text if ok else ""
                 elif kind in ("proactive", "important_date", "manual", "reminder"):
                     from utils.humanize_delivery import direct_send_proactive_result
@@ -2194,6 +2588,16 @@ class WeChatConnector:
         依赖（Speaker.express 内才 import 本模块），因此必须方法内局部 import。
         """
         from speaker import DeliveryResult, Speaker, UtteranceIntent
+
+        # 2026-11-21 死会话治理：回复链确定性 auth 闸——needs_reauth 终态或
+        # token 窗口已死的会话不可能送达，直接返回未受理，不拆条不触网。
+        if self._auth_send_blocked("回复"):
+            reason = (
+                "auth_needs_reauth"
+                if (self._terminal_state or self.auth_state == AUTH_STATE_NEEDS_REAUTH)
+                else "auth_token_window_dead"
+            )
+            return DeliveryResult(accepted=False, channel="reply", reason=reason)
 
         session_key, character_id = self.humanize_scope(peer)
         humanize = None
@@ -2995,7 +3399,16 @@ class WeChatConnector:
             self._messages_today = 0
             self._last_day = today
         return {
-            "connected": bool(self.token),
+            # 2026-11-21：degraded / needs_reauth / disabled 一律不显示在线。
+            # idle+token 的旧构造（未走 run()）仍按在线兼容。
+            "connected": bool(self.token)
+            and self.auth_state
+            not in (AUTH_STATE_DEGRADED, AUTH_STATE_NEEDS_REAUTH, AUTH_STATE_DISABLED),
+            "auth_state": self.auth_state,
+            "auth_failures": int(self.auth_failures),
+            "reauth_attempts": int(self.reauth_attempts),
+            "reauth_required_at": self.reauth_required_at or None,
+            "last_error": self.last_error,
             "uptime_seconds": time.time() - self.started_at if self.started_at else 0,
             "bot_id": self.bot_id,
             "last_activity": self._last_activity or None,
@@ -3010,9 +3423,12 @@ class WeChatConnector:
         （utils.async_utils.get_shared_loop），无全局池可关（P1-审查 item27）。
         """
         self._stop = True
+        self._stop_reason = self._stop_reason or AUTH_STATE_DISABLED
         # 关闭本实例的消息处理线程池
         with suppress(Exception):
             self._msg_executor.shutdown(wait=False)
-        # 持久化断开状态（per-user 或遗留全局）
-        self._merge_session_state({"connected": False, "status": "disconnected"})
+        # 2026-11-21：needs_reauth 是终态，stop() 不得覆盖（否则前端永远
+        # 看不到「需重新扫码」，又回到只能靠人肉发现死会话）。
+        if not self._terminal_state:
+            self._set_auth_state(AUTH_STATE_DISABLED)
         logger.info("微信连接器已停止 owner=%s slot=%s", self.owner_user_id, self.slot)

@@ -163,6 +163,9 @@ class TestFinalReview:
         meta = dict(tools.calls[0][1]["_meta"])
         call_id = meta.pop("call_id", "")
         assert call_id and len(call_id) == 12
+        # 称呼闸契约扩展（2026-11-21）：_meta 增 character_id —— 角色卡自称
+        # 改存 user_calls_ai 的闸门按它判别角色；本用例未绑角色，恒为空串。
+        assert meta.pop("character_id", None) == ""
         assert meta == {
             "session_key": "1:peer@im.wechat", "user_id": 7,
             "turn_id": "", "message_id": "",

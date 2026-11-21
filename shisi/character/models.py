@@ -13,6 +13,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from utils.local_time import now_utc_naive
+
 
 class CardFormat(str, Enum):
     CHARA_CARD_V2 = "chara_card_v2"
@@ -96,8 +98,8 @@ class CharacterState(BaseModel):
     emotion_stage: str = "陌生"
     avatar_url: str | None = None
     tags: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=now_utc_naive)
+    updated_at: datetime = Field(default_factory=now_utc_naive)
 
 
 class ImportResult(BaseModel):

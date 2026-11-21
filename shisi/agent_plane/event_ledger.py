@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Iterable
 from contextlib import closing
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,7 @@ EVENT_TOOL_RESULT = "tool_result"
 EVENT_PROMPT_SLOTS = "prompt_slots"
 EVENT_PROACTIVE_SEND = "proactive_send"
 EVENT_PROACTIVE_SKIP = "proactive_skip"
+EVENT_CHANNEL_STATE = "channel_state"
 EVENT_ERROR = "error"
 
 KNOWN_TYPES = frozenset(
@@ -51,6 +52,7 @@ KNOWN_TYPES = frozenset(
         EVENT_PROMPT_SLOTS,
         EVENT_PROACTIVE_SEND,
         EVENT_PROACTIVE_SKIP,
+        EVENT_CHANNEL_STATE,
         EVENT_ERROR,
     }
 )
@@ -121,6 +123,25 @@ class ReplayBundle:
         }
 
 
+def _owner_scope_clauses(
+    owner_id: int, session_keys: list[str] | None,
+) -> tuple[list[str], list[Any]]:
+    """owner 归属 SQL 子句：普通会话键 ``uid:%`` + 通道状态键 ``channel:uid:%``。
+
+    ``channel_state`` 事件（wechat_connector 写入）的 session_key 是
+    ``channel:<uid>:<slot>``，不带 ``uid:`` 前缀；账号删除/验证必须同时覆盖，
+    否则删号后通道审计行永久残留而零残留扫描看不见。
+    """
+    uid = int(owner_id)
+    clauses = ["session_key LIKE ?", "session_key LIKE ?"]
+    params: list[Any] = [f"{uid}:%", f"channel:{uid}:%"]
+    explicit = [k for k in (session_keys or []) if k]
+    if explicit:
+        clauses.append(f"session_key IN ({','.join('?' * len(explicit))})")
+        params.extend(explicit)
+    return clauses, params
+
+
 class EventLedger:
     def __init__(self, db_path: Path | str):
         self._db_path = Path(db_path)
@@ -138,8 +159,13 @@ class EventLedger:
 
     @staticmethod
     def now_iso() -> str:
-        # 与项目墙钟约定一致：本地时区 ISO（可测）
-        return datetime.now().astimezone().isoformat(timespec="seconds")
+        """当前 UTC ISO（aware，``+00:00``）—— 事件账本统一口径。
+
+        选择 **aware UTC** 而非 naive：本表历史值本就带偏移（原 ``+08:00``），
+        改成 naive 会让新旧行无法按字典序可靠比较；固定 ``+00:00`` 既保留
+        offset 语义，又让 ``created_at < cutoff`` 在全表范围内保持同一基准。
+        """
+        return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self._db_path), timeout=30)
@@ -218,7 +244,7 @@ class EventLedger:
         """P1-51：账本保留策略——删除早于 retention_days 的事件行，返回删除数。
 
         旧实现只 append 不 prune，chat/tool/profile/web_disabled 全类型常驻，
-        data/agent_plane.db 无界增长。由夜间 curator 任务（02:17）每日调用。
+        data/agent_plane.db 无界增长。由夜间 curator 任务（默认 03:40）每日调用。
 
         2026-09-22：``preserve_types`` 豁免类型——``profile_update/profile_correct``
         是用户画像的**唯一写权威**（user_profile 表仅投影缓存），给它们套 30 天
@@ -226,7 +252,8 @@ class EventLedger:
         一旦丢失画像即静默清零。curator 现传入画像两类型永久保留。
         """
         days = max(1, int(retention_days))
-        cutoff = (datetime.now().astimezone() - timedelta(days=days)).isoformat(
+        # 统一 aware UTC：与 now_iso 写入口径逐字同构，字符串比较才成立。
+        cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=days)).isoformat(
             timespec="seconds"
         )
         keep = [str(t) for t in preserve_types if str(t)]
@@ -245,17 +272,12 @@ class EventLedger:
         """账号生命周期：清除该账号在账本中的全部事件行（W9）。
 
         账本键 = 完整会话键；owner 解析在本 owner 内完成——先按
-        ``"{owner_id}:"`` 前缀定位，再并入调用方提供的显式键（如 WS 四段）。
-        返回删除计数。画像事件（profile_update/profile_correct）同样属于被
-        遗忘账号的数据，一并清除（prune 的豁免只针对留存账号的画像写权威）。
+        ``"{owner_id}:"`` 与 ``"channel:{owner_id}:"`` 两个前缀定位，再并入
+        调用方提供的显式键（如 WS 四段）。返回删除计数。画像事件
+        （profile_update/profile_correct）同样属于被遗忘账号的数据，一并清除
+        （prune 的豁免只针对留存账号的画像写权威）。
         """
-        uid_prefix = f"{int(owner_id)}:"
-        explicit = [k for k in (session_keys or []) if k]
-        clauses = ["session_key LIKE ?"]
-        params: list[Any] = [uid_prefix + "%"]
-        if explicit:
-            clauses.append(f"session_key IN ({','.join('?' * len(explicit))})")
-            params.extend(explicit)
+        clauses, params = _owner_scope_clauses(owner_id, session_keys)
         sql = f"DELETE FROM event_ledger WHERE ({' OR '.join(clauses)})"
         with closing(self._conn()) as conn, conn:
             cur = conn.execute(sql, params)
@@ -264,13 +286,7 @@ class EventLedger:
     def count_owner_sessions(
         self, owner_id: int, session_keys: list[str] | None = None,
     ) -> int:
-        uid_prefix = f"{int(owner_id)}:"
-        explicit = [k for k in (session_keys or []) if k]
-        clauses = ["session_key LIKE ?"]
-        params: list[Any] = [uid_prefix + "%"]
-        if explicit:
-            clauses.append(f"session_key IN ({','.join('?' * len(explicit))})")
-            params.extend(explicit)
+        clauses, params = _owner_scope_clauses(owner_id, session_keys)
         sql = f"SELECT COUNT(*) FROM event_ledger WHERE ({' OR '.join(clauses)})"
         with closing(self._conn()) as conn:
             return int(conn.execute(sql, params).fetchone()[0])

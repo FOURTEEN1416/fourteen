@@ -1,5 +1,33 @@
 # Code Deletion Log
 
+## [2026-11-21] 可观测性批：tool_call_log 零引用表退役（迁移脚本已备，本轮未执行 DROP）
+
+### 结论
+- **审计与代码实况一致**：全仓 `grep -rn "tool_call_log" --include="*.py" --include="*.ts" --include="*.tsx" --include="*.sql"` 在移除前仅命中 `shisi/memory/legacy/structured_memory.py` 的建表语句/模块注释与 `docs/CODEMAPS/DATABASE.md`；移除建表语句后仅剩本日志、迁移脚本与文档说明。**零读取、零写入、零 API**。
+- **本地实测**：`data/sqlite.db` 表存在且 `SELECT COUNT(*) FROM tool_call_log` = **0 行**（2026-11-21 只读检查）；审计称生产同为 0 行（本机无法核验生产库）。
+- **替代能力**：`event_ledger` 的 `tool_call` / `tool_result` 事件已覆盖工具名、`call_id`、成功/失败、错误文本、耗时与回放；本批同时补齐了主链 tool loop 与画像同步直连 dispatch 的 `tool_result` 落账，不再需要独立 `tool_call_log`。
+- **本批动作**：仅新增 `scripts/retire_tool_call_log.py`（默认 dry-run，`--apply` 才备份并 DROP），并移除 `structured_memory.py` 的建表语句（防止 DROP 后下次启动复活）；**未执行任何 DROP**，本地/生产表仍在。
+
+### 后续动作（需 owner 裁决）
+1. 冷停服务 → 运行 `python scripts/retire_tool_call_log.py --dry-run` 复核行数。
+2. 确认 0 行后执行 `python scripts/retire_tool_call_log.py --apply`（自动整库备份到 `data/backups/tool_call_log_retire_<UTC时间戳>/`）。
+3. 删除后在 `data/sqlite.db` 复核 `sqlite_master` 无 `tool_call_log`，并将 `docs/CODEMAPS/DATABASE.md` 的表清单从 16 项更新为 15 项。
+
+**Reversible**: 本轮零删除；`--apply` 前自动整库备份，回滚=用备份覆盖 `data/sqlite.db` 后重启。建表语句可从 `git show HEAD~:<file>` 恢复。
+
+## [2026-11-21] 生命周期审计：0 字节库与旧种子卡「只登记不删」（建议条目，未执行删除）
+
+### 结论
+- **0 字节库**：审计称 `data/chat_history.db`、`data/memory.db` 为 0 字节且无运行时代码消费。本批按「只登记不删」处理；本机当前 `find . -name "chat_history.db" -o -name "memory.db"` **无输出**（未检出），登记为**待复核删除候选**，不进入任何删除动作。
+- **旧种子卡**：审计称生产 `characters` 表仍有 25 行旧种子卡，且仍被 `GET /api/shisi/characters`、`GET /api/shisi/persona`、`GET /api/characters/{id}/persona-card` 读取。**明确保留，不得删除**（删卡会破坏上述读端点）。本机 `data/sqlite.db` 的 `characters` / `characters_v2` 均为 0 行（本地快照与生产不同，不能据本机计数推断生产）。
+- **本批无删除**：`git status --porcelain | grep -E '^( D|D |AD|RD)'` 预期无输出；本条仅为后续清理批次提供审计线索。
+
+### 后续动作（需 owner 裁决）
+1. 在生产环境复核两个 0 字节库是否仍存在、是否真无消费者；确认后走「冷停 → 备份 → 删除文件 → 验证」流程。
+2. 25 行旧种子卡若要清理，必须先迁移/下线三个读端点，并单独登记删除清单；本批不动。
+
+**Reversible**: 本条为登记条目，无删除动作，无需回滚。
+
 ## [2026-11-14] 四域清理批：27 个零引用符号文件内删除（无整文件删除；原标 2026-11-13，与本批文档口径及「登记员复核 2026-11-14 实跑」统一）
 
 ### 依据与范围

@@ -61,6 +61,12 @@ function LiveStatusBanner() {
   }
 
   const seconds = status.uptime_seconds ?? 0
+  // 2026-11-21 死会话治理：后端显式状态机 needs_reauth 终态——必须显性提示
+  // 并提供重新扫码入口，不能再让用户看到「已连接」的假在线状态。
+  const needsReauth =
+    Boolean(status.needs_reauth) ||
+    status.status === 'needs_reauth' ||
+    status.auth_state === 'needs_reauth'
   // NEW-28①：按小时/天进位（旧实现超 1 小时显示「75 分 0 秒」不进位）
   const uptime = seconds >= 86400
     ? `${Math.floor(seconds / 86400)} 天 ${Math.floor((seconds % 86400) / 3600)} 小时`
@@ -78,11 +84,11 @@ function LiveStatusBanner() {
           <div className="flex items-center gap-2">
             <span
               className={`inline-flex h-2.5 w-2.5 rounded-full ${
-                status.connected ? 'bg-green-400' : 'bg-red-400'
+                needsReauth ? 'bg-amber-400' : status.connected ? 'bg-green-400' : 'bg-red-400'
               }`}
             />
             <span className="text-sm font-semibold text-gray-700">
-              我的微信 {status.connected ? '已连接' : '未连接'}
+              我的微信 {needsReauth ? '登录态失效' : status.connected ? '已连接' : '未连接'}
             </span>
           </div>
           <div className="flex items-center gap-3 text-xs text-gray-400">
@@ -147,6 +153,25 @@ function LiveStatusBanner() {
         </div>
       </div>
 
+      {needsReauth && (
+        <div
+          className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+          data-testid="needs-reauth-banner"
+        >
+          <span className="flex items-center gap-1.5">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+            微信登录态已失效（长时间未收到你的消息或凭证过期）。请重新扫码连接，恢复后角色才能继续收发消息。
+          </span>
+          <button
+            onClick={() => setShowQrModal(true)}
+            data-testid="reauth-btn"
+            className="rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-600"
+          >
+            重新扫码
+          </button>
+        </div>
+      )}
+
       {(() => {
         // 后端 wechat_connector 用 time.time() 记录活动时刻（**秒**），
         // 直接 new Date(秒) 会被当毫秒解析 → 显示 1970-01-21（09-19 诊断 P2）。
@@ -170,17 +195,20 @@ function LiveStatusBanner() {
       {!status.connected && (
         <div className="mt-4 rounded-xl border border-dashed border-macaron-blue/30 bg-macaron-blue-light/20 p-6 text-center stagger-item">
           <QrCode className="mx-auto h-10 w-10 text-macaron-blue/60" />
-          <p className="mt-3 text-sm font-medium text-gray-700">你尚未连接自己的微信</p>
+          <p className="mt-3 text-sm font-medium text-gray-700">
+            {needsReauth ? '微信登录态已失效' : '你尚未连接自己的微信'}
+          </p>
           <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-gray-400">
-            点击下方按钮，用你自己的微信扫码绑定（与他人通道隔离）；
-            连接成功后，你即可在微信里与角色一对一对话。
+            {needsReauth
+              ? '重新扫码后即可恢复收发消息；角色配置、记忆与数据都会保留。'
+              : '点击下方按钮，用你自己的微信扫码绑定（与他人通道隔离）；连接成功后，你即可在微信里与角色一对一对话。'}
           </p>
           <button
             onClick={() => setShowQrModal(true)}
             className="btn-macaron mx-auto mt-4 flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-medium"
           >
             <QrCode className="h-3.5 w-3.5" />
-            立即扫码连接
+            {needsReauth ? '重新扫码恢复' : '立即扫码连接'}
           </button>
         </div>
       )}

@@ -21,13 +21,16 @@ from __future__ import annotations
 
 import ast
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 from utils import topic_state as ts
 
 FIXED = datetime(2026, 11, 12, 10, 0, 0)
+# 2026-11-21 时间口径统一批：_local_now 是北京墙钟，topic_state 内部已统一
+# UTC；调度器传给计划/复提 API 的时刻应为同一瞬间的 UTC naive。
+FIXED_UTC = FIXED - timedelta(hours=8)
 KEY = "4:web:c1c1c1c1"
 CHAR = "card_c1"
 
@@ -265,7 +268,7 @@ def test_skip_save_goes_through_thread_state_with_full_params(monkeypatch):
         "api": "take",
         "session_key": KEY,
         "character_id": CHAR,
-        "now": FIXED,
+        "now": FIXED_UTC,
         "consume": False,
     }
 
@@ -278,7 +281,7 @@ def test_skip_save_goes_through_thread_state_with_full_params(monkeypatch):
         "topic": "面试",
         "intent": "问问二面结果",
         "wait_minutes": 45,
-        "planned_at": FIXED,
+        "planned_at": FIXED_UTC,
     }
     # 两次调用各构造一个 ThreadState，归属键完整。
     assert instances == [(KEY, CHAR), (KEY, CHAR)]
@@ -300,7 +303,7 @@ def test_skip_with_empty_next_consumes_injected_plan(monkeypatch):
 
     assert captured[-1]["next_plan"] == {"topic": "旧计划", "intent": "旧意图"}
     takes = _take_calls(calls)
-    assert [(t["consume"], t["now"]) for t in takes] == [(False, FIXED), (True, FIXED)]
+    assert [(t["consume"], t["now"]) for t in takes] == [(False, FIXED_UTC), (True, FIXED_UTC)]
     # 纯读 + 放弃消费；不得保存新计划。
     assert _save_calls(calls) == []
     assert instances == [(KEY, CHAR), (KEY, CHAR)]
@@ -344,7 +347,7 @@ def test_delivery_success_consume_save_and_recall_go_through_thread_state(monkey
 
     takes = _take_calls(calls)
     # 第一拍纯读；投递成功后消费。
-    assert [(t["consume"], t["now"]) for t in takes] == [(False, FIXED), (True, FIXED)]
+    assert [(t["consume"], t["now"]) for t in takes] == [(False, FIXED_UTC), (True, FIXED_UTC)]
 
     saves = _save_calls(calls)
     assert len(saves) == 1
@@ -353,12 +356,12 @@ def test_delivery_success_consume_save_and_recall_go_through_thread_state(monkey
     assert saves[0]["topic"] == "面试结果"
     assert saves[0]["intent"] == "问问二面结果"
     assert saves[0]["wait_minutes"] == 0
-    assert saves[0]["planned_at"] == FIXED
+    assert saves[0]["planned_at"] == FIXED_UTC
 
     marks = _mark_calls(calls)
     assert [(m["topic_id"], m["now"]) for m in marks] == [
-        ("tp-1", FIXED),
-        ("tp-2", FIXED),
+        ("tp-1", FIXED_UTC),
+        ("tp-2", FIXED_UTC),
     ]
     assert all(m["session_key"] == KEY and m["character_id"] == CHAR for m in marks)
     # 预读 1 + 成功消费/保存共用 1 + 记账 1。
@@ -383,7 +386,7 @@ def test_delivery_failure_does_not_consume_or_save(monkeypatch):
     )
     sched._llm_proactive_one_user(hub, KEY)
 
-    assert [(t["consume"], t["now"]) for t in _take_calls(calls)] == [(False, FIXED)]
+    assert [(t["consume"], t["now"]) for t in _take_calls(calls)] == [(False, FIXED_UTC)]
     assert _save_calls(calls) == []
     assert _mark_calls(calls) == []
 

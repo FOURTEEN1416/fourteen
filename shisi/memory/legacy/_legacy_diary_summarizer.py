@@ -10,6 +10,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from utils.local_time import now_utc_naive
+
 logger = logging.getLogger("diary_summarizer")
 
 
@@ -110,8 +112,15 @@ class DiarySummarizer:
                 with self._structured_memory.get_connection() as conn:
                     self._ensure_table(conn)
                     conn.execute(
-                        "INSERT OR REPLACE INTO daily_summaries (date, summary) VALUES (?, ?)",
-                        (date_str, summary),
+                        "INSERT OR REPLACE INTO daily_summaries (date, summary, created_at) "
+                        "VALUES (?, ?, ?)",
+                        (
+                            date_str,
+                            summary,
+                            # 2026-11-21 时间口径统一批：created_at 显式写 UTC；
+                            # date 仍是本地日标签（由 daily_maintenance 生成）。
+                            now_utc_naive().strftime("%Y-%m-%d %H:%M:%S"),
+                        ),
                     )
                     conn.commit()
             except Exception as e:  # noqa: BLE001

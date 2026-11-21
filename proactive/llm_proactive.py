@@ -784,13 +784,23 @@ def build_proactive_context(
     # 且排在【角色人设】之前（人设框架注指向本段）。
     # 2026-10-14 拟人化修正（用户质疑驱动）：禁令对象是**名字**（模型自造昵称），
     # 不是「笨蛋」「傻瓜」这类亲密呼语——后者是角色语气不是用户名，显式豁免防拟人化弱化。
-    nick = str(prof.get("nickname") or "").strip()
+    # 2026-11-21 称呼语义矫正：nickname 只有语义升级后才是「AI 对用户」的
+    # 称呼；user_calls_ai 是反向（用户对 AI），不得混用。
+    from utils.address_terms import ai_self_name_from_profile, resolve_user_address_from_profile
+
+    nick = resolve_user_address_from_profile(prof, str(character_id or ""))
+    ai_name = ai_self_name_from_profile(prof)
     parts.append(
         "【用户身份】真实用户（注册账号本人），不是角色卡世界观中的人物。"
         + (
             f"用户昵称：{nick}——对用户的称呼用这个昵称。"
-            if nick
+            if nick != "你"
             else "无已知昵称——对用户称「你」，不得另起名字。"
+        )
+        + (
+            f"用户平时叫你「{ai_name}」——这是你的称呼，不是用户的名字。"
+            if ai_name and ai_name != nick
+            else ""
         )
         + "「笨蛋」「傻瓜」这类表达亲密的呼语不受此限——那是你的语气，不是他的名字，"
         "按你的性格正常使用。"

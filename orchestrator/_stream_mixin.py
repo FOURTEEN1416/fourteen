@@ -82,6 +82,7 @@ class _StreamPipelineMixin:
         def _prepare_context(self, *args: Any, **kwargs: Any) -> Any: ...
         def _after_process(self, *args: Any, **kwargs: Any) -> Any: ...
         def _finalize_reply(self, *args: Any, **kwargs: Any) -> str: ...
+        async def _regenerate_action_only_reply(self, *args: Any, **kwargs: Any) -> str: ...
     # 后台 task 引用集合（避免被 GC 回收，asyncio.create_task 文档要求）。
     # 必须为实例变量，若为类变量会导致多实例共享同一集合引发 race condition。
     # 实际初始化在 OptimizedOrchestrator.__init__ 中完成。
@@ -174,6 +175,7 @@ class _StreamPipelineMixin:
         character_id: str,
         user_msg: str = "",
         reply_mode: str | None = None,
+        recent_assistant_messages: list[str] | None = None,
     ) -> dict[str, Any]:
         """首 token 前一次性提升增量守卫所需的全部上下文（含唯一一次称呼 I/O）。
 
@@ -213,6 +215,9 @@ class _StreamPipelineMixin:
             "forbidden": forbidden,
             "safety_check": build_safety_check((self.components or {}).get("safety")),
             "user_msg": user_msg,
+            # 2026-11-21 出站质量批（闸一/闸三）：最近 assistant 历史，流式
+            # 逐句放行前比对；已发前缀永不回滚。
+            "recent_assistant_messages": list(recent_assistant_messages or []),
         }
 
     @request_scoped_llm
@@ -377,7 +382,9 @@ class _StreamPipelineMixin:
                     # 守卫与终裁（旧实现守卫/终裁各自热读，流式下可能拿到两个模式）。
                     turn_reply_mode = ctx.get("reply_mode")
                     guard_ctx = self._build_guard_context(
-                        session_id, character_id, user_msg_clean, reply_mode=turn_reply_mode,
+                        session_id, character_id, user_msg_clean,
+                        reply_mode=turn_reply_mode,
+                        recent_assistant_messages=ctx.get("recent_assistant_messages"),
                     )
 
                     # 上游仍可流式生成。真流式下按句边下发；buffered 下攒稿后下发。
@@ -472,6 +479,28 @@ class _StreamPipelineMixin:
                     remainder = guard.finish() if guard is not None else full_reply
                     if guard is not None and guard.safety_replacement and not remainder:
                         remainder = ""
+                    # 2026-11-21 出站质量批（闸二）：真流式下动作段被逐句剥空、
+                    # 一个字都没发出去时，用 guard.raw_text 做一次同模型重生成。
+                    # 已发前缀场景绝不进入（reply 非空），符合「首屏前判定」。
+                    if (
+                        guard is not None
+                        and not reply
+                        and not guard.safety_replacement
+                    ):
+                        from utils.outbound_quality import is_action_only_reply
+
+                        if is_action_only_reply(guard.raw_text, turn_reply_mode):
+                            # ``finish()`` 对未闭合动作段会返回原文余量；这里是
+                            # 首屏前整体丢弃并重生成，不是把动作段发给用户。
+                            remainder = await self._regenerate_action_only_reply(
+                                guard.raw_text,
+                                request_llm=request_llm,
+                                system_prompt=system_prompt,
+                                history=chat_history,
+                                user_msg=user_msg_clean,
+                                reply_mode=turn_reply_mode,
+                                session_id=session_id,
+                            )
                     if guard is not None and not generation_interrupted and remainder:
                         # 供应商静默截断可观测性（设计复核 2026-10-21 条目「降级语义
                         # 不闭合」）：provider 内层超时/异常时**吞掉并正常结束**，
@@ -500,6 +529,7 @@ class _StreamPipelineMixin:
                             session_id=session_id,
                             last_turn_age_seconds=ctx.get("last_turn_age_seconds"),
                             reply_mode=turn_reply_mode,
+                            recent_assistant_messages=ctx.get("recent_assistant_messages"),
                         )
                         if should_finalize
                         else ""

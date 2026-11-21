@@ -4,7 +4,7 @@
 （本机 12/12 全绿），后续批次**不得**加 weak-term / 同义词 / 后缀拼接等扩展。
 
 **职责**：只做**文本判定**，不连库、不读环境、不写日志、不 import 其它业务
-模块（顶部 import 只允许 ``datetime.timedelta`` 与 ``now_local``）。账的读写
+模块（顶部 import 只允许 ``datetime.timedelta`` 与 ``now_utc_naive``）。账的读写
 在 :mod:`agent_core.commitments`；本模块只回答四个问题：
 
 - ``should_extract``：这句话是不是「我答应了要交付」？→ 是才登记
@@ -19,7 +19,7 @@
 
 from datetime import timedelta
 
-from utils.local_time import now_local
+from utils.local_time import now_utc_naive
 
 MIN_TERM_LEN = 2
 COMMITMENT_TTL_HOURS = 168
@@ -132,5 +132,6 @@ def should_close(detail, reply, delivered_payload=None, acted_on=False):
 
 
 def expires_at(now=None):
-    base = now if now is not None else now_local()
+    """承诺过期时刻（UTC naive；与 agent_commitments.expires_at 同口径）。"""
+    base = now if now is not None else now_utc_naive()
     return base + timedelta(hours=COMMITMENT_TTL_HOURS)

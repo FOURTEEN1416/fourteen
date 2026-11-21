@@ -1047,6 +1047,26 @@ class MemoryPipeline:
             # 3. 清理低置信度事实
             self._cleanup_low_confidence_facts()
 
+            # 3.5 数据生命周期维护（2026-11-21）：
+            #     - 回收站 TTL 出库（restore_before + 宽限期 → 物理删，先备份）
+            #     - 失效删除水位裁剪（早于最小相关 chat id 的已确认水位归档）
+            #     - 存量精确同文去重（生产 1361/1367 类重复）
+            # 维护方法缺失时跳过（旧替身/单测 fake sm 不要求实现全套）。
+            for _name in (
+                "purge_expired_recycle_bin",
+                "prune_deletion_watermarks",
+                "dedupe_exact_facts",
+            ):
+                _fn = getattr(self.sm, _name, None)
+                if not callable(_fn):
+                    continue
+                try:
+                    _receipt = _fn() or {}
+                    if _receipt.get("deleted") or _receipt.get("pruned"):
+                        logger.info("生命周期维护 %s: %s", _name, _receipt)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("生命周期维护 %s 失败: %s", _name, e)
+
             # 4. 抽取积压续跑（缺陷 C）：以持久化水位全量扫描，
             #    兜住"长期低频 / 重启前未达阈值 / 失败后无新轮"三类停摆会话
             swept = self.sweep_extraction_backlog()

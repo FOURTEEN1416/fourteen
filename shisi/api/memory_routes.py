@@ -110,6 +110,31 @@ async def forward_memory(
     return ApiResponse(data=receipt)
 
 
+@router.post("/recycle/{recycle_id}/restore", response_model=ApiResponse)
+async def restore_recycled_fact(
+    recycle_id: int,
+    _admin: tuple[int, User] = Depends(require_role("admin")),
+):
+    """恢复回收站事实（2026-11-21 生命周期补齐）。
+
+    审计实况：`memory_recycle_bin` 只有写入没有恢复入口（restored 恒 0）。
+    本端点按回收站主键恢复；`StructuredMemory.restore_fact_from_recycle`
+    已做精确同文去重（同归属已有同文时只标记 restored，不双插）。
+    """
+    from shisi.memory.legacy.structured_memory import StructuredMemory, default_db_path
+
+    sm = None
+    try:
+        sm = StructuredMemory(str(default_db_path()))
+        fact_id = sm.restore_fact_from_recycle(int(recycle_id))
+    finally:
+        if sm is not None:
+            sm.close()
+    if fact_id is None:
+        raise HTTPException(status_code=404, detail="回收站记录不存在或已恢复")
+    return ApiResponse(data={"restored_fact_id": int(fact_id)})
+
+
 @router.delete("/{memory_id}", response_model=ApiResponse)
 async def delete_memory(memory_id: str, character_id: str = "", confirm: bool = False):
     """占位端点——删除链路**未实现**。

@@ -116,6 +116,16 @@ export interface WeChatStatus {
   messages_today: number
   last_activity: string
   qr_code?: string
+  /** 2026-11-21 死会话治理：显式连接状态机 + 终态字段 */
+  status?: string
+  auth_state?: string
+  needs_reauth?: boolean
+  last_error?: string
+  reauth_required_at?: number | null
+  reauth_attempts?: number
+  auth_failures?: number
+  token_window_state?: string
+  message?: string
 }
 
 export type TrainingStatusEnum = 'idle' | 'extracting' | 'cleaning' | 'training' | 'done' | 'error' | 'stopped'

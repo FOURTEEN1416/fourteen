@@ -174,7 +174,11 @@ def load_live_hooks(session_key: str, memory: Any = None) -> LiveHooks:
                 text = str(f.get("fact") or "").strip()
                 if not text:
                     continue
-                updated = _parse_dt(f.get("updated_at"))
+                # user_facts.updated_at 是 UTC naive；读边界转北京墙钟再与 now 比，
+                # 否则 UTC+8 下会把 7 天窗整体错判 8 小时（2026-11-21 统一批）。
+                from utils.local_time import beijing_wall
+
+                updated = beijing_wall(f.get("updated_at"))
                 if updated is not None and updated < cutoff:
                     continue
                 lines.append(f"TA 说过「{_clip(text, 36)}」——还没下文，可以问问进展")

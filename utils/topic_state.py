@@ -25,8 +25,10 @@
   ``[topic_state][step=...]`` 且只打 ``action/topic_id/status/计数``，不落标题、
   锚点或用户消息原文。
 
-时钟：统一 ``utils.local_time.now_local()`` 归一为 naive 北京墙钟，落库格式
-``%Y-%m-%d %H:%M:%S``；禁止混用 ``chat_history.created_at`` 的 UTC。
+时钟：统一 ``utils.local_time.now_utc_naive()`` 归一为 naive UTC，落库格式
+``%Y-%m-%d %H:%M:%S``（与 ``chat_history.created_at`` 同口径）；本模块内部
+所有 TTL / 等待窗比较均在 UTC 下进行，读边界再由调用方本地化。唯一例外是
+``daily_llm_budget`` 的日界：按**北京自然日**重置（见 ``_beijing_day``）。
 """
 
 from __future__ import annotations
@@ -46,7 +48,7 @@ from pathlib import Path
 from typing import Any
 
 from utils import json_state
-from utils.local_time import _BEIJING, now_local
+from utils.local_time import now_utc_naive, to_utc_naive, utc_to_local_naive
 from utils.project_paths import project_path
 
 logger = logging.getLogger("utils.topic_state")
@@ -111,6 +113,8 @@ CREATE TABLE IF NOT EXISTS topic_state (
     idle_turns     INTEGER NOT NULL DEFAULT 0,
     recall_count   INTEGER NOT NULL DEFAULT 0,
     last_recalled_at TEXT NOT NULL DEFAULT '',
+    followup_count INTEGER NOT NULL DEFAULT 0,
+    last_followup_at TEXT NOT NULL DEFAULT '',
     last_active_at TEXT NOT NULL,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
@@ -153,6 +157,8 @@ __all__ = [
     "select_proactive_recall",
     "save_next_plan",
     "mark_topic_recalled",
+    "topic_followup_allowed",
+    "note_topic_followup",
     "take_next_plan",
     "purge_expired",
     "purge_owner",
@@ -232,10 +238,12 @@ def write_topic_config(**partial: Any) -> dict[str, Any]:
 
 
 def _normalize_now(now: datetime | None = None) -> datetime:
-    """统一为 naive 北京墙钟（秒级）。aware 输入先转北京再摘掉 tzinfo。"""
-    dt = now if now is not None else now_local()
-    if getattr(dt, "tzinfo", None) is not None:
-        dt = dt.astimezone(_BEIJING).replace(tzinfo=None)
+    """统一为 naive UTC（秒级）。aware 输入按真实时刻换算后摘掉 tzinfo。
+
+    naive 输入视为已经是 UTC 存储口径（与迁移后的列一致）；内部调用点已全部
+    改传 UTC，测试/外部若要传北京墙钟需先自行 ``local_naive_to_utc``。
+    """
+    dt = to_utc_naive(now) if now is not None else now_utc_naive()
     return dt.replace(microsecond=0)
 
 
@@ -248,6 +256,23 @@ def _parse_ts(value: Any) -> datetime | None:
         return datetime.strptime(str(value or ""), _TS_FMT)
     except (TypeError, ValueError):
         return None
+
+
+def _beijing_day(value: datetime | Any) -> str:
+    """UTC 时刻或存储串 → 北京自然日 ``YYYY-MM-DD``（daily_llm_budget 日界口径）。
+
+    产品语义 = 北京时间自然日（2026-11-21 时间口径统一批）：存储列与传入的
+    ``now`` 均为 UTC 口径，比较前**两端**统一经 ``utc_to_local_naive`` 转北京
+    墙钟再取日期。旧实现两端取 UTC 日，预算会在北京时间 08:00 才换日。
+    不可解析的值返回空串（调用方据此按「跨日」处理，与旧 ``[:10]`` 行为一致）。
+    """
+    if isinstance(value, datetime):
+        parsed = to_utc_naive(value)
+    else:
+        parsed = _parse_ts(value)
+        if parsed is None:
+            return ""
+    return utc_to_local_naive(parsed).strftime("%Y-%m-%d")
 
 
 def _clip(text: Any, limit: int) -> str:
@@ -478,12 +503,13 @@ def _migrate_legacy_plan_table(conn: sqlite3.Connection) -> None:
     logger.info("[topic_state][step=migrate_plan] topic_plan -> thread_plan done")
 
 
-def _ensure_recall_columns(conn: sqlite3.Connection) -> None:
-    """存量库补列（幂等，2026-11-07 v1.65.2 复提记账）：recall_count / last_recalled_at。
+def _ensure_topic_columns(conn: sqlite3.Connection) -> None:
+    """存量库补列（幂等）：recall 记账两列 + 2026-11-21 追问限两列。
 
-    存量库没有这两列时 ALTER 补上；新库由 _SCHEMA 直接带列，这里零操作。
-    读路径（``select_proactive_recall`` 的 ``ensure_schema=False`` 连接）也会
-    先调它——否则「首次读先于任何写」的部署时序会因缺列整体降级 ``[]``。
+    存量库缺列时 ALTER 补上；新库由 _SCHEMA 直接带列，这里零操作。
+    读路径（``select_proactive_recall`` / ``topic_followup_allowed`` 的
+    ``ensure_schema=False`` 连接）也会先调它——否则「首次读先于任何写」的
+    部署时序会因缺列整体降级。
     """
     cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(topic_state)")}
     if not cols:
@@ -496,6 +522,18 @@ def _ensure_recall_columns(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE topic_state ADD COLUMN last_recalled_at TEXT NOT NULL DEFAULT ''",
         )
+    if "followup_count" not in cols:
+        conn.execute(
+            "ALTER TABLE topic_state ADD COLUMN followup_count INTEGER NOT NULL DEFAULT 0",
+        )
+    if "last_followup_at" not in cols:
+        conn.execute(
+            "ALTER TABLE topic_state ADD COLUMN last_followup_at TEXT NOT NULL DEFAULT ''",
+        )
+
+
+# 旧名保留：两处既有读路径按原名调用，改名会扩大回归面。
+_ensure_recall_columns = _ensure_topic_columns
 
 
 def _recall_gap_hours(recall_count: int, base_hours: float) -> float:
@@ -554,6 +592,8 @@ def _row_to_topic(row: sqlite3.Row) -> dict[str, Any]:
         "idle_turns": _safe_int(_row_get(row, "idle_turns", 0), 0),
         "recall_count": _safe_int(_row_get(row, "recall_count", 0), 0),
         "last_recalled_at": str(_row_get(row, "last_recalled_at", "") or ""),
+        "followup_count": _safe_int(_row_get(row, "followup_count", 0), 0),
+        "last_followup_at": str(_row_get(row, "last_followup_at", "") or ""),
         "last_active_at": str(_row_get(row, "last_active_at", "") or ""),
         "created_at": str(_row_get(row, "created_at", "") or ""),
         "updated_at": str(_row_get(row, "updated_at", "") or ""),
@@ -646,7 +686,9 @@ def _snapshot_from_conn(
         "text": "",
         "next_plan": _row_to_plan(plan_row),
     }
-    snapshot["text"] = render_topic_state_block(snapshot)
+    # 传入同一 now，避免「查询基准」与「渲染基准」各取一次真实时钟
+    # （UTC 迁移后二者必须同为 UTC，否则 same_session 窗会瞬移 8 小时）。
+    snapshot["text"] = render_topic_state_block(snapshot, now=now)
     return snapshot
 
 
@@ -1179,6 +1221,15 @@ def update_after_turn(
                 "transitions": [],
             }
 
+        # 2026-11-21 主动线治理批：用户任何一轮发言都打破「未回复」态，
+        # 同话题追问计数立即清零（不按话题是否命中重置：用户已经在说话，
+        # 再按旧话题追问就是骚扰）。
+        conn.execute(
+            "UPDATE topic_state SET followup_count=0, last_followup_at='' "
+            "WHERE session_key=? AND character_id=? AND followup_count>0",
+            (key, character),
+        )
+
         # 会话内顺手清理过期行（小事务，避免表无界增长）
         conn.execute(
             "DELETE FROM topic_state WHERE session_key=? AND character_id=? AND expires_at < ?",
@@ -1283,7 +1334,8 @@ def update_after_turn(
         turns = prev_turns + 1
         prev_calls = _safe_int(_row_get(meta, "llm_calls", 0))
         prev_last = str(_row_get(meta, "last_llm_at", "") or "")
-        if prev_last and prev_last[:10] != dt.strftime("%Y-%m-%d"):
+        # 预算日界按北京自然日（两端 UTC → 北京日期再比，见 _beijing_day）。
+        if prev_last and _beijing_day(prev_last) != _beijing_day(dt):
             prev_calls = 0
         budget = int(cfg["daily_llm_budget"] or 0)
         budget_ok = budget <= 0 or prev_calls < budget
@@ -1394,7 +1446,9 @@ def select_proactive_recall(
     if not character:
         return []
     dt = _normalize_now(now)
-    if quiet_hours is not None and _in_quiet_hours(dt.hour, quiet_hours):
+    # 静默窗是**本地墙钟**语义；存储/比较已是 UTC，读边界转本地后再取 hour。
+    local_hour = utc_to_local_naive(dt).hour
+    if quiet_hours is not None and _in_quiet_hours(local_hour, quiet_hours):
         logger.debug("[topic_state][step=recall] quiet_hours")
         return []
 
@@ -1508,6 +1562,108 @@ def mark_topic_recalled(
             return bool(cur.rowcount)
     except Exception as e:  # noqa: BLE001
         logger.debug("[topic_state][step=recall_touch] degraded=%s", type(e).__name__)
+        return False
+
+
+def topic_followup_allowed(
+    session_key: str,
+    character_id: str = "default",
+    topic: str = "",
+    *,
+    now: datetime | None = None,
+    limit: int = 1,
+) -> bool:
+    """同话题未回复追问是否还有额度（2026-11-21 主动线治理批）。
+
+    判定口径：在 ``topic_state`` 里按标题（精确归一 → 文本重叠）找当前
+    active/parked 行；``followup_count >= limit`` → False。找不到行/状态机
+    关闭/读库失败 → True（fail-open，不能让资格信息缺失把主动线打哑）。
+    """
+    cfg = read_topic_config()
+    if not cfg["enabled"]:
+        return True
+    key = str(session_key or "").strip()
+    character = _character_key(character_id)
+    title = str(topic or "").strip()
+    if not key or not character or not title:
+        return True
+    dt = _normalize_now(now)
+    try:
+        with closing(_connect(ensure_schema=False, busy_timeout_ms=_READ_TIMEOUT_MS)) as conn:
+            _ensure_topic_columns(conn)
+            rows = conn.execute(
+                "SELECT * FROM topic_state WHERE session_key=? AND character_id=? "
+                "AND status IN ('active','parked') AND expires_at > ?",
+                (key, character, _ts(dt)),
+            ).fetchall()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[topic_state][step=followup] allowed_degraded=%s", type(e).__name__)
+        return True
+    matched = _find_by_title(title, [_row_to_topic(row) for row in rows])
+    if matched is None:
+        return True
+    count = _safe_int(matched.get("followup_count", 0), 0)
+    return count < max(1, int(limit))
+
+
+def note_topic_followup(
+    session_key: str,
+    character_id: str = "default",
+    topic: str = "",
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """记录一次**已投递**的同话题追问（计数 +1，写 last_followup_at）。
+
+    找不到对应话题行时按该标题补建一条 active 行——否则「模型每次换一种
+    说法复提同一件事」会因标题不精确匹配而永远逃过追问限。补建失败/状态机
+    关闭 → False（不阻塞主链）。
+    """
+    cfg = read_topic_config()
+    if not cfg["enabled"]:
+        return False
+    key = str(session_key or "").strip()
+    character = _character_key(character_id)
+    title_text = _clip(topic, 40)
+    if not key or not character or not title_text:
+        return False
+    dt = _normalize_now(now)
+    now_ts = _ts(dt)
+    try:
+        with closing(_connect(ensure_schema=True)) as conn, _write_tx(conn):
+            _ensure_topic_columns(conn)
+            rows = conn.execute(
+                "SELECT * FROM topic_state WHERE session_key=? AND character_id=? "
+                "AND status IN ('active','parked') AND expires_at > ?",
+                (key, character, now_ts),
+            ).fetchall()
+            matched = _find_by_title(title_text, [_row_to_topic(row) for row in rows])
+            if matched is None:
+                title = _clip(title_text, 20) or "未命名话题"
+                topic_id = _topic_id_for(key, character, title)
+                _insert_topic(
+                    conn,
+                    session_key=key,
+                    character_id=character,
+                    topic_id=topic_id,
+                    title=title,
+                    summary=_clip(title_text, 60),
+                    anchors=[title],
+                    mention_count=1,
+                    turn_count=0,
+                    now=dt,
+                    cfg=cfg,
+                )
+                matched = {"topic_id": topic_id}
+            cur = conn.execute(
+                "UPDATE topic_state SET followup_count=followup_count+1, "
+                "last_followup_at=?, updated_at=? WHERE session_key=? AND "
+                "character_id=? AND topic_id=?",
+                (now_ts, now_ts, key, character, str(matched["topic_id"])),
+            )
+            return bool(cur.rowcount)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[topic_state][step=followup] note_degraded=%s", type(e).__name__)
         return False
 
 
@@ -1875,7 +2031,8 @@ def _build_judge_prompt(
         return f"- [{status}] {title}" + (f"（锚点：{anchors}）" if anchors else "")
 
     lines = [
-        f"当前时间：{now.strftime('%Y-%m-%d %H:%M')}",
+        # prompt 是读边界：存储 UTC → 北京墙钟再展示（模型看到的「现在」必须是本地钟点）。
+        f"当前时间：{utc_to_local_naive(now).strftime('%Y-%m-%d %H:%M')}",
         "当前用户消息（≤300字）：" + _clip(user_message, 300),
         "当前回复（≤300字）：" + _clip(assistant_reply, 300),
         "现有话题：",
@@ -1919,7 +2076,8 @@ def should_run_llm_judge(
             if budget > 0:
                 calls = _safe_int(_row_get(meta, "llm_calls", 0))
                 last = str(_row_get(meta, "last_llm_at", "") or "")
-                if last[:10] != dt.strftime("%Y-%m-%d"):
+                # 预算日界按北京自然日（两端 UTC → 北京日期再比）。
+                if _beijing_day(last) != _beijing_day(dt):
                     calls = 0
                 if calls >= budget:
                     return False
@@ -2137,7 +2295,8 @@ def run_llm_judge(
             ).fetchone()
             calls = _safe_int(_row_get(meta, "llm_calls", 0))
             last = str(_row_get(meta, "last_llm_at", "") or "")
-            if last[:10] != dt.strftime("%Y-%m-%d"):
+            # 预算日界按北京自然日（两端 UTC → 北京日期再比）。
+            if _beijing_day(last) != _beijing_day(dt):
                 calls = 0
             calls += 1
             conn.execute(

@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import logging
+import time
+import uuid
 from typing import Any
 
 from tools.base_tool import BaseTool, ToolResult
@@ -87,7 +89,28 @@ class UpdateUserProfileTool(BaseTool):
     parameters_schema = {
         "type": "object",
         "properties": {
-            "nickname": {"type": "string", "description": "称呼/昵称；清空传空串"},
+            "nickname": {
+                "type": "string",
+                "description": (
+                    "AI 对用户的称呼（仅当用户明确自述「叫我 X」「我叫 X」时写）；"
+                    "不是用户对 AI 的称呼，禁止写角色名/卡文里的自称；清空传空串"
+                ),
+            },
+            "user_calls_ai": {
+                "type": "string",
+                "description": (
+                    "用户对 AI 的称呼（仅当用户说「叫你 X」「以后叫你 X」时写）；"
+                    "不是 AI 对用户的称呼"
+                ),
+            },
+            "clear_nickname": {
+                "type": "boolean",
+                "description": "用户否认/取消对用户的称呼时 true（清空 nickname）",
+            },
+            "clear_user_calls_ai": {
+                "type": "boolean",
+                "description": "用户否认/取消对 AI 的称呼时 true（清空 user_calls_ai）",
+            },
             "birthday": {"type": "string", "description": "生日（用户原话表述，如 腊月初一 / 11月14）"},
             "clear_birthday": {"type": "boolean", "description": "用户否认生日时 true"},
             "occupation": {"type": "string", "description": "身份/近况：上班/上学/军训/自由职业等"},
@@ -118,9 +141,15 @@ class UpdateUserProfileTool(BaseTool):
         if not session_key:
             return ToolResult(False, error="missing_session_key")
         payload: dict[str, Any] = {}
-        for k in ("nickname", "birthday", "occupation", "location", "notes"):
+        for k in ("nickname", "user_calls_ai", "birthday", "occupation", "location", "notes"):
             if k in kwargs and kwargs[k] is not None:
                 payload[k] = kwargs[k]
+        if kwargs.get("clear_nickname"):
+            payload["clear_nickname"] = True
+            payload["nickname"] = ""
+        if kwargs.get("clear_user_calls_ai"):
+            payload["clear_user_calls_ai"] = True
+            payload["user_calls_ai"] = ""
         if kwargs.get("clear_birthday"):
             payload["clear_birthday"] = True
             payload["birthday"] = ""
@@ -147,6 +176,7 @@ class UpdateUserProfileTool(BaseTool):
                 reason=reason,
                 actor="profile_tool",
                 turn_id=str((meta or {}).get("turn_id") or ""),
+                character_id=str((meta or {}).get("character_id") or ""),
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("profile ledger write failed: %s", e)
@@ -159,7 +189,7 @@ class UpdateUserProfileTool(BaseTool):
         )
         return ToolResult(True, data={
             "profile": {k: profile.get(k) for k in (
-                "nickname", "birthday", "occupation", "location",
+                "nickname", "user_calls_ai", "birthday", "occupation", "location",
                 "preferences", "commitments", "notes",
             )},
             "user_key": session_key,
@@ -461,6 +491,10 @@ PROFILE_SYNC_SYSTEM = """你是用户伴侣的**记忆管理员**（不可见角
 3. 若无值得写入的新信息 → 不要调用任何工具。
 4. 偏好/约定/生日/职业/称呼优先走 update_user_profile；细碎事实走 remember_facts。
 5. 禁止把角色自己的台词当成用户事实。
+6. 称呼方向必须分清：`nickname` 是「AI 怎么称呼用户」（仅用户自述「叫我X/我叫X」）；
+   `user_calls_ai` 是「用户怎么称呼 AI」（用户说「叫你X/以后叫你X」）。角色卡里的名字、
+   mes_example/creator_notes 里的「叫你X」都是角色自称，禁止写进 nickname。
+   用户否认称呼 → `clear_nickname` 或 `clear_user_calls_ai`，不要写空串硬凑。
 """
 
 
@@ -493,7 +527,13 @@ def _profile_sync_dispatcher() -> Any:
 
 def apply_profile_sync_calls(session_key: str, tool_calls: list[dict], sm: Any = None,
                              *, character_id: str = "", turn_id: str = "") -> list[dict]:
-    """执行智能体同步产生的 tool_calls（服务端注入 session_key）。"""
+    """执行智能体同步产生的 tool_calls（服务端注入 session_key）。
+
+    2026-11-21 可观测性批：本函数是绕开 orchestrator 的直连 dispatch 路径，
+    旧实现只执行不记 event_ledger，导致画像同步执行过的工具在因果账本里
+    完全没有记录。现在逐调用写 call + result 两条事件，``call_id`` 原样
+    透传（缺失时生成短 uuid），成功/失败与错误文本都保留。
+    """
     import json
 
     disp = _profile_sync_dispatcher()
@@ -502,6 +542,9 @@ def apply_profile_sync_calls(session_key: str, tool_calls: list[dict], sm: Any =
         fn = tc.get("function", {}) if isinstance(tc, dict) else {}
         name = str(fn.get("name") or "")
         raw = fn.get("arguments", "{}")
+        call_id = str(
+            (tc.get("id") if isinstance(tc, dict) else "") or uuid.uuid4().hex[:12]
+        )
         try:
             args = json.loads(raw) if isinstance(raw, str) else dict(raw or {})
         except Exception:  # noqa: BLE001
@@ -509,11 +552,51 @@ def apply_profile_sync_calls(session_key: str, tool_calls: list[dict], sm: Any =
         args["_meta"] = {"session_key": session_key, "character_id": character_id, "turn_id": turn_id}
         if sm is not None:
             args["structured_memory"] = sm
+        started = time.perf_counter()
         result = disp.dispatch(
             name, args, affinity_level=0,
             caller_id=str(session_key or ""),
         )
-        out.append({"name": name, "result": result.to_dict()})
+        duration_ms = (time.perf_counter() - started) * 1000.0
+        rd = result.to_dict()
+        success = bool(rd.get("success", True)) and not rd.get("error")
+        error = str(rd.get("error") or "")
+        out.append({"name": name, "result": rd})
+        # 逐调用双账：call 与 result 必须成对，provider 标记来源便于回放区分。
+        # 两段各自 try：call 落账失败不得连带吞掉 result。
+        try:
+            from shisi.agent_plane.runtime import append_tool_call_event
+
+            append_tool_call_event(
+                session_key=str(session_key or ""),
+                tool_name=name,
+                call_id=call_id,
+                provider="profile_sync",
+                success=success,
+                error=error,
+                turn_id=str(turn_id or ""),
+                character_id=str(character_id or ""),
+                args_preview=str(raw)[:200],
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("profile sync tool call ledger failed: %s", e)
+        try:
+            from shisi.agent_plane.runtime import append_tool_result_event
+
+            append_tool_result_event(
+                session_key=str(session_key or ""),
+                tool_name=name,
+                call_id=call_id,
+                provider="profile_sync",
+                success=success,
+                error=error,
+                turn_id=str(turn_id or ""),
+                character_id=str(character_id or ""),
+                result_preview=json.dumps(rd, ensure_ascii=False, default=str)[:400],
+                duration_ms=duration_ms,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("profile sync tool result ledger failed: %s", e)
     return out
 
 

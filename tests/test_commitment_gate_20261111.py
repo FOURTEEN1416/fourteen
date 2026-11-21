@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from agent_core import commitment_gate as gate
-from utils.local_time import now_local
+from utils.local_time import now_utc_naive
 
 # ---------------------------------------------------------------------------
 # 1. 冻结常量（逐字）
@@ -60,7 +60,7 @@ def test_frozen_tables_are_verbatim():
 
 
 def test_module_has_exactly_two_imports():
-    """gate 是纯函数模块：只允许 datetime.timedelta 与 now_local 两条 import。"""
+    """gate 是纯函数模块：只允许 datetime.timedelta 与 now_utc_naive 两条 import。"""
     source = Path(gate.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
@@ -69,7 +69,7 @@ def test_module_has_exactly_two_imports():
     assert isinstance(first, ast.ImportFrom) and first.module == "datetime"
     assert [a.name for a in first.names] == ["timedelta"]
     assert isinstance(second, ast.ImportFrom) and second.module == "utils.local_time"
-    assert [a.name for a in second.names] == ["now_local"]
+    assert [a.name for a in second.names] == ["now_utc_naive"]
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +235,6 @@ def test_expires_at_exact_ttl():
     assert gate.COMMITMENT_TTL_HOURS == 168
 
 
-def test_expires_at_defaults_to_now_local():
-    delta = gate.expires_at() - (now_local() + timedelta(hours=168))
+def test_expires_at_defaults_to_now_utc():
+    delta = gate.expires_at() - (now_utc_naive() + timedelta(hours=168))
     assert abs(delta.total_seconds()) < 5

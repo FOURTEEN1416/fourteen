@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, ".")
 
-from utils.local_time import now_local
+from utils.local_time import now_local, now_utc_naive
 from utils.prompt_sanitize import _extract_user_anchor_sentences
 from utils.topic_state import render_topic_state_block
 
@@ -26,11 +26,9 @@ def _utc_ago(hours: float) -> str:
     return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
 
-def _beijing_ago(hours: float) -> str:
-    # naive 北京墙钟串（topic_state._parse_ts 按 Beijing naive 解析）——
-    # datetime.now() 在 UTC 宿主是 UTC 墙钟，strftime 出来的「伪北京串」
-    # 会与 now_local 基准差 8h（run 42401562467 test_fresh_active 红）。
-    return (now_local() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+def _storage_ago(hours: float) -> str:
+    # topic_state 时间列已统一 UTC naive（2026-11-21 口径批）；渲染按存储口径解析。
+    return (now_utc_naive() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ── 1. 续聊锚点的时间窗 ───────────────────────────────────
@@ -104,7 +102,7 @@ def _topic(title: str, hours_ago: float, turns: int = 3, anchors: list[str] | No
     return {
         "title": title,
         "turn_count": turns,
-        "last_active_at": _beijing_ago(hours_ago),
+        "last_active_at": _storage_ago(hours_ago),
         "anchors": anchors or [],
     }
 

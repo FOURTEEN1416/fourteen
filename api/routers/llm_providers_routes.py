@@ -41,7 +41,7 @@ _CONFIG_PATH = project_path("config", "llm_providers.json")
 _CONFIG_LOCK = threading.Lock()
 
 # 预设供应商 key（仅作为元信息标记，前端显示"预设"徽章；不影响增删改）
-_PRESET_KEYS = {"agnes", "zhipu", "xunfei", "baidu", "deepseek"}
+_PRESET_KEYS = {"agnes", "nex", "zhipu", "xunfei", "baidu", "deepseek"}
 # 特殊选项 key（系统行为，不可删除/添加，只能改 guide）
 _SPECIAL_KEYS = {"auto", "custom"}
 

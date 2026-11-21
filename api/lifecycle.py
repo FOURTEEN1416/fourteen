@@ -30,9 +30,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,7 @@ from api.database import (
     WechatPeerPreference,
 )
 from utils.deletion_guard import block_owner, read_graveyard, write_graveyard
+from utils.local_time import to_api_utc
 from utils.project_paths import project_path
 from utils.session_key import owner_of
 
@@ -248,6 +250,95 @@ async def _count_rows(db: Any, model: Any, col: str, uid: int) -> int:
         select(func.count()).select_from(model).where(getattr(model, col) == uid)
     )
     return int(result.scalar() or 0)
+
+
+# ═══════════════════════════════════════════════════════
+# 登录会话全局清扫（2026-11-21 数据生命周期）
+# ═══════════════════════════════════════════════════════
+
+
+async def cleanup_expired_user_sessions(
+    db: Any, *, user_id: int | None = None, now: datetime | None = None
+) -> int:
+    """删除过期 refresh 会话行（登录时按用户 / 每日全局）。
+
+    审计实况：`user_sessions` 只有登录写入与改密/停用撤销，没有 TTL 清扫，
+    生产 53/49 行已过期仍常驻。这里复用 ORM 模型与调用方现有会话，避免
+    第二套连接/事务 owner。
+    """
+    cutoff = now or datetime.now(timezone.utc)
+    stmt = delete(UserSession).where(UserSession.expires_at < cutoff)
+    if user_id is not None:
+        stmt = stmt.where(UserSession.user_id == int(user_id))
+    result = await db.execute(stmt)
+    await db.commit()
+    removed = int(result.rowcount or 0)
+    if removed:
+        logger.info("过期登录会话清理：%d 行 user_scope=%s", removed, user_id)
+    return removed
+
+
+async def purge_expired_user_sessions(
+    *, db_factory: Callable[[], Any] | None = None,
+    user_id: int | None = None, now: datetime | None = None,
+) -> int:
+    """无请求上下文的异步清理入口（后台任务/脚本）。"""
+    factory = db_factory or _default_db_factory()
+    async with factory() as db:
+        return await cleanup_expired_user_sessions(db, user_id=user_id, now=now)
+
+
+def _users_sqlite_path() -> Path | None:
+    """从运行时 DB URL 解析 SQLite 文件路径；非 SQLite 返回 None。"""
+    try:
+        from sqlalchemy.engine.url import make_url
+
+        from api.runtime_config import get_database_url
+
+        url = make_url(get_database_url())
+        if url.get_backend_name() != "sqlite":
+            return None
+        database = str(url.database or "")
+        if not database or database == ":memory:":
+            return None
+        path = Path(database)
+        if not path.is_absolute():
+            from utils.project_paths import PROJECT_ROOT
+
+            path = PROJECT_ROOT / path
+        return path
+    except Exception as e:  # noqa: BLE001
+        logger.debug("解析 users SQLite 路径失败: %s", e)
+        return None
+
+
+def purge_expired_user_sessions_sync(
+    *, db_path: Path | str | None = None, now: datetime | None = None
+) -> int:
+    """同步清理（每日维护线程用；不跨事件循环调 async engine）。
+
+    直接对 users SQLite 执行等价的 DELETE；非 SQLite 部署（PostgreSQL 等）
+    返回 0，由登录路径的异步清理兜底。
+    """
+    path = Path(db_path) if db_path is not None else _users_sqlite_path()
+    if path is None or not Path(path).exists():
+        return 0
+    base = now or datetime.now(timezone.utc)
+    if base.tzinfo is not None:
+        base = base.astimezone(timezone.utc).replace(tzinfo=None)
+    cutoff = base.strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect(str(path), timeout=10)
+    try:
+        if not _table_exists(conn, "user_sessions"):
+            return 0
+        cur = conn.execute("DELETE FROM user_sessions WHERE expires_at < ?", (cutoff,))
+        conn.commit()
+        removed = int(cur.rowcount or 0)
+        if removed:
+            logger.info("过期登录会话清理（每日维护）：%d 行", removed)
+        return removed
+    finally:
+        conn.close()
 
 
 async def _users_db_preview(scope: AccountScope, db_factory: Callable[[], Any]) -> dict:
@@ -582,6 +673,146 @@ def _topic_state_verify(scope: AccountScope) -> dict:
     )}
 
 
+def _user_state_tables_purge(scope: AccountScope) -> dict:
+    """清除同库中的账号级状态表（2026-11-21 生命周期补齐）。
+
+    审计实况：原删号步骤漏了 ``user_character_settings`` /
+    ``emotion_stage_state`` / ``vital_signs_state``（三张表都在 sqlite.db，
+    键分别以 ``user_key`` / 隔离键 ``session::character`` 存放），以及
+    agent_core 三张影子账本表。遗漏会让已删账号的偏好、阶段、生理读数与
+    承诺事件残留，甚至被后台任务重新读出。
+    """
+    _chars, _kn, sqlite_db, _agent, _chroma = _default_paths(
+        scope.characters_dir, scope.knowledge_dir, scope.sqlite_db,
+        scope.agent_db, scope.chroma_dir,
+    )
+    uid = int(scope.user_id)
+    prefix = f"{uid}:%"
+    explicit = sorted({
+        str(k).strip() for k in (
+            list(scope.session_keys) + list(scope.wxids)
+            + list(scope.character_ids) + [str(uid)]
+        ) if str(k).strip()
+    })
+    counts: dict[str, int] = {}
+    if not Path(sqlite_db).exists():
+        return counts
+    conn = sqlite3.connect(str(sqlite_db), timeout=10)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for table, column, also_owner in (
+            ("user_character_settings", "user_key", False),
+            ("user_character_overrides", "user_id", False),
+            ("emotion_stage_state", "character_id", False),
+            ("vital_signs_state", "character_id", False),
+            ("affinity_records", "character_id", False),
+            ("affinity_audit", "character_id", False),
+            ("affinity_unlocks", "character_id", False),
+            ("agent_events", "user_key", True),
+            ("agent_threads", "user_key", True),
+            ("agent_commitments", "user_key", True),
+        ):
+            if not _table_exists(conn, table):
+                continue
+            clauses = [f"{column} LIKE ?"]
+            params: list[Any] = [prefix]
+            if explicit:
+                clauses.append(f"{column} IN ({','.join('?' for _ in explicit)})")
+                params.extend(explicit)
+            if also_owner:
+                clauses.append("owner_user_id=?")
+                params.append(uid)
+            cur = conn.execute(
+                f"DELETE FROM {table} WHERE {' OR '.join(clauses)}", tuple(params)
+            )
+            counts[table] = int(cur.rowcount or 0)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return counts
+
+
+def _user_state_tables_verify(scope: AccountScope) -> dict:
+    _chars, _kn, sqlite_db, _agent, _chroma = _default_paths(
+        scope.characters_dir, scope.knowledge_dir, scope.sqlite_db,
+        scope.agent_db, scope.chroma_dir,
+    )
+    uid = int(scope.user_id)
+    prefix = f"{uid}:%"
+    explicit = sorted({
+        str(k).strip() for k in (
+            list(scope.session_keys) + list(scope.wxids)
+            + list(scope.character_ids) + [str(uid)]
+        ) if str(k).strip()
+    })
+    residual: dict[str, int] = {}
+    if not Path(sqlite_db).exists():
+        return residual
+    conn = sqlite3.connect(str(sqlite_db), timeout=10)
+    try:
+        for table, column, also_owner in (
+            ("user_character_settings", "user_key", False),
+            ("user_character_overrides", "user_id", False),
+            ("emotion_stage_state", "character_id", False),
+            ("vital_signs_state", "character_id", False),
+            ("affinity_records", "character_id", False),
+            ("affinity_audit", "character_id", False),
+            ("affinity_unlocks", "character_id", False),
+            ("agent_events", "user_key", True),
+            ("agent_threads", "user_key", True),
+            ("agent_commitments", "user_key", True),
+        ):
+            if not _table_exists(conn, table):
+                continue
+            clauses = [f"{column} LIKE ?"]
+            params: list[Any] = [prefix]
+            if explicit:
+                clauses.append(f"{column} IN ({','.join('?' for _ in explicit)})")
+                params.extend(explicit)
+            if also_owner:
+                clauses.append("owner_user_id=?")
+                params.append(uid)
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE {' OR '.join(clauses)}",
+                tuple(params),
+            ).fetchone()
+            residual[table] = int(row[0] or 0) if row else 0
+    finally:
+        conn.close()
+    return residual
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone() is not None
+
+
+def _runtime_plane_purge(scope: AccountScope) -> dict:
+    """控制面全表 owner 级清除（2026-11-21 生命周期补齐）。
+
+    审计实况：原删号步骤完全没触碰 ``runtime_plane`` —— 已删账号仍留在
+    ``outbound_commands`` / ``inbound_seen`` / ``followup_budget`` 等表里，
+    可能被恢复或继续被认领。唯一 SQL owner 是 ``runtime_plane.purge_owner``。
+    """
+    from proactive import runtime_plane
+
+    return runtime_plane.purge_owner(int(scope.user_id), list(scope.session_keys))
+
+
+def _runtime_plane_verify(scope: AccountScope) -> dict:
+    from proactive import runtime_plane
+
+    return {
+        "rows": runtime_plane.count_owner(
+            int(scope.user_id), list(scope.session_keys)
+        )
+    }
+
+
 def _affinity_purge(scope: AccountScope) -> dict:
     from utils import affinity_state
 
@@ -632,7 +863,9 @@ def _purge_throttle_file(
     from utils import json_state
 
     config_path = ProactiveScheduler._CONFIG_PATH
-    explicit = {str(k) for k in list(session_keys) + list(bare_peers or [])}
+    explicit = {
+        str(k) for k in list(session_keys) + list(bare_peers or []) + [str(owner_id)]
+    }
 
     def _owned(key: str) -> bool:
         if key in explicit:
@@ -647,14 +880,30 @@ def _purge_throttle_file(
         throttle = data.get("throttle")
         if not isinstance(throttle, dict):
             return
-        for section in ("llm_proactive_next_ok", "deliver_fail_counts",
-                        "disabled_event_day"):
+        # 2026-11-21 主动线治理批：与 `ProactiveScheduler._ledger_snapshot`
+        # 的账本段一一对齐——漏一段就会在下次 _persist 时把已删账号条目复活。
+        for section in (
+            "llm_proactive_next_ok", "deliver_fail_counts",
+            "deliver_fail_counts_ts", "disabled_event_day",
+            "wait_window_event_day", "quiet_event_day",
+            "model_degraded_event_day", "deliver_circuit_open",
+        ):
             seg = throttle.get(section)
             if isinstance(seg, dict):
                 victims = [k for k in list(seg) if _owned(str(k))]
                 for k in victims:
                     seg.pop(k, None)
                     removed += 1
+        # gate_skip 的键形是 "{user_key}|{reason}"：先剥尾段再判归属
+        gate = throttle.get("gate_skip_event_day")
+        if isinstance(gate, dict):
+            victims = [
+                k for k in list(gate)
+                if _owned(str(k).rpartition("|")[0])
+            ]
+            for k in victims:
+                gate.pop(k, None)
+                removed += 1
         sent = throttle.get("important_dates_sent")
         if isinstance(sent, list):
             keep = [
@@ -689,7 +938,7 @@ def _scheduler_throttle_verify(scope: AccountScope) -> dict:
     from proactive.scheduler import ProactiveScheduler
     from utils import json_state
 
-    explicit = {str(k) for k in [*scope.session_keys, *scope.wxids]}
+    explicit = {str(k) for k in [*scope.session_keys, *scope.wxids, str(scope.user_id)]}
 
     def _owned(key: str) -> bool:
         if key in explicit:
@@ -700,11 +949,17 @@ def _scheduler_throttle_verify(scope: AccountScope) -> dict:
     data = json_state.read_json(ProactiveScheduler._CONFIG_PATH, default={}) or {}
     throttle = data.get("throttle") or {}
     n = 0
-    for section in ("llm_proactive_next_ok", "deliver_fail_counts",
-                    "disabled_event_day"):
+    for section in (
+        "llm_proactive_next_ok", "deliver_fail_counts", "deliver_fail_counts_ts",
+        "disabled_event_day", "wait_window_event_day", "quiet_event_day",
+        "model_degraded_event_day", "deliver_circuit_open",
+    ):
         seg = throttle.get(section)
         if isinstance(seg, dict):
             n += sum(1 for k in seg if _owned(str(k)))
+    gate = throttle.get("gate_skip_event_day")
+    if isinstance(gate, dict):
+        n += sum(1 for k in gate if _owned(str(k).rpartition("|")[0]))
     sent = throttle.get("important_dates_sent")
     if isinstance(sent, list):
         n += sum(
@@ -747,6 +1002,9 @@ _OWNER_STEPS: dict[str, OwnerStep] = {
          _character_instances_verify),
         ("memory_sqlite", _memory_sqlite_preview, _memory_sqlite_purge,
          _memory_sqlite_verify),
+        # 2026-11-21 主动线治理批：同库账号级状态表（偏好/阶段/生理/影子账本）
+        ("user_state_tables", None, _user_state_tables_purge,
+         _user_state_tables_verify),
         # W13 · D11：心理画像（user_persona/user_persona_snapshots，同
         # sqlite.db）——插在 memory_sqlite 之后同库清理；verify residual
         # 机制提供「目标 owner 删光、他人保留」的行数断言。
@@ -757,6 +1015,7 @@ _OWNER_STEPS: dict[str, OwnerStep] = {
         ("ase_states", None, _ase_states_purge, _ase_states_verify),
         ("affinity_points", None, _affinity_purge, _affinity_verify),
         ("wechat_channels", None, _wechat_channels_purge, _wechat_channels_verify),
+        ("runtime_plane", None, _runtime_plane_purge, _runtime_plane_verify),
         ("scheduler_throttle", None, _scheduler_throttle_purge,
          _scheduler_throttle_verify),
         ("process_caches", None, _process_caches_purge, _process_caches_verify),
@@ -766,9 +1025,10 @@ _OWNER_STEPS: dict[str, OwnerStep] = {
 
 # 冻结步骤必须先于一切清除；users_db 行删除必须最后。
 _STEP_ORDER = [
-    "freeze_revoke", "character_instances", "memory_sqlite", "persona_profile",
-    "memory_vectors", "event_ledger", "topic_state", "ase_states", "affinity_points",
-    "wechat_channels", "scheduler_throttle", "process_caches", "users_db",
+    "freeze_revoke", "character_instances", "memory_sqlite", "user_state_tables",
+    "persona_profile", "memory_vectors", "event_ledger", "topic_state",
+    "ase_states", "affinity_points", "wechat_channels", "runtime_plane",
+    "scheduler_throttle", "process_caches", "users_db",
 ]
 
 
@@ -791,7 +1051,9 @@ def _load_job(user_id: int, job_dir: Path | None = None) -> dict | None:
 
 
 def _save_job(job: dict, job_dir: Path | None = None) -> None:
-    job["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    # 2026-11-21 时间口径统一批：任务状态落盘改显式 UTC ISO（原 time.strftime
+    # 产出无时区本地串，消费端会当本地时间解析）。
+    job["updated_at"] = datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
     _job_path(job["user_id"], job_dir).write_text(
         json.dumps(job, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -800,7 +1062,7 @@ def _save_job(job: dict, job_dir: Path | None = None) -> None:
 def _graveyard_register(user_id: int) -> None:
     def _mutate(data: dict) -> None:
         data[str(int(user_id))] = {
-            "deleted_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "deleted_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
         }
 
     write_graveyard(_mutate)
@@ -1128,7 +1390,12 @@ def _export_sm(sm: Any, sqlite_db: Path | None) -> Any:
 def export_chats_page(
     sm: Any, session_key: str, before_id: int = 0, limit: int = 500,
 ) -> dict:
-    return sm.export_owner_chats_page(session_key, before_id=before_id, limit=limit)
+    page = sm.export_owner_chats_page(session_key, before_id=before_id, limit=limit)
+    # 2026-11-21 时间口径统一批：导出面同样补显式 +00:00，避免消费端当本地时间。
+    for row in page.get("messages") or []:
+        if isinstance(row, dict) and row.get("created_at"):
+            row["created_at"] = to_api_utc(row["created_at"])
+    return page
 
 
 async def export_account_manifest(

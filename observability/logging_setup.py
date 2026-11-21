@@ -104,6 +104,25 @@ ring_buffer = RingBufferHandler()
 ring_buffer.addFilter(UserContextFilter())
 
 
+# 2026-11-21 可观测性批：第三方库高频 INFO 噪声压制。
+# APScheduler 的 ``apscheduler.executors.default`` 每个 job 起止各打一条
+# INFO；生产 app.log.1 55272 行中 53629 行（97.0%）来自它，其中 5 秒一次的
+# 「控制命令消费」占 22443 行。job 级起止已由 proactive.scheduler 的
+# ``_safe_job_wrapper`` 降为 DEBUG（仅慢 job 打 WARNING），这里再把库自身
+# logger 压到 WARNING；ERROR/WARNING 不受影响。
+_NOISY_LOGGERS: tuple[tuple[str, int], ...] = (
+    ("apscheduler", logging.WARNING),
+    ("apscheduler.scheduler", logging.WARNING),
+    ("apscheduler.executors.default", logging.WARNING),
+)
+
+
+def _configure_noisy_loggers() -> None:
+    """把高频第三方 logger 固定到 WARNING（ERROR/WARNING 仍完整保留）。"""
+    for logger_name, level in _NOISY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(level)
+
+
 def _add_rotating_file_handler(root_logger: logging.Logger, log_level: int) -> None:
     """添加 10MB 轮转文件日志到 ./data/app.log"""
     log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
@@ -126,6 +145,8 @@ def _add_rotating_file_handler(root_logger: logging.Logger, log_level: int) -> N
 
 def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
     level = getattr(logging, log_level, logging.INFO)
+    # 先压第三方噪声：无论是否安装 structlog 都生效。
+    _configure_noisy_loggers()
 
     if not HAS_STRUCTLOG:
         logging.basicConfig(level=level)
@@ -142,6 +163,12 @@ def setup_logging(log_level: str = "INFO", log_format: str = "json") -> None:
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        # 2026-11-21 可观测性批：structlog 的 BoundLogger 不会自动做
+        # stdlib 风格的 ``event % args`` —— 旧实现把
+        # ``logger.warning("Model %s ...", name, secs)`` 渲染成
+        # ``{"event": "Model %s ...", "positional_args": [...]}``。放在
+        # renderer 之前统一格式化，同型未渲染 dict 一并修复。
+        structlog.stdlib.PositionalArgumentsFormatter(),
     ]
 
     renderer = (  # noqa: SIM108

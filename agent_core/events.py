@@ -17,8 +17,9 @@
   structured_memory.py::user_key_from_session``，禁止剥 owner）；
   ``owner_user_id`` = ``utils.session_key.owner_of(session_key)``。任一不可得 →
   整条不落库（不可归属宁丢不串）。
-- **时钟**：``utils.local_time.now_local()`` 的北京 naive 墙钟
-  ``%Y-%m-%d %H:%M:%S``；排序一律按 ``id``/``rowid``，禁止按 ``created_at``。
+- **时钟**：``utils.local_time.now_utc_naive()`` 的 UTC naive
+  ``%Y-%m-%d %H:%M:%S``（2026-11-21 时间口径统一批；原北京墙钟已迁移）；
+  排序一律按 ``id``/``rowid``，禁止按 ``created_at``。
 - **写延迟预算**：``_WRITE_BUSY_TIMEOUT_MS=50``（原 300ms 会阻塞事件循环并拖慢该
   worker 全部并发请求）+ 建表锁 ``_SCHEMA_LOCK_TIMEOUT_S=0.05``（绝不在
   ``threading.Lock`` 上无超时阻塞）；丢事件即计数，不重试。
@@ -39,7 +40,7 @@ from contextlib import closing, suppress
 from datetime import datetime
 
 from utils import inbound_context
-from utils.local_time import now_local
+from utils.local_time import now_utc_naive
 from utils.project_paths import project_path
 from utils.session_key import owner_of
 
@@ -211,8 +212,8 @@ def _resolve_scope(*, user_key: str = "", session_key: str = "") -> tuple[str, s
 
 
 def _now_ts() -> str:
-    """当前北京墙钟 ``%Y-%m-%d %H:%M:%S``（禁 CURRENT_TIMESTAMP 的 UTC）。"""
-    return now_local().strftime(_TS_FMT)
+    """当前 UTC ``%Y-%m-%d %H:%M:%S``（与 chat_history/时间迁移后的列同口径）。"""
+    return now_utc_naive().strftime(_TS_FMT)
 
 
 def _normalize_ts(value: object) -> str:

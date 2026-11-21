@@ -20,8 +20,10 @@ import pytest
 from proactive import post_draft_judge
 from proactive.llm_proactive import build_proactive_context, parse_decision
 from utils import topic_state as ts
+from utils.local_time import local_naive_to_utc
 
-FIXED = datetime(2026, 10, 28, 10, 0, 0)
+FIXED = datetime(2026, 10, 28, 10, 0, 0)  # 调度器 _local_now 的北京墙钟
+FIXED_UTC = FIXED - timedelta(hours=8)  # 同一瞬间的 UTC naive（topic_state 存储口径）
 KEY = "4:web:deadbeef"
 CHAR = "default"
 
@@ -296,14 +298,21 @@ def test_skip_decision_saves_plan(plan_env, monkeypatch):
     assert row is not None
     assert row["topic"] == "面试"
     assert row["intent"] == "问问二面结果"
-    assert row["next_at"] == "2026-10-28 10:45:00"
+    # 调度器 10:00 北京墙钟 → 02:00 UTC，wait 45min → 02:45 UTC 落库。
+    assert row["next_at"] == (FIXED_UTC + timedelta(minutes=45)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     assert row["consumed_at"] is None
 
 
 def test_skip_with_empty_next_consumes_injected_plan(plan_env, monkeypatch):
     """复核修复：模型写空 = 放弃本轮已注入的旧计划，不能留到下一 tick 再注入。"""
     now = datetime.now().replace(microsecond=0)
-    ts.save_next_plan(KEY, CHAR, "旧计划", "旧意图", wait_minutes=0, planned_at=now - timedelta(minutes=5))
+    now_utc = local_naive_to_utc(now)
+    ts.save_next_plan(
+        KEY, CHAR, "旧计划", "旧意图", wait_minutes=0,
+        planned_at=now_utc - timedelta(minutes=5),
+    )
     decision = {
         "should_contact": False,
         "message": "",
@@ -321,7 +330,11 @@ def test_skip_with_empty_next_consumes_injected_plan(plan_env, monkeypatch):
 
 def test_delivery_success_consumes_plan(plan_env, monkeypatch):
     now = datetime.now().replace(microsecond=0)
-    ts.save_next_plan(KEY, CHAR, "旧计划", "旧意图", wait_minutes=0, planned_at=now - timedelta(minutes=10))
+    now_utc = local_naive_to_utc(now)
+    ts.save_next_plan(
+        KEY, CHAR, "旧计划", "旧意图", wait_minutes=0,
+        planned_at=now_utc - timedelta(minutes=10),
+    )
     decision = {
         "should_contact": True,
         "message": "面试结果应该出来了吧，我一直惦记着这事",
@@ -346,12 +359,16 @@ def test_delivery_success_consumes_plan(plan_env, monkeypatch):
     assert row["consumed_at"] is None  # 新计划可读（upsert 复位）
     assert row["topic"] == "面试结果"
     assert row["intent"] == "问问二面结果"
-    assert row["next_at"] == now.strftime("%Y-%m-%d %H:%M:%S")
+    assert row["next_at"] == now_utc.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def test_delivery_failure_keeps_plan(plan_env, monkeypatch):
     now = datetime.now().replace(microsecond=0)
-    ts.save_next_plan(KEY, CHAR, "旧计划", "旧意图", wait_minutes=0, planned_at=now - timedelta(minutes=10))
+    now_utc = local_naive_to_utc(now)
+    ts.save_next_plan(
+        KEY, CHAR, "旧计划", "旧意图", wait_minutes=0,
+        planned_at=now_utc - timedelta(minutes=10),
+    )
     decision = {
         "should_contact": True,
         "message": "面试结果应该出来了吧，我一直惦记着这事",
@@ -371,7 +388,11 @@ def test_delivery_failure_keeps_plan(plan_env, monkeypatch):
 
 def test_window_expired_drops_plan(plan_env, monkeypatch):
     now = datetime.now().replace(microsecond=0)
-    ts.save_next_plan(KEY, CHAR, "旧计划", "旧意图", wait_minutes=0, planned_at=now - timedelta(minutes=5))
+    now_utc = local_naive_to_utc(now)
+    ts.save_next_plan(
+        KEY, CHAR, "旧计划", "旧意图", wait_minutes=0,
+        planned_at=now_utc - timedelta(minutes=5),
+    )
     sched, hub, _captured, calls = _make_sched(monkeypatch)
     sched._llm_proactive_next_ok[KEY] = time.time() - 3600
     sched._proactive_window_config = lambda: (True, 30)
@@ -385,7 +406,9 @@ def test_scheduler_restart_reads_plan_from_db(plan_env, monkeypatch):
     # 第一次：skip 存计划（10:00，wait 45）
     sched_a, hub_a, _c1, _calls1 = _make_sched(monkeypatch, now=FIXED)
     sched_a._llm_proactive_one_user(hub_a, KEY)
-    assert _plan_row()["next_at"] == "2026-10-28 10:45:00"
+    assert _plan_row()["next_at"] == (FIXED_UTC + timedelta(minutes=45)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
     # 模拟重启：新实例、空内存账本；10:46 到点后决策上下文必须看到 next_plan
     monkeypatch.setattr("proactive.ase_engine._local_now", lambda: FIXED + timedelta(minutes=46))
@@ -401,11 +424,15 @@ def test_scheduler_restart_reads_plan_from_db(plan_env, monkeypatch):
     assert plan is not None
     assert plan["topic"] == "面试"
     assert plan["intent"] == "问问二面结果"
-    assert plan["next_at"] == "2026-10-28 10:45:00"
+    assert plan["next_at"] == (FIXED_UTC + timedelta(minutes=45)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
 
 def test_plan_not_injected_before_due(plan_env, monkeypatch):
-    ts.save_next_plan(KEY, CHAR, "面试", "问问二面结果", wait_minutes=45, planned_at=FIXED)
+    ts.save_next_plan(
+        KEY, CHAR, "面试", "问问二面结果", wait_minutes=45, planned_at=FIXED_UTC
+    )
     sched, hub, captured, _calls = _make_sched(monkeypatch, now=FIXED + timedelta(minutes=20))
     sched._llm_proactive_one_user(hub, KEY)
     assert captured[-1]["next_plan"] is None

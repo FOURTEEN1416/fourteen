@@ -29,6 +29,11 @@
   ② ``sanitize_reply_text`` 的发言标签/时间前缀/``len<2`` 语义按**逻辑行**判定，
   与整段的 ``splitlines()`` 同义。
 
+**2026-11-21 出站质量批**：新增 ``recent_assistant_messages``——在片段**放行前**
+做历史重复/模板复读判定（闸一/闸三）；``raw_text`` 保留上游原文，供上层在
+**一个字都没发出去**时做动作-only 同模型重生成（闸二）。已发前缀仍永不回滚、
+永不重判。
+
 **与降级/超时/断线的配合**：上游中断按**流末**处理（``finish()`` 补发已收到内容），
 不重试、不换供应商重生成；适配器断开由 ``_ack``/``accepted_end`` 原语义兜底
 （只落已确认前缀）。
@@ -46,6 +51,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from utils.outbound_quality import (
+    is_repeated_fragment,
+    strip_repeated_template_fragment,
+)
 from utils.project_paths import project_path
 from utils.prompt_sanitize import (
     _ATTRIBUTION_FLIP_RE,
@@ -222,6 +231,7 @@ class IncrementalReplyGuard:
         forbidden: frozenset[str] | set[str] = frozenset(),
         safety_check: Callable[[str], str | None] | None = None,
         soft_flush_chars: int = DEFAULT_SOFT_FLUSH_CHARS,
+        recent_assistant_messages: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self.user_msg = str(user_msg or "")
         self.character_name = str(character_name or "").strip()
@@ -231,10 +241,16 @@ class IncrementalReplyGuard:
         self.forbidden = frozenset(t for t in (forbidden or ()) if t)
         self._safety_check = safety_check
         self._soft_flush_chars = max(1, int(soft_flush_chars))
+        # 2026-11-21 出站质量批：最近 assistant 历史（闸一/闸三）。流式只在
+        # **片段放行前**比对，已发前缀永不重判、永不回滚。
+        self.recent_assistant_messages: tuple[str, ...] = tuple(
+            str(t).strip() for t in (recent_assistant_messages or ()) if str(t).strip()
+        )
 
         self._pending = ""      # 最后一个句界之后的不完整尾巴
         self._held = ""         # 已过增量守卫、但因形态可疑被扣住不发
         self._emitted = ""      # 已放行正文（左邻上下文 / 首行 / 整串形态判定）
+        self._raw_text = ""     # 上游收到的原始 token（动作-only 重生成用）
         self._received = False
         self._at_line_start = True
         self._first_line_open = True
@@ -251,6 +267,11 @@ class IncrementalReplyGuard:
     def emitted_text(self) -> str:
         return self._emitted
 
+    @property
+    def raw_text(self) -> str:
+        """上游收到的原始文本（不过守卫）。动作-only 重生成判定用。"""
+        return self._raw_text
+
     def has_received(self) -> bool:
         """是否收到过任何上游内容（区分「首 token 前失败」与「已发后中断」）。"""
         return self._received or bool(self._pending) or bool(self._held)
@@ -261,6 +282,7 @@ class IncrementalReplyGuard:
         if not text or self.stop_requested:
             return []
         self._received = True
+        self._raw_text += text
         self._pending += text
         released: list[str] = []
 
@@ -430,6 +452,20 @@ class IncrementalReplyGuard:
         _guard_log("attribution_flip", before, s)
         if not s.strip():
             return []
+        # ⑦b 出站质量：模板复读 / 历史重复（2026-11-21 出站质量批）。
+        # 只判定**尚未放行**的片段；已发前缀在 ``_emitted`` 里，永不重判回滚。
+        if self.recent_assistant_messages:
+            before = s
+            s = strip_repeated_template_fragment(s, self.recent_assistant_messages)
+            _guard_log("template_repeat", before, s)
+            if not s.strip():
+                return []
+            candidates = list(self.recent_assistant_messages)
+            if self._emitted:
+                candidates.append(self._emitted)
+            if is_repeated_fragment(s, candidates):
+                _guard_log("history_repeat", s, "")
+                return []
         # ⑧ 无由头反问：命中 → 截断 + 终止上游
         s, stopped = self._truncate_reciprocal(s)
         if stopped:

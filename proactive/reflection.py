@@ -10,6 +10,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from utils.local_time import now_utc_naive
+
 logger = logging.getLogger("proactive.reflection")
 
 # 内心独白保留条数（消费方 get_latest_monologue 只取最后一条）
@@ -21,7 +23,7 @@ class InnerMonologue:
     thought: str
     type: str
     urgency_delta: float
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=now_utc_naive)
 
 
 class ReflectionEngine:

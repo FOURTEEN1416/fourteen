@@ -30,6 +30,8 @@ from sqlalchemy import (
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from utils.local_time import to_api_utc
+
 logger = logging.getLogger("database")
 
 # ── 数据库 URL（默认 SQLite，可覆写为 PostgreSQL） ──
@@ -108,8 +110,8 @@ class User(Base):
             "role": self.role,
             "is_active": self.is_active,
             "is_verified": self.is_verified,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
+            "created_at": to_api_utc(self.created_at),
+            "last_login_at": to_api_utc(self.last_login_at),
         }
 
     def __repr__(self) -> str:
@@ -151,10 +153,10 @@ class InviteCode(Base):
         return {
             "code": self.code,
             "created_by": self.created_by,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": to_api_utc(self.created_at),
             "used_by": self.used_by,
-            "used_at": self.used_at.isoformat() if self.used_at else None,
-            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "used_at": to_api_utc(self.used_at),
+            "expires_at": to_api_utc(self.expires_at),
             "is_revoked": self.is_revoked,
             "note": self.note,
         }
@@ -221,7 +223,7 @@ class UserActiveCharacter(Base):
         return {
             "user_id": self.user_id,
             "character_id": self.character_id,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "updated_at": to_api_utc(self.updated_at),
         }
 
     def __repr__(self) -> str:
@@ -248,7 +250,7 @@ class ConsentRecord(Base):
         return {
             "user_id": self.user_id,
             "agreement_version": self.agreement_version,
-            "agreed_at": self.agreed_at.isoformat() if self.agreed_at else None,
+            "agreed_at": to_api_utc(self.agreed_at),
         }
 
     def __repr__(self) -> str:
@@ -278,7 +280,7 @@ class WechatBinding(Base):
             "nickname": self.nickname,
             "avatar": self.avatar,
             "character_card_id": self.character_card_id,
-            "bound_at": self.bound_at.isoformat() if self.bound_at else None,
+            "bound_at": to_api_utc(self.bound_at),
         }
 
     def __repr__(self) -> str:
@@ -323,10 +325,10 @@ class WechatChannelSession(Base):
             "last_error": self.last_error,
             "messages_today": self.messages_today,
             "last_connected_at": (
-                self.last_connected_at.isoformat() if self.last_connected_at else None
+                to_api_utc(self.last_connected_at)
             ),
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": to_api_utc(self.created_at),
+            "updated_at": to_api_utc(self.updated_at),
         }
 
     def __repr__(self) -> str:
@@ -359,7 +361,7 @@ class WechatPeerPreference(Base):
             "owner_user_id": self.owner_user_id,
             "peer_wxid": self.peer_wxid,
             "character_card_id": self.character_card_id,
-            "chosen_at": self.chosen_at.isoformat() if self.chosen_at else None,
+            "chosen_at": to_api_utc(self.chosen_at),
         }
 
     def __repr__(self) -> str:
@@ -394,8 +396,8 @@ class CharacterAchievement(Base):
             "character_id": self.character_id,
             "progress": self.progress,
             "target": self.target,
-            "unlocked_at": self.unlocked_at.isoformat() if self.unlocked_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "unlocked_at": to_api_utc(self.unlocked_at),
+            "updated_at": to_api_utc(self.updated_at),
         }
 
     def __repr__(self) -> str:
@@ -439,10 +441,10 @@ class Announcement(Base):
             "link": self.link,
             "link_label": self.link_label,
             "dismissible": self.dismissible,
-            "starts_at": self.starts_at.isoformat() if self.starts_at else None,
-            "ends_at": self.ends_at.isoformat() if self.ends_at else None,
+            "starts_at": to_api_utc(self.starts_at),
+            "ends_at": to_api_utc(self.ends_at),
             "enabled": self.enabled,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": to_api_utc(self.created_at),
         }
 
 

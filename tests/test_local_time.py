@@ -178,11 +178,10 @@ def _code_only(src: str) -> str:
 
 
 def test_pending_intent_write_clock_matches_read_clock() -> None:
-    """upsert_pending_intent 的 expires_at 必须与读侧 _now_local 同源。
+    """upsert_pending_intent 的 expires_at 必须与读侧 _now_utc 同源。
 
-    CI 实证（2026-09-20）：GitHub Actions 宿主为 UTC。旧写法 `datetime.now()`
-    写出的 expires_at 比 `_now_local()`（UTC+8 墙钟）慢 8 小时 → pending 一落库
-    即被 get_active_pending_intent 判 expired，ask_user 分支看起来「没写库」。
+    2026-11-21 时间口径统一批：写入口径已从北京墙钟切到 UTC naive；
+    pending 的 TTL 比较两端同为 UTC，CI/容器宿主时区不再影响判定。
     """
     import inspect
 
@@ -191,18 +190,17 @@ def test_pending_intent_write_clock_matches_read_clock() -> None:
     src = _code_only(inspect.getsource(StructuredMemory.upsert_pending_intent))
     assert "datetime.now()" not in src, (
         "upsert_pending_intent 不得用裸 datetime.now()（主机时区依赖）；"
-        "必须走 _now_local()/now_local()"
+        "必须走 _now_utc()/now_utc_naive()"
     )
-    assert "_now_local" in src or "now_local" in src
+    assert "_now_utc" in src or "now_utc_naive" in src
 
 
 def test_pending_intent_survives_utc_host_clock_skew(tmp_path) -> None:
-    """行为回归：expires_at 必须相对 now_local 计算（钉死具体落库值）。
+    """行为回归：expires_at 必须相对 now_utc_naive 计算（钉死具体落库值）。
 
-    CI 实证（2026-09-20）：GitHub Actions 宿主为 UTC。旧写法 `datetime.now()`
-    写出的 expires_at 比读侧 `_now_local()`（UTC+8）慢 8 小时 → pending 一落库
-    即过期。本用例把 now_local 钉到 2099，断言落库 expires_at 也是 2099+TTL；
-    若实现退回 datetime.now()（≈当前墙钟），断言必红，与运行时刻无关。
+    2026-11-21 时间口径统一批：写入与读取统一 UTC naive。本用例把
+    ``now_utc_naive`` 钉到 2099，断言落库 expires_at 也是 2099+TTL；
+    若实现退回宿主墙钟，断言必红，与运行时刻无关。
     """
     from datetime import datetime as _dt
 
@@ -210,8 +208,8 @@ def test_pending_intent_survives_utc_host_clock_skew(tmp_path) -> None:
     from shisi.memory.legacy.structured_memory import StructuredMemory
 
     pinned = _dt(2099, 1, 1, 12, 0, 0)
-    original = smod.now_local
-    smod.now_local = lambda: pinned  # type: ignore[assignment]
+    original = smod.now_utc_naive
+    smod.now_utc_naive = lambda: pinned  # type: ignore[assignment]
     sm = StructuredMemory(str(tmp_path / "skew.db"))
     try:
         sm.upsert_pending_intent(
@@ -224,14 +222,14 @@ def test_pending_intent_survives_utc_host_clock_skew(tmp_path) -> None:
             ).fetchone()
         assert row is not None
         assert row["expires_at"] == "2099-01-01 12:15:00", (
-            f"expires_at={row['expires_at']!r} 必须由 now_local+TTL 推出；"
+            f"expires_at={row['expires_at']!r} 必须由 now_utc_naive+TTL 推出；"
             "出现当前墙钟说明又退回了 datetime.now()"
         )
         pending = sm.get_active_pending_intent("s1")
         assert pending is not None
         assert pending["ask_count"] == 1
     finally:
-        smod.now_local = original  # type: ignore[assignment]
+        smod.now_utc_naive = original  # type: ignore[assignment]
         sm.close()
 
 

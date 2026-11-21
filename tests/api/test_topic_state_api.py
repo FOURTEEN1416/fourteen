@@ -107,9 +107,10 @@ def api(tmp_path, monkeypatch):
     config_path = tmp_path / "scheduler_config.json"
     monkeypatch.setattr(topic_state, "_CONFIG_PATH", config_path, raising=False)
     monkeypatch.setattr(topic_state, "_DB_PATH", tmp_path / "topic_api_state.db", raising=False)
-    # 固定墙钟：快照端点不带 now，若用真实时钟，_NOW 创建的 next_plan
+    # 固定存储时钟：快照端点不带 now，若用真实时钟，_NOW 创建的 next_plan
     # 会在 24h TTL 后过期 → 测试变成时间炸弹（2026-10-28 复核 finding）。
-    monkeypatch.setattr(topic_state, "now_local", lambda: _NOW, raising=False)
+    # 2026-11-21 时间口径统一批：topic_state 默认时钟改为 UTC naive。
+    monkeypatch.setattr(topic_state, "now_utc_naive", lambda: _NOW, raising=False)
 
     app, client, engine = _build_app(tmp_path)
     yield client, engine, app, config_path

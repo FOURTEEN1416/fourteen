@@ -49,8 +49,28 @@ def test_switch_defaults_on_and_accepts_explicit_off_values(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def _seed_fresh_window(owner: int = OWNER, slot: int = 0, peer: str = PEER) -> None:
+    """在沙箱会话根落一份新鲜 context token 窗口。
+
+    2026-11-21 死会话治理：语音出站有 auth 闸（``voice_send_blocked``，
+    token 窗口 dead/empty/missing 不出站）。本文件测的是「窗口活」时的
+    投递行为，conftest 沙箱默认空目录（=missing=被闸拦下），须先播种。
+    """
+    import json as _json
+
+    from wechat_direct import channel_paths
+
+    path = channel_paths.context_tokens_path(owner, slot)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        _json.dumps({peer: {"token": "ctx-fresh", "ts": time.time()}}),
+        encoding="utf-8",
+    )
+
+
 def _patch_direct(monkeypatch, *, synth_ok: bool = True):
     """替身直发链三件套，记录调用。"""
+    _seed_fresh_window()  # 直发路径假定窗口活，先过语音 auth 闸
     calls: dict[str, list] = {"creds": [], "synth": [], "send": []}
 
     def fake_creds(owner, peer, *, max_age_hours=0):
@@ -295,6 +315,7 @@ def _patch_voice_drain(monkeypatch, connector, *, synth_ok: bool = True):
 
 
 def _drain_voice(connector, monkeypatch, row: dict) -> _FakePlane:
+    _seed_fresh_window(connector.owner_user_id, connector.slot)  # 过语音 auth 闸
     plane = _FakePlane(row)
     monkeypatch.setattr(wc, "_plane", lambda: plane)
     connector._context_tokens[PEER] = {"token": "ctx-d1", "ts": time.time()}

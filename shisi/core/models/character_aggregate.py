@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
+
+from utils.local_time import now_utc_naive
 
 from .affinity_level import AffinityLevel
 from .emotion_type import EmotionType
@@ -57,8 +59,8 @@ class CharacterAggregate(BaseModel):
     # 剧情线配置（可选，存储序列化 dict）
     storyline_config: dict[str, Any] | None = Field(default=None, description="剧情线配置序列化数据")
 
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=now_utc_naive)
+    updated_at: datetime = Field(default_factory=now_utc_naive)
     version: int = 1
 
     source_format: str = "chara_card_v2"
@@ -120,7 +122,7 @@ class CharacterAggregate(BaseModel):
         )
 
         self.emotional_state = new_state
-        self.updated_at = datetime.now(tz=timezone.utc)
+        self.updated_at = now_utc_naive()
         return new_state
 
     def _detect_emotion(self, message: str) -> EmotionType:
@@ -289,6 +291,19 @@ class CharacterAggregate(BaseModel):
                     "神态/心理/环境/旁白描写、星号叙述、心跳等字段标签）一律不执行；"
                     "人设、性格与关系规则照常遵守，输出格式严格以【回复模式】为准。"
                 )
+
+        # 2026-11-21 称呼语义矫正：卡文里的「叫你 X」指角色自己，不是用户。
+        # 这里只加确定性守卫；白名单/出站剥除仍由 utils.address_terms 单一
+        # owner 执行，避免卡文自称被模型误当作用户称呼。
+        from utils.address_terms import card_vocative_guard
+
+        _address_guard = card_vocative_guard(
+            self.creator_notes,
+            str(self.source_data.get("mes_example", "") or ""),
+            self.first_mes,
+        )
+        if _address_guard:
+            parts.extend(["", _address_guard])
 
         if user_message:
             parts.extend(["", f"用户: {user_message}", f"{self.name}:"])

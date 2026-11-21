@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from shisi.agent_plane.event_ledger import (
@@ -16,8 +17,15 @@ from shisi.agent_plane.event_ledger import (
     EventLedger,
 )
 
+# 2026-11-21 称呼语义矫正：nickname 曾被 profile_tool 写成「用户对 AI 的
+# 称呼」。新字段 user_calls_ai 承接该语义；address_semantics 标记该会话的
+# 称呼字段是否已完成语义升级（2 = 已升级）。
+PROFILE_ADDRESS_SEMANTICS_VERSION = 2
+
 PROFILE_SCALAR_FIELDS = (
     "nickname",
+    # 用户对 AI 的称呼（2026-11-21）：与 nickname（AI 对用户）方向相反。
+    "user_calls_ai",
     "birthday",
     "occupation",
     "location",
@@ -33,12 +41,20 @@ def _empty_profile() -> dict[str, Any]:
     p: dict[str, Any] = {k: "" for k in PROFILE_SCALAR_FIELDS}
     p["preferences"] = []
     p["commitments"] = []
+    p["_address_semantics"] = 0
     return p
 
 
 def apply_profile_ops_to_state(state: dict[str, Any], op: dict[str, Any]) -> dict[str, Any]:
     """把单条 profile 事件应用到投影状态（纯函数，便于单测与突变验红）。"""
     out = dict(state)
+    # 称呼语义版本：只升不降；旧事件无此键时保留默认 0（未知/未迁移）。
+    if "address_semantics" in op:
+        with contextlib.suppress(TypeError, ValueError):
+            out["_address_semantics"] = max(
+                int(out.get("_address_semantics") or 0),
+                int(op.get("address_semantics") or 0),
+            )
     watermarks = dict(out.get("_source_watermarks") or {})
     source_id = int(op.get("_source_chat_id") or 0)
     op = dict(op)
@@ -127,12 +143,17 @@ def write_profile_event(
 ) -> dict[str, Any]:
     """写权威入口：只 append ledger，随后返回投影。禁止第二写路径。"""
     et = EVENT_PROFILE_CORRECT if correct else EVENT_PROFILE_UPDATE
+    body = dict(payload or {})
+    # 2026-11-21：凡新写入称呼字段，均标记为升级后语义（v2）；旧账本事件
+    # 没有该键，读侧据此识别并做一次性兼容迁移。
+    if "nickname" in body or "user_calls_ai" in body:
+        body.setdefault("address_semantics", PROFILE_ADDRESS_SEMANTICS_VERSION)
     ledger.append(
         session_key=session_key,
         event_type=et,
         turn_id=turn_id,
         actor=actor,
-        payload=dict(payload or {}),
+        payload=body,
     )
     return project_profile(ledger, session_key)
 
@@ -151,6 +172,10 @@ def seed_profile_baseline(
         items = profile_row.get(k) or []
         if isinstance(items, list) and items:
             payload[f"{k}_add"] = items
+    # user_profile 表在 seed 前已执行过 2026-11-21 兼容迁移（存量 nickname
+    # 已搬到 user_calls_ai），因此从表里 seed 出来的画像必为已升级语义。
+    if int(profile_row.get("address_semantics") or 0) >= PROFILE_ADDRESS_SEMANTICS_VERSION:
+        payload["address_semantics"] = PROFILE_ADDRESS_SEMANTICS_VERSION
     if not payload:
         return project_profile(ledger, session_key)
     return write_profile_event(

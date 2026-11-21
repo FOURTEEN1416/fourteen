@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -118,7 +118,11 @@ async def _read_db_rows(session_factory) -> dict[int, dict[str, Any]]:
 def _api_value(field: str, item: dict[str, Any]) -> Any:
     raw = item[field]
     if field == "created_at":
-        return datetime.fromisoformat(raw) if isinstance(raw, str) else raw
+        if not isinstance(raw, str):
+            return raw
+        parsed = datetime.fromisoformat(raw)
+        # API 输出带 +00:00；DB 列是 naive UTC。比较前统一为 naive UTC。
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
     return raw
 
 

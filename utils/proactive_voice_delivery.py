@@ -166,12 +166,19 @@ def find_wechat_credentials(
             continue
         ts = float(meta.get("ts") or 0)
         age_h = (now - ts) / 3600.0 if ts else 9999.0
+        try:
+            slot_no = int(str(slot_dir.name).removeprefix("slot"))
+        except ValueError:
+            slot_no = int(cred.get("slot") or 0)
         item = {
             "token": str(cred.get("token") or ""),
             "base_url": str(cred.get("base_url") or ""),
             "context_token": str(meta.get("token") or ""),
             "age_hours": round(age_h, 1),
             "fresh": age_h < float(max_age_hours),
+            # 2026-11-21 死会话治理：语音 auth 闸（token 窗口探针）要按
+            # 「提供这份凭据的 slot」判定，多 slot 时不能张冠李戴。
+            "slot": slot_no,
         }
         if item["fresh"]:
             return item
@@ -287,6 +294,19 @@ def send_proactive_voice(
     creds = find_wechat_credentials(owner, peer, max_age_hours=max_age_hours)
     if creds is None:
         return False, "no_credentials", 0
+    # 2026-11-21 死会话治理：语音 auth 闸——needs_reauth/disabled 终态或
+    # context token 窗口已死（dead/empty/missing）的会话，合成与发送都不做
+    # （TTS/上传高成本，死会话上只会白烧），按失败返回、由 scheduler 走
+    # 既有文字回落，不重试。
+    try:
+        from wechat_direct.wechat_connector import voice_send_blocked
+
+        if voice_send_blocked(
+            owner, int(creds.get("slot") or 0), kind="主动语音",
+        ):
+            return False, "auth_blocked", 0
+    except Exception:  # noqa: BLE001 —— 闸模块不可用按未知放行（半更新部署）
+        pass
     audio = synthesize_audio(text, character_id, owner)
     if audio is None:
         return False, "tts_unavailable", 0
@@ -304,6 +324,8 @@ def send_proactive_voice(
             token=creds.get("token") or "",
             base_url=creds.get("base_url") or "",
             duration_ms=min(60000, max(1500, len(str(text or "")) * 180)),
+            owner_user_id=owner,
+            slot=int(creds.get("slot") or 0),
         )
         return bool(ok), ("" if ok else str(err or "send_rejected")[:120]), 0
     except Exception as e:  # noqa: BLE001

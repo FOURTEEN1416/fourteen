@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.database import OperatorAudit, OperatorPref
+from utils.local_time import to_api_utc
 
 logger = logging.getLogger("api.audit")
 
@@ -85,7 +86,7 @@ async def recent_operator_audit(db: AsyncSession, limit: int = 50) -> list[dict]
             "action": r.action,
             "target": r.target,
             "detail": r.detail or {},
-            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "created_at": to_api_utc(r.created_at),
         }
         for r in rows
     ]

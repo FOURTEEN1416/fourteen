@@ -282,9 +282,10 @@ def test_created_at_format_and_injection(store):
     assert rows[0]["created_at"] == "2026-11-11 09:00:00"
     stamp = rows[1]["created_at"]
     assert len(stamp) == 19 and stamp[4] == "-" and stamp[10] == " " and stamp[16] == ":"
-    from utils.local_time import now_local
+    from utils.local_time import now_utc_naive
 
-    assert stamp[:16] == now_local().strftime("%Y-%m-%d %H:%M")
+    # 2026-11-21 时间口径统一批：agent_core 写入口径改为 UTC naive。
+    assert stamp[:16] == now_utc_naive().strftime("%Y-%m-%d %H:%M")
 
 
 # ---------------------------------------------------------------------------

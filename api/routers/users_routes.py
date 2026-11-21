@@ -18,6 +18,7 @@ from api.auth import verify_api_key_dep
 from api.auth_jwt import require_role
 from api.database import User
 from api.deps import deps
+from utils.local_time import to_api_utc
 
 logger = logging.getLogger("api.routers.users_routes")
 
@@ -74,6 +75,10 @@ async def get_user_chat_history(
                 (user_id, limit),
             ).fetchall()
             messages = [dict(r) for r in rows][::-1]
+            # 2026-11-21 时间口径统一批：created_at 是 UTC naive 文本，API 边界
+            # 统一补显式 +00:00（与本批其他读面一致）；不可解析保留原样。
+            for _m in messages:
+                _m["created_at"] = to_api_utc(_m.get("created_at")) or _m.get("created_at")
     else:
         messages = []
     return {"messages": messages, "user_id": user_id}

@@ -448,7 +448,7 @@ def run_backup(
         "schema_version": 1,
         "tool": "deploy/backup_manager.py",
         "run_id": run_id,
-        "created_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+        "created_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
         "project_root": str(project_root),
         "database_url": url,
         "git_rev": _default_git_rev(project_root),

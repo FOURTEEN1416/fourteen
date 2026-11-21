@@ -31,10 +31,35 @@ from api.auth import verify_api_key_dep
 from api.auth_jwt import AuthPrincipal, get_optional_principal, require_role
 from api.database import get_db
 from api.main_routes import TopicStateConfigRequest
+from utils.local_time import to_api_utc
 
 logger = logging.getLogger("api.routers.topic_routes")
 
 router = APIRouter(tags=["topic-state"])
+
+
+def _serialize_snapshot_times(value):
+    """递归把快照里的 ``*_at`` UTC naive 文本转成带 +00:00 的 ISO。
+
+    2026-11-21 时间口径统一批：API 返回 naive ISO 会被浏览器当本地时间解析。
+    只改序列化副本，不动 ``get_topic_snapshot`` 的原始结构（主链渲染仍用
+    naive UTC 比较）。
+    """
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if isinstance(key, str) and key.endswith("_at") and isinstance(item, str):
+                if not item:
+                    out[key] = item
+                else:
+                    converted = to_api_utc(item)
+                    out[key] = converted if converted is not None else item
+            else:
+                out[key] = _serialize_snapshot_times(item)
+        return out
+    if isinstance(value, list):
+        return [_serialize_snapshot_times(item) for item in value]
+    return value
 
 
 @router.get("/api/topic-state/config")
@@ -186,5 +211,5 @@ async def get_topic_state_snapshot(
         "status": "ok",
         "session_key": key,
         "character_id": character_id,
-        **snapshot,
+        **_serialize_snapshot_times(snapshot),
     }

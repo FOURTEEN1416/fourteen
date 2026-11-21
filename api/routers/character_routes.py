@@ -30,12 +30,14 @@ from shisi.knowledge.character_knowledge_service import get_knowledge_service
 from shisi.knowledge.crawler_adapter import get_crawler_adapter
 from shisi.voice.character_voice import CharacterVoiceManager
 from utils.character_helpers import (
+    card_owner_key,
     normalize_behavior_patterns,
     normalize_character_card,
     sanitize_character_name,
     sanitize_honesty_boundary,
 )
 from utils.character_resolver import BUILTIN_CHARACTER_ID, is_builtin
+from utils.local_time import to_api_utc
 from utils.project_paths import project_path
 
 PRESETS_DIR = project_path("data", "presets")
@@ -57,14 +59,10 @@ CHARACTERS_DIR = project_path("config", "characters")
 #
 # 机器侧纯 API Key（无 Bearer，部署脚本 / E2E / 测试）是独立的服务面契约：
 # 不做归属收窄，行为与改造前一致——归属校验只在存在 Bearer 主体时生效。
-
-_UNOWNED_MARKERS = {"", "default", "system"}
-
-
-def card_owner_key(card: dict[str, Any]) -> str:
-    """卡片的归属键；无主（公共模板 / 存量卡）返回空串。"""
-    owner = str(card.get("user_id") or "").strip()
-    return "" if owner in _UNOWNED_MARKERS else owner
+#
+# `card_owner_key` 真源在 `utils.character_helpers`（轻量无服务端依赖），
+# 生命周期删除链与清理脚本同源引用；顶部 import 即 re-export，维持既有
+# `from api.routers.character_routes import card_owner_key` 消费方路径。
 
 
 def card_access_allowed(card: dict[str, Any], principal: AuthPrincipal | None) -> bool:
@@ -1440,7 +1438,15 @@ async def list_memory_facts(
     else:
         sm = getattr(mem, "structured_memory", None)
         rows = sm.get_facts(category, limit=limit, owner_prefix=prefix) if sm else []
-    return {"facts": rows, "total": len(rows)}
+    # 2026-11-21 时间口径统一批：user_facts 时间列是 UTC naive，API 边界补 +00:00。
+    facts = []
+    for row in rows:
+        item = dict(row)
+        for key in ("created_at", "updated_at", "last_seen_at"):
+            if item.get(key):
+                item[key] = to_api_utc(item[key])
+        facts.append(item)
+    return {"facts": facts, "total": len(facts)}
 
 
 _FACT_SURFACE_GONE = (
@@ -1680,6 +1686,12 @@ async def export_chat(
                     messages = [dict(r) for r in rows][::-1]
             except Exception as e:
                 logger.warning("查询聊天记录失败: %s", e)
+
+    # 2026-11-21 时间口径统一批：chat_history.created_at 是 UTC naive 文本，
+    # 导出边界（JSON 与 CSV 同口径）统一补显式 +00:00，浏览器/Excel 按 UTC
+    # 解析不再偏 8 小时；不可解析的值保留原样（fail-open）。
+    for _m in messages:
+        _m["created_at"] = to_api_utc(_m.get("created_at")) or _m.get("created_at")
 
     if format == "csv":
         output = io.StringIO()

@@ -294,6 +294,15 @@ def isolate_runtime_state_files(tmp_path_factory, monkeypatch):
         _redirect(_hot, "_STATE_PATH", "hot_topics.json")
     except Exception:
         pass
+    # 主动线读的是另一条路径（proactive_hooks._load_hot_topics），同样必须
+    # 指向 per-test 沙箱：否则宿主 data/hot_topics.json 的真实条目会让
+    # 「空来源/falsy」用例误判为有活材料。
+    try:
+        from proactive import proactive_hooks as _ph
+
+        _redirect(_ph, "_HOT_TOPICS_PATH", "hot_topics.json")
+    except Exception:
+        pass
 
     # 知识库真源与派生索引（2026-11-15 收尾批实证）：`character_knowledge_service`
     # 默认 `_DEFAULT_INDEX_DIR = data/knowledge`（派生索引 `<cid>.json` 与

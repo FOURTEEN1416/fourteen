@@ -45,7 +45,7 @@ def ensure_profile_seeded(session_key: str) -> dict[str, Any]:
         or ledger.query(session_key=sk, event_type=EVENT_PROFILE_CORRECT, limit=1)
     )
     if has_profile:
-        return project_profile(ledger, sk)
+        return _migrate_legacy_address_projection(sk, project_profile(ledger, sk))
     try:
         row = _store().get(sk) or {}
     except Exception:  # noqa: BLE001
@@ -53,6 +53,56 @@ def ensure_profile_seeded(session_key: str) -> dict[str, Any]:
     if row:
         return seed_profile_baseline(ledger, sk, row)
     return project_profile(ledger, sk)
+
+
+def _migrate_legacy_address_projection(
+    session_key: str, projection: dict[str, Any]
+) -> dict[str, Any]:
+    """旧账本画像的称呼语义兼容迁移（2026-11-21）。
+
+    生产 `user_profile` 表已由 `UserProfileStore._ensure_schema` 把存量
+    nickname 搬到 user_calls_ai。若账本里的旧投影仍把同名值放在 nickname，
+    这里按「DB 迁移信号」补一条 profile_correct 事件，把旧值搬到
+    user_calls_ai 并清空 nickname（幂等：搬完 version=2，不再触发）。
+    """
+    from shisi.agent_plane.event_ledger import EVENT_PROFILE_CORRECT
+    from shisi.agent_plane.profile_projection import (
+        PROFILE_ADDRESS_SEMANTICS_VERSION,
+        project_profile,
+    )
+
+    p = projection or {}
+    if int(p.get("_address_semantics") or 0) >= PROFILE_ADDRESS_SEMANTICS_VERSION:
+        return p
+    try:
+        row = _store().get(session_key) or {}
+    except Exception:  # noqa: BLE001
+        row = {}
+    legacy_nick = str(p.get("nickname") or "").strip()
+    migrated_ai_name = str(row.get("user_calls_ai") or "").strip()
+    if not (
+        legacy_nick
+        and migrated_ai_name
+        and legacy_nick == migrated_ai_name
+        and int(row.get("address_semantics") or 0) >= PROFILE_ADDRESS_SEMANTICS_VERSION
+    ):
+        return p
+    logger.info(
+        "[profile_migrate] 旧 nickname 按用户→AI 语义迁移 session=%s", session_key
+    )
+    # 直接 append（不递归 ensure_profile_seeded），随后重放投影。
+    get_ledger().append(
+        session_key=session_key,
+        event_type=EVENT_PROFILE_CORRECT,
+        actor="address_migration",
+        payload={
+            "nickname": "",
+            "user_calls_ai": migrated_ai_name,
+            "address_semantics": PROFILE_ADDRESS_SEMANTICS_VERSION,
+            "reason": "2026-11-21 称呼语义矫正：存量 nickname 实为用户对 AI 的称呼",
+        },
+    )
+    return project_profile(get_ledger(), session_key)
 
 
 def materialize_profile_cache(session_key: str, projection: dict[str, Any]) -> None:
@@ -63,12 +113,17 @@ def materialize_profile_cache(session_key: str, projection: dict[str, Any]) -> N
     try:
         store = _store()
         fields: dict[str, Any] = {}
-        for k in ("nickname", "birthday", "occupation", "location", "notes", "self_intro"):
+        for k in (
+            "nickname", "user_calls_ai", "birthday", "occupation", "location",
+            "notes", "self_intro",
+        ):
             if k in projection:
                 fields[k] = str(projection.get(k) or "")
         for k in ("preferences", "commitments"):
             if k in projection and isinstance(projection[k], list):
                 fields[k] = list(projection[k])
+        if "_address_semantics" in projection:
+            fields["address_semantics"] = int(projection.get("_address_semantics") or 0)
         if fields.get("birthday") == "":
             fields["clear_birthday"] = True
         if fields:
@@ -210,6 +265,7 @@ def write_profile_from_tool(
     turn_id: str = "",
     actor: str = "agent",
     reason: str = "",
+    character_id: str = "",
 ) -> dict[str, Any]:
     """工具写权威入口：seed → ledger append → 投影 → 物化缓存。
 
@@ -240,6 +296,33 @@ def write_profile_from_tool(
             "[profile_gate] 拒绝写回被用户否认的称呼 '%s'（session=%s）", nick, sk
         )
         body.pop("nickname", None)
+        nick = ""
+    # 2026-11-21 称呼语义矫正：角色名派生词/角色卡「叫你 X」是角色自称，
+    # 绝不能写进 nickname（AI 对用户）。这里改路由到 user_calls_ai，避免
+    # 生产「阿茹」类污染再次发生。
+    if nick:
+        from utils.address_terms import (
+            character_card_self_names,
+            character_name_derivatives,
+        )
+
+        ai_names = character_name_derivatives(character_id) | character_card_self_names(
+            character_id
+        )
+        if nick in ai_names:
+            logger.warning(
+                "[profile_gate] nickname '%s' 是角色自称，改存 user_calls_ai（session=%s）",
+                nick,
+                sk,
+            )
+            body.pop("nickname", None)
+            body.setdefault("user_calls_ai", nick)
+    if "nickname" in body or "user_calls_ai" in body:
+        from shisi.agent_plane.profile_projection import (
+            PROFILE_ADDRESS_SEMANTICS_VERSION,
+        )
+
+        body["address_semantics"] = PROFILE_ADDRESS_SEMANTICS_VERSION
     # 存量自愈：投影里若仍存着被否认的称呼，自动追加清空更正。
     proj_existing = project_profile_for(sk)
     denied_nick = str(proj_existing.get("nickname") or "").strip()
@@ -263,6 +346,12 @@ def write_profile_from_tool(
         )
     if reason:
         body["reason"] = reason
+    if body.get("clear_nickname"):
+        body["nickname"] = ""
+        correct = True
+    if body.get("clear_user_calls_ai"):
+        body["user_calls_ai"] = ""
+        correct = True
     if body.get("clear_birthday") or body.get("commitments_clear"):
         correct = True
     proj = write_profile_event(
@@ -296,19 +385,33 @@ def format_profile_prompt_block(
     投影里也不注入 prompt（写侧否决门防新增，读侧守卫防存量继续带偏）。
     """
     p = projection or {}
-    if not any(
-        p.get(k) for k in ("nickname", "birthday", "occupation", "location", "notes", "self_intro")
-    ) and not (p.get("preferences") or p.get("commitments")):
-        return ""
     denied = {str(x) for x in (denied_names or []) if str(x or "").strip()}
+    nick = str(p.get("nickname") or "").strip()
+    semantics = int(p.get("_address_semantics") or p.get("address_semantics") or 0)
+    ai_name = str(p.get("user_calls_ai") or "").strip()
+    # 旧投影同时含 nickname + user_calls_ai 时，nickname 是历史污染值，不渲染。
+    nick_visible = bool(
+        nick and nick not in denied and not (semantics < 2 and ai_name)
+    )
+    if not any(
+        p.get(k) for k in (
+            "user_calls_ai", "birthday", "occupation", "location",
+            "notes", "self_intro",
+        )
+    ) and not nick_visible and not (p.get("preferences") or p.get("commitments")):
+        return ""
     lines: list[str] = ["# 用户画像（稳定事实，以本段为准；段外信息禁止编造）"]
     # 2026-11-07 P8：用户自述是**本人声明**，优先于模型推测的字段展示。
     self_intro = str(p.get("self_intro") or "").strip()
     if self_intro:
         lines.append(f"- 用户自述（本人填写，优先采信）：{self_intro}")
-    nick = str(p.get("nickname") or "").strip()
-    if nick and nick not in denied:
-        lines.append(f"- 称呼：{nick}")
+    # 2026-11-21 称呼语义矫正：两个方向分开渲染，禁止混用。
+    if ai_name:
+        lines.append(
+            f"- 用户对 AI 的称呼：{ai_name}（用户这样叫你；这是你的称呼，不是用户的名字）"
+        )
+    if nick_visible:
+        lines.append(f"- 用户希望被称呼：{nick}")
     if p.get("birthday"):
         lines.append(f"- 生日：{p['birthday']}")
     if p.get("occupation"):
@@ -507,3 +610,52 @@ def append_tool_call_event(
         )
     except Exception as e:  # noqa: BLE001
         logger.debug("ledger tool call event failed: %s", e)
+
+
+def append_tool_result_event(
+    *,
+    session_key: str,
+    tool_name: str,
+    call_id: str = "",
+    provider: str = "",
+    success: bool = True,
+    error: str = "",
+    turn_id: str = "",
+    reply_id: str = "",
+    character_id: str = "",
+    result_preview: str = "",
+    duration_ms: float = 0.0,
+) -> None:
+    """工具结果入账（2026-11-21 可观测性批）。
+
+    与 :func:`append_tool_call_event` 一一对应：每次真实工具执行完成都必须
+    写一条 ``EVENT_TOOL_RESULT``，用 ``call_id`` 关联调用，并保留成功/失败
+    与错误文本。旧实现只有编排器在工具结果拼进 prompt 时写一条无 call_id 的
+    聚合事件，主链 tool loop 与画像同步直连 dispatch 都不落结果，导致
+    ``tool_call`` 与 ``tool_result`` 长期不对称（生产近 7 天 13:0）。
+    """
+    from shisi.agent_plane.event_ledger import EVENT_TOOL_RESULT
+
+    sk = str(session_key or "").strip()
+    if not sk or not tool_name:
+        return
+    try:
+        get_ledger().append(
+            session_key=sk,
+            event_type=EVENT_TOOL_RESULT,
+            character_id=str(character_id or ""),
+            actor="tool_dispatch",
+            turn_id=str(turn_id or ""),
+            reply_id=str(reply_id or ""),
+            payload={
+                "tool": str(tool_name),
+                "call_id": str(call_id or ""),
+                "provider": str(provider or ""),
+                "success": bool(success),
+                "error": str(error or ""),
+                "result_preview": str(result_preview or "")[:400],
+                "duration_ms": round(float(duration_ms or 0.0), 3),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("ledger tool result event failed: %s", e)

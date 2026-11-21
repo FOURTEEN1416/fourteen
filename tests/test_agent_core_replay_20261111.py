@@ -734,35 +734,26 @@ def test_replay_0923_promise_text_is_extracted_and_opened(scene):
 
 
 def test_replay_ttl_due_at_survives_non_utc8_host_clock(scene, monkeypatch):
-    """🔴 2026-11-11 复核修复：非 UTC+8 主机（CI / 无 TZ 容器）上 TTL 必须真落库。
+    """2026-11-21 时间口径统一批：gate 的默认时钟改为 UTC naive。
 
-    ``utils.local_time.now_local`` 在宿主时区偏离 UTC+8 超 1h 时返回 **aware**
-    datetime（CI、Ubuntu、未设 TZ 的容器全命中）。旧实现把 ``aware + TTL`` 直接
-    ``isoformat(sep=' ')`` → ``'2026-11-17 09:23:00+08:00'``；而 B-1 的
-    ``events._normalize_ts`` 只认 ``%Y-%m-%d %H:%M[:%S]`` ⇒ ``due_at`` 落**空串**
-    ⇒ ``expire_commitments`` 的两个谓词（``due_at<>''`` / ``expires_at<>''``）
-    都不成立 ⇒ 该承诺**永不过期**，「你还没兑现的承诺」注入段与 hooks 剔除对该
-    用户永久生效。
-
-    本用例把 gate 的时钟钉成 aware（与 CI 主机产物同形），断言：① **冻结语义不变**
-    （aware 进 aware 出，原样 +168h）；② 落库的 due_at 可解析且等于 TTL 时刻；
-    ③ 到点真被清理。即：病在**落库序列化**侧，由 scheduler 的 ``strftime`` 收口，
-    ``commitment_gate`` 一字未改（冻结件）。
+    历史缺陷是 aware 串落库被 ``_normalize_ts`` 判空导致承诺永不过期；
+    统一 UTC 后 gate 永远返回 naive UTC，scheduler 的 ``strftime`` 收口
+    仍然保留。本用例钉住：① TTL 精确 +168h；② 落库 due_at 可解析；
+    ③ 到点真被清理。
     """
     from datetime import datetime, timedelta, timezone
 
     from agent_core import commitment_gate as gate
 
     aware_now = datetime(2026, 11, 10, 9, 23, tzinfo=timezone(timedelta(hours=8)))
-    monkeypatch.setattr(gate, "now_local", lambda: aware_now)
+    utc_now = aware_now.astimezone(timezone.utc).replace(tzinfo=None)
+    monkeypatch.setattr(gate, "now_utc_naive", lambda: utc_now)
 
     ttl = gate.expires_at()
-    # 冻结语义：aware 进 aware 出（gate 不做时区归一，本批也不得改）
-    assert ttl == aware_now + timedelta(hours=gate.COMMITMENT_TTL_HOURS)
-    assert ttl.tzinfo is not None
+    assert ttl == utc_now + timedelta(hours=gate.COMMITMENT_TTL_HOURS)
+    assert ttl.tzinfo is None
     expected = ttl.strftime("%Y-%m-%d %H:%M:%S")
-    # strftime 天然丢弃 tzinfo，且 now_local 的 aware 分支壁钟就是北京时间 ⇒ 串可解析
-    assert scene.events._normalize_ts(expected) == "2026-11-17 09:23:00"
+    assert scene.events._normalize_ts(expected) == "2026-11-17 01:23:00"
 
     scene.state.decisions.append(
         {"should_contact": True, "message": PROMISE_TEXT, "reason": "有具体由头", "wait_minutes": None}
@@ -772,7 +763,7 @@ def test_replay_ttl_due_at_survives_non_utc8_host_clock(scene, monkeypatch):
     row = next(c for c in _open_commitments(scene) if "笔记" in str(c.get("detail") or ""))
     assert row["due_at"] == expected, f"due_at 必须可解析落库，实测 {row['due_at']!r}"
     # 到点即清：承诺不会永久挂账（这正是空串 due_at 时失效的那一步）。
-    assert scene.commitments.expire_commitments("2026-11-17 09:23:01", user_key=SESSION_A) == 1
+    assert scene.commitments.expire_commitments("2026-11-17 01:23:01", user_key=SESSION_A) == 1
     assert _open_commitments(scene) == []
 
 

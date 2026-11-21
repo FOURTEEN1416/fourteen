@@ -539,3 +539,19 @@ def normalize_character_card(data: dict[str, Any]) -> dict[str, Any]:
             normalized.pop(key, None)
 
     return normalized
+
+
+# ── 角色卡归属（W1 唯一 owner 真源）─────────────────────────
+#: 无主标记：user_id 为这些值（或空）的卡 = 公共模板 / 平台存量卡。
+_UNOWNED_MARKERS = {"", "default", "system"}
+
+
+def card_owner_key(card: dict[str, Any]) -> str:
+    """卡片的归属键；无主（公共模板 / 存量卡）返回空串。
+
+    真源在本模块（轻量、零服务端依赖）：`api/routers/character_routes`
+    与 `api/lifecycle`、清理脚本均从此处引用，避免「脚本场景 import
+    角色路由即触发 auth_jwt 启动检查」的重量耦合。
+    """
+    owner = str(card.get("user_id") or "").strip()
+    return "" if owner in _UNOWNED_MARKERS else owner

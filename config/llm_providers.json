@@ -28,6 +28,36 @@
         ]
       }
     },
+    "nex": {
+      "name": "Nex",
+      "model": "nex-n2.6",
+      "api_base": "",
+      "api_key": "",
+      "auth_mode": "bearer",
+      "max_tokens": 8192,
+      "temperature": 0.85,
+      "stream_enabled": true,
+      "description": "nex-n2.6（OpenAI 兼容），链上第 2 位备选。Base URL 与 API Key 经环境变量 NEX_API_BASE / NEX_API_KEY 注入（或 config/llm_providers.local.json），缺失时自动跳过、不阻塞现有链；调整 fallback_chain 顺序即可改变其优先级。",
+      "enabled": true,
+      "sort_order": 2,
+      "guide": {
+        "apply_url": "",
+        "free_quota": "以平台实际额度为准",
+        "steps": [
+          "获取 Nex 平台分配的 API Key 与 OpenAI 兼容 Base URL",
+          "设置环境变量 NEX_API_KEY=<key>、NEX_API_BASE=<base_url>（须含版本路径，如 /v1），或写入 config/llm_providers.local.json",
+          "保存设置后，系统按链序在 Agnes 之后、智谱之前使用 nex-n2.6"
+        ],
+        "tips": [
+          "本供应商使用 OpenAI 兼容协议，Base URL 须包含版本路径（如 /v1）",
+          "Base URL 或 API Key 任一缺失时，nex 自动跳过，不影响 Agnes / 智谱等其它供应商",
+          "想调整 nex 的优先级，改 fallback_chain 里的顺序即可（当前：agnes → nex → zhipu → xunfei → baidu）"
+        ],
+        "warnings": [
+          "git-tracked 配置里 api_key 恒为空；真实密钥只放 .env 或 config/llm_providers.local.json（均已 gitignore）"
+        ]
+      }
+    },
     "zhipu": {
       "name": "智谱AI",
       "model": "glm-4.5-flash",
@@ -42,9 +72,9 @@
           "type": "disabled"
         }
       },
-      "description": "glm-4.5-flash（免费），链上第 2 位，Agnes 不可用时自动接管。",
+      "description": "glm-4.5-flash（免费），链上第 3 位，Agnes/Nex 不可用时自动接管。",
       "enabled": true,
-      "sort_order": 2,
+      "sort_order": 3,
       "guide": {
         "apply_url": "https://open.bigmodel.cn",
         "free_quota": "GLM-4.5-Flash 免费档（已关闭思考模式，适配短句对话）",
@@ -76,7 +106,7 @@
       "stream_enabled": true,
       "description": "spark-lite 永久免费，Token 无限，并发 5，有效期至 2036 年。",
       "enabled": true,
-      "sort_order": 3,
+      "sort_order": 4,
       "guide": {
         "apply_url": "https://console.xfyun.cn",
         "free_quota": "Spark Lite 永久免费，Token 无限，有效期至 2036 年",
@@ -113,7 +143,7 @@
       "stream_enabled": true,
       "description": "ernie-speed-128k 每月 50 万 Token 免费，支持 128K 上下文。",
       "enabled": true,
-      "sort_order": 4,
+      "sort_order": 5,
       "guide": {
         "apply_url": "https://console.bce.baidu.com",
         "free_quota": "ERNIE-Speed-128k 每月 50 万 Token 免费，128K 上下文",
@@ -151,7 +181,7 @@
       "stream_enabled": true,
       "description": "deepseek-chat（DeepSeek-V3）质量更高，需自行申请 API Key（付费）。",
       "enabled": false,
-      "sort_order": 5,
+      "sort_order": 6,
       "guide": {
         "apply_url": "https://platform.deepseek.com",
         "free_quota": "无免费额度，按量计费（约 0.001 元/千 Token，价格极低）",
@@ -186,7 +216,7 @@
         "free_quota": "免费（使用已配置的供应商）",
         "steps": [
           "选择「自动回退」后无需任何操作",
-          "系统会按以下优先级尝试：Agnes → 智谱 → 讯飞 → 百度",
+          "系统会按以下优先级尝试：Agnes → Nex → 智谱 → 讯飞 → 百度",
           "如果某个供应商不可用（如 API Key 过期），会自动切换到下一个",
           "建议新用户选择此选项"
         ],
@@ -232,6 +262,7 @@
   },
   "fallback_chain": [
     "agnes",
+    "nex",
     "zhipu",
     "xunfei",
     "baidu",

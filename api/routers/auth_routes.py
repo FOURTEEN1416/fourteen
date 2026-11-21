@@ -46,6 +46,7 @@ from api.consent import (
 from api.database import User, UserSession, get_db
 from api.password_policy import PasswordStr, ensure_password_strength
 from api.routers.character_template_routes import provision_initial_character
+from utils.local_time import to_api_utc
 
 logger = logging.getLogger("auth_routes")
 
@@ -276,6 +277,16 @@ async def login(
     # 密码验证通过：连续失败计数归零
     auth_record_success(req.login)
 
+    # 2026-11-21 数据生命周期：登录时顺手清理该用户过期 refresh 会话
+    # （审计实况 user_sessions 53/49 过期行无全局清扫）。
+    try:
+        from api.lifecycle import cleanup_expired_user_sessions
+
+        await cleanup_expired_user_sessions(db, user_id=int(user.id))
+    except Exception as exc:  # noqa: BLE001
+        # 清理失败不阻塞登录（会话行本身有 expires_at 判定）。
+        logger.warning("登录会话清理失败 user=%s: %s", user.id, exc)
+
     # 生成令牌
     token_data = token_claims(user)
     access_token = create_access_token(token_data)
@@ -446,7 +457,7 @@ async def consent(
             return {
                 "detail": "Consent already recorded",
                 "agreement_version": existing.agreement_version,
-                "agreed_at": existing.agreed_at.isoformat() if existing.agreed_at else None,
+                "agreed_at": to_api_utc(existing.agreed_at),
             }
 
     record = await record_consent(db, user_id, req.agreement_version)
@@ -454,7 +465,7 @@ async def consent(
     return {
         "detail": "Consent recorded",
         "agreement_version": record.agreement_version,
-        "agreed_at": record.agreed_at.isoformat() if record.agreed_at else None,
+        "agreed_at": to_api_utc(record.agreed_at),
     }
 
 

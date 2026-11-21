@@ -6,7 +6,7 @@
 - chat_history: 对话历史（结构化版本，带角色/会话归属）
 - reminders: 提醒事项
 - pending_intents: 澄清任务状态机
-- reflections / trace_log / tool_call_log: 洞察与诊断
+- reflections / trace_log: 洞察与诊断
 
 2026-09-22 清理：affinity_log（零写入）、emotion_trajectory（零写入）、
 working_memory/sessions（唯一写入者 DB 版 WorkingMemory 已拆除）四张死表
@@ -28,7 +28,13 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from utils import session_key as session_key_mod
-from utils.local_time import local_day_utc_bounds, now_local
+from utils.local_time import (
+    local_day_utc_bounds,
+    local_text_to_utc_text,
+    now_utc_naive,
+    to_utc_naive,
+    utc_text_to_local_text,
+)
 
 # 默认库路径（2026-09-24 提为模块常量）：供 tests/conftest 的
 # isolate_runtime_state_files monkeypatch——旧实现把默认值写在 __init__
@@ -47,6 +53,32 @@ def default_db_path():
     return p if p.is_absolute() else PROJECT_ROOT / p
 
 logger = logging.getLogger("structured_memory")
+
+
+def _write_jsonl_backup(kind: str, rows: list[dict[str, Any]], backup_dir: Any = None) -> str | None:
+    """生命周期物理删除前备份（JSONL，一行一条，便于回滚核对）。
+
+    返回备份文件绝对路径；无行可备份时返回 None。备份失败即抛错，调用方
+    必须中止删除（宁可不删，不可无备份物理删）。
+    """
+    if not rows:
+        return None
+    from pathlib import Path
+
+    if backup_dir is not None:
+        root = Path(backup_dir)
+    else:
+        from utils.project_paths import project_path
+
+        root = project_path("data", "backups", "memory_lifecycle")
+    root.mkdir(parents=True, exist_ok=True)
+    stamp = now_utc_naive().strftime("%Y%m%dT%H%M%S%f")
+    path = root / f"{kind}_{stamp}.jsonl"
+    with path.open("w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+    return str(path.resolve())
+
 
 # 全局注册表，用于跟踪所有 StructuredMemory 实例，确保程序退出时关闭连接
 _structured_memory_instances: list[StructuredMemory] = []
@@ -248,16 +280,9 @@ class StructuredMemory:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
-                CREATE TABLE IF NOT EXISTS tool_call_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tool_name TEXT NOT NULL,
-                    arguments TEXT DEFAULT '{}',
-                    result TEXT DEFAULT '',
-                    duration_ms REAL DEFAULT 0,
-                    success BOOLEAN DEFAULT 1,
-                    trace_id TEXT DEFAULT '',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
+                -- 2026-11-21 可观测性批：tool_call_log 全仓零读写、生产/本地 0 行，
+                -- 已按 DELETION_LOG 退役。存量表由 scripts/retire_tool_call_log.py
+                -- 迁移删除；此处不得再建表，否则 DROP 后会被下次启动复活。
 
                 CREATE TABLE IF NOT EXISTS reflections (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1167,7 +1192,6 @@ class StructuredMemory:
           历史来源都被幂等跳过；新发言再提到则正常重抽（水位语义不变）。
         """
         import json
-        from datetime import datetime as _dt
         from datetime import timedelta as _td
 
         victims: list[dict[str, Any]] = []
@@ -1203,7 +1227,11 @@ class StructuredMemory:
                 if int(r["id"]) != int(fact_id)
                 and self.facts_near_duplicate(str(r["fact"] or ""), target_fact)
             ]
-            deleted_at = _dt.now()
+            # 2026-11-21 时间口径统一批：回收站两列统一 UTC naive 写入，与该表
+            # DDL 默认 datetime('now')（UTC）同口径。旧实现写北京墙钟，与默认值
+            # 在同一表混存；存量混合行由 scripts/migrate_time_columns_to_utc.py
+            # 按「restore_before-deleted_at 配对识别、无法识别从宽保留」处理。
+            deleted_at = now_utc_naive()
             for v in victims:
                 v_key = str(v.get("user_key") or "")
                 if recycle:
@@ -1261,15 +1289,32 @@ class StructuredMemory:
             if row is None:
                 return None
             data = json.loads(dict(row)["memory_content"])
+            fact_text = str(data.get("fact", "") or "")
+            fact_user_key = str(data.get("user_key", "") or "")
+            # 2026-11-21 精确同文去重：恢复前先查同归属 active 同文行；已存在
+            # 则只标记 restored，不再双插（生产 1361/1367 类重复的写入侧根因）。
+            if fact_text:
+                existing = conn.execute(
+                    "SELECT id FROM user_facts WHERE user_key = ? AND fact = ? "
+                    "AND status = 'active' ORDER BY id LIMIT 1",
+                    (fact_user_key, fact_text),
+                ).fetchone()
+                if existing is not None:
+                    conn.execute(
+                        "UPDATE memory_recycle_bin SET restored = 1 WHERE id = ?",
+                        (recycle_id,),
+                    )
+                    conn.commit()
+                    return int(existing["id"])
             cur = conn.execute(
                 "INSERT INTO user_facts (fact, category, confidence, source, user_key, access_count, status) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'active')",
                 (
-                    data.get("fact", ""),
+                    fact_text,
                     data.get("category", "general"),
                     data.get("confidence", 0.5),
                     data.get("source", ""),
-                    data.get("user_key", ""),
+                    fact_user_key,
                     int(data.get("access_count", 0) or 0),
                 ),
             )
@@ -1279,27 +1324,258 @@ class StructuredMemory:
             conn.commit()
             return cur.lastrowid  # type: ignore[no-any-return]
 
+    # ── 数据生命周期维护（2026-11-21）──────────────────────
+
+    def purge_expired_recycle_bin(
+        self,
+        grace_days: int = 7,
+        *,
+        now: datetime | None = None,
+        backup_dir: Any = None,
+    ) -> dict[str, Any]:
+        """回收站 TTL 出库：``restore_before`` + 宽限期已过 → 物理删除。
+
+        背景：`memory_recycle_bin` 只有写入没有出库（生产 780 行、restored=0、
+        284 行已过期）。本方法先备份再物理删除，保证可回滚核对。
+        时间口径（2026-11-21 统一批）：``restore_before`` 由 `delete_fact` 以
+        UTC naive 写入（DDL 默认 ``datetime('now')`` 亦为 UTC），这里统一用
+        UTC 比较；显式传入的 ``now`` 经 :func:`to_utc_naive` 归一（naive 视为
+        已是 UTC）。存量北京墙钟行由迁移脚本按「配对识别、从宽保留」处理：
+        未平移行的 restore_before 数值偏大 8 小时，出库判定只会更晚、不会提前
+        删除（宁晚勿早删）。
+        """
+        grace = max(0, int(grace_days or 0))
+        base = to_utc_naive(now) if now is not None else now_utc_naive()
+        cutoff = base - timedelta(days=grace)
+        with self._conn() as conn:
+            if not self._has_table(conn, "memory_recycle_bin"):
+                return {"expired": 0, "deleted": 0, "backup": None}
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM memory_recycle_bin ORDER BY id"
+            ).fetchall()]
+        expired: list[dict[str, Any]] = []
+        for row in rows:
+            raw = str(row.get("restore_before") or "").strip()
+            if not raw:
+                continue
+            try:
+                deadline = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                logger.warning("回收站行 %s 的 restore_before 不可解析，跳过", row.get("id"))
+                continue
+            if deadline <= cutoff:
+                expired.append(row)
+        if not expired:
+            return {"expired": 0, "deleted": 0, "backup": None}
+        backup = _write_jsonl_backup("memory_recycle_bin", expired, backup_dir)
+        ids = [int(r["id"]) for r in expired]
+        with self._conn(write=True) as conn:
+            conn.executemany(
+                "DELETE FROM memory_recycle_bin WHERE id = ?",
+                [(i,) for i in ids],
+            )
+            conn.commit()
+        logger.info("回收站 TTL 出库：删除 %d 行（备份=%s）", len(ids), backup)
+        return {"expired": len(expired), "deleted": len(ids), "backup": backup}
+
+    def prune_deletion_watermarks(self, *, backup_dir: Any = None) -> dict[str, Any]:
+        """裁剪失效删除水位：早于该键最小相关 chat id 的已确认水位归档。
+
+        水位只在「未来重抽的 source_last_id <= through_chat_id」时才有拦截
+        意义。若该会话现存最小 chat id 已大于水位，后续重抽必然拿到更大的
+        id，水位永久失效 → 备份后删除。**没有聊天记录的键保留水位**（迟到
+        抽取任务仍可能带旧 source_last_id，水位是唯一防线）。
+        """
+        with self._conn() as conn:
+            if not self._has_table(conn, "fact_deletion_watermarks"):
+                return {"candidates": 0, "pruned": 0, "backup": None}
+            rows = [dict(r) for r in conn.execute(
+                """
+                SELECT w.user_key, w.fact, w.through_chat_id,
+                       (SELECT MIN(c.id) FROM chat_history c
+                         WHERE c.session_id = w.user_key) AS min_chat_id
+                  FROM fact_deletion_watermarks w
+                 ORDER BY w.user_key, w.fact
+                """
+            ).fetchall()]
+        # 只在「该键仍存在聊天窗口」且水位早于窗口最小值时裁剪；没有聊天
+        # 记录的键保留水位（防迟到抽取任务用旧 source_last_id 复活已删事实）。
+        dead = [
+            r for r in rows
+            if r.get("min_chat_id") is not None
+            and int(r.get("through_chat_id") or 0) < int(r.get("min_chat_id") or 0)
+        ]
+        if not dead:
+            return {"candidates": 0, "pruned": 0, "backup": None}
+        backup = _write_jsonl_backup("fact_deletion_watermarks", dead, backup_dir)
+        with self._conn(write=True) as conn:
+            conn.executemany(
+                "DELETE FROM fact_deletion_watermarks WHERE user_key = ? AND fact = ?",
+                [(str(r["user_key"]), str(r["fact"])) for r in dead],
+            )
+            conn.commit()
+        logger.info("删除水位裁剪：归档 %d 行（备份=%s）", len(dead), backup)
+        return {"candidates": len(dead), "pruned": len(dead), "backup": backup}
+
+    @staticmethod
+    def _owner_scope_of(user_key: str) -> str:
+        """取归属域：``1001:wxid`` → ``1001``；非数字前缀原样返回。"""
+        key = str(user_key or "")
+        left, sep, _ = key.partition(":")
+        return left if sep and left.isdigit() else key
+
+    @staticmethod
+    def fact_semantic_similarity(a: str, b: str) -> float:
+        """事实语义相似度（字符二元组 Jaccard；仅用于候选，不自动合并）。
+
+        取舍：词面相似无法证明主体、否定词和日期相同，因此**只做候选**，
+        自动合并仍只允许 `facts_near_duplicate` 的归一化同文。
+        """
+        ta = "".join(str(a or "").lower().split())
+        tb = "".join(str(b or "").lower().split())
+        if not ta or not tb:
+            return 0.0
+        if ta == tb:
+            return 1.0
+        ga = {ta[i:i + 2] for i in range(max(0, len(ta) - 1))}
+        gb = {tb[i:i + 2] for i in range(max(0, len(tb) - 1))}
+        if not ga or not gb:
+            return 0.0
+        return len(ga & gb) / len(ga | gb)
+
+    def find_semantic_duplicate_candidates(
+        self,
+        text: str,
+        user_key: str,
+        *,
+        window_days: int = 90,
+        threshold: float = 0.85,
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """语义查重（90 天窗）候选：只读，不写入、不自动合并。
+
+        设计：精确同文在写入侧已强制去重；语义相似沿用 90 天窗口，返回
+        ``[{id, fact, similarity}]`` 供维护/人工复核。窗口外旧事实不参与
+        （避免把半年前的同话题事实当成当前重复）。
+        """
+        base = now or datetime.now()
+        if base.tzinfo is not None:
+            base = base.replace(tzinfo=None)
+        cutoff = (base - timedelta(days=max(1, int(window_days or 90)))).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        with self._conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT id, fact, updated_at FROM user_facts "
+                "WHERE user_key = ? AND status = 'active' AND updated_at >= ? "
+                "ORDER BY updated_at DESC",
+                (str(user_key or ""), cutoff),
+            ).fetchall()]
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            score = self.fact_semantic_similarity(text, str(row.get("fact") or ""))
+            if score >= float(threshold):
+                out.append({
+                    "id": int(row["id"]),
+                    "fact": str(row.get("fact") or ""),
+                    "similarity": round(score, 4),
+                })
+        return out
+
+    def dedupe_exact_facts(
+        self, *, user_key: str | None = None, backup_dir: Any = None
+    ) -> dict[str, Any]:
+        """存量精确同文去重（维护任务）：同归属域归一化同文只留一行。
+
+        生产实证 1361/1367、1364/1365/1370 为精确同文重复。合并规则：
+        保留置信度最高（并列取最早 id）的行，access_count 求和，topics 并集，
+        category 取 relationship/commitment 优先。删除前行备份。
+        """
+        scope_keys: set[str] | None = None
+        if user_key:
+            scope_keys = set(self.identity_keys(str(user_key)))
+        with self._conn() as conn:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT * FROM user_facts WHERE status = 'active' ORDER BY id"
+            ).fetchall()]
+        groups: dict[tuple[tuple[str, ...], str], list[dict[str, Any]]] = {}
+        group_cache: dict[str, tuple[str, ...]] = {}
+
+        def _identity_group(key: str) -> tuple[str, ...]:
+            if key not in group_cache:
+                group_cache[key] = tuple(sorted(self.identity_keys(key)))
+            return group_cache[key]
+
+        for row in rows:
+            row_key = str(row.get("user_key") or "")
+            if scope_keys is not None and row_key not in scope_keys:
+                continue
+            norm = self._normalize_fact_text(str(row.get("fact") or ""))
+            if not norm:
+                continue
+            groups.setdefault((_identity_group(row_key), norm), []).append(row)
+        # 先产出合并计划；备份成功后才允许删行（宁可不删，不可无备份物理删）。
+        plan: list[tuple[dict[str, Any], list[dict[str, Any]], list[str], str]] = []
+        victims: list[dict[str, Any]] = []
+        for (_scope, _norm), items in groups.items():
+            if len(items) < 2:
+                continue
+            items.sort(key=lambda r: (-float(r.get("confidence") or 0.0), int(r["id"])))
+            keep = items[0]
+            rest = items[1:]
+            topics: list[str] = []
+            for r in items:
+                for t in str(r.get("topics") or "").split(","):
+                    if t and t not in topics:
+                        topics.append(t)
+            category = keep.get("category") or "general"
+            for r in rest:
+                if str(r.get("category") or "") in ("relationship", "commitment"):
+                    category = r["category"]
+                    break
+            plan.append((keep, items, topics, category))
+            victims.extend(rest)
+        if not victims:
+            return {"groups": 0, "deleted": 0, "backup": None}
+        backup = _write_jsonl_backup("user_facts_exact_dupes", victims, backup_dir)
+        with self._conn(write=True) as conn:
+            for keep, items, topics, category in plan:
+                conn.execute(
+                    "UPDATE user_facts SET confidence = ?, access_count = ?, "
+                    "category = ?, topics = ?, last_seen_at = CURRENT_TIMESTAMP, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (
+                        max(float(r.get("confidence") or 0.0) for r in items),
+                        sum(int(r.get("access_count") or 0) for r in items),
+                        category,
+                        ",".join(topics),
+                        int(keep["id"]),
+                    ),
+                )
+                for r in items[1:]:
+                    conn.execute("DELETE FROM user_facts WHERE id = ?", (int(r["id"]),))
+            conn.commit()
+        logger.info(
+            "事实精确去重：合并 %d 组、删除 %d 行（备份=%s）",
+            len(plan), len(victims), backup,
+        )
+        return {"groups": len(plan), "deleted": len(victims), "backup": backup}
+
     def add_facts_batch(self, facts: list[dict[str, Any]], user_key: str = "") -> list[int]:
-        """批量添加事实"""
+        """批量添加事实（走唯一写入口 add_fact_receipt，精确同文自动强化）。"""
         if not facts:
             return []
         ids: list[int] = []
-        with self._conn(write=True) as conn:
-            for f in facts:
-                cur = conn.execute(
-                    "INSERT INTO user_facts (fact, category, confidence, source, user_key, access_count, status) "
-                    "VALUES (?, ?, ?, ?, ?, 0, 'active')",
-                    (
-                        f.get("fact", ""),
-                        f.get("category", "general"),
-                        f.get("confidence", 0.5),
-                        f.get("source", ""),
-                        user_key or "",
-                    ),
-                )
-                ids.append(int(cur.lastrowid or 0))
-            conn.commit()
-            return ids
+        for f in facts:
+            receipt = self.add_fact_receipt(
+                str(f.get("fact", "") or ""),
+                category=str(f.get("category", "general") or "general"),
+                confidence=float(f.get("confidence", 0.5) or 0.5),
+                source=str(f.get("source", "") or ""),
+                user_key=user_key or "",
+            )
+            ids.append(int(receipt.get("fact_id") or 0))
+        return ids
 
     # ── 记忆反思 ──────────────────────────────────────────
 
@@ -1672,19 +1948,28 @@ class StructuredMemory:
             return int(row["cnt"]) if row else 0
 
     # ── 提醒 ──────────────────────────────────────────────
+    #
+    # 时间口径（2026-11-21 统一批）：
+    # - 存储：reminders.trigger_time / delivered_at 一律 **UTC naive**；
+    # - 输入：工具/LLM 仍按北京时间字符串传入，add_reminder / reschedule_reminder
+    #   在写边界用 local_text_to_utc_text 转换；
+    # - 输出：get_pending_reminders / list_reminders / get_reminder 在读边界
+    #   用 utc_text_to_local_text 转回北京时间，模型/用户看到的仍是本地钟点；
+    # - 比较：get_due_reminders 用 UTC now 与 UTC 列比较，TTL 语义不漂移。
 
     @staticmethod
-    def _now_local() -> str:
-        """本地时间字符串（与 ``utils.local_time.now_local`` **同源**）。
+    def _now_utc() -> str:
+        """当前 UTC 时间字符串（写入口径；原 ``_now_local`` 的替代）。"""
+        return now_utc_naive().strftime("%Y-%m-%d %H:%M:%S")
 
-        提醒的时间比较统一走应用层：SQLite ``datetime('now')`` 是 UTC，
-        与 LLM 写入的北京时间字符串差 8 小时（历史缺陷）。
-
-        ⚠️ 2026-09-20：原先直接 ``datetime.now()``（**依赖主机时区**，在非
-        UTC+8 主机上会静默错 8 小时且无回退）—— 现统一委托公共真源，
-        自动获得 UTC+8 回退，与 ASE/记忆管线共用同一时钟。
-        """
-        return now_local().strftime("%Y-%m-%d %H:%M:%S")
+    @staticmethod
+    def _reminder_row_for_display(row: Any) -> dict[str, Any]:
+        """提醒行 → 本地墙钟展示口径（仅转换时间列，其余字段原样）。"""
+        data = dict(row)
+        for key in ("trigger_time", "delivered_at"):
+            if data.get(key):
+                data[key] = utc_text_to_local_text(data[key])
+        return data
 
     def add_reminder(
         self,
@@ -1693,18 +1978,25 @@ class StructuredMemory:
         session_key: str = "",
         user_id: int | None = None,
     ) -> int:
-        """添加提醒（session_key 为空 = 无投递目标，轮询不会投递它）"""
+        """添加提醒（session_key 为空 = 无投递目标，轮询不会投递它）。
+
+        ``trigger_time`` 入参是**北京时间**文本；落库前转换为 UTC naive。
+        """
+        stored_trigger = local_text_to_utc_text(trigger_time) if trigger_time else None
         with self._conn(write=True) as conn:
             cursor = conn.execute(
                 "INSERT INTO reminders (content, trigger_time, session_key, user_id) "
                 "VALUES (?, ?, ?, ?)",
-                (content, trigger_time, session_key, user_id),
+                (content, stored_trigger, session_key, user_id),
             )
             conn.commit()
             return cursor.lastrowid  # type: ignore[no-any-return]
 
     def get_pending_reminders(self, session_key: str = "") -> list[dict[str, Any]]:
-        """查询未触发的提醒（query 工具用；session_key 空 = 不过滤）"""
+        """查询未触发的提醒（query 工具用；session_key 空 = 不过滤）。
+
+        读边界：trigger_time / delivered_at 转回北京时间展示。
+        """
         with self._conn() as conn:
             sql = (
                 "SELECT * FROM reminders WHERE active = 1 AND triggered = 0 "
@@ -1716,24 +2008,28 @@ class StructuredMemory:
                 params.append(session_key)
             sql += " ORDER BY trigger_time ASC"
             rows = conn.execute(sql, params).fetchall()
-            return [dict(r) for r in rows]
+            return [self._reminder_row_for_display(r) for r in rows]
 
-    def get_due_reminders(self, now_local: str | None = None) -> list[dict[str, Any]]:
-        """轮询专用：已到期且具备投递目标的提醒（北京时间应用层比较）"""
-        now_local = now_local or self._now_local()
+    def get_due_reminders(self, now_utc: str | None = None) -> list[dict[str, Any]]:
+        """轮询专用：已到期且具备投递目标的提醒（UTC 应用层比较）。
+
+        ``now_utc`` 缺省取 :meth:`_now_utc`；比较两端同为 UTC naive 文本，
+        因此“本地凌晨/跨日”不再影响到期判定。
+        """
+        now_utc = now_utc or self._now_utc()
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT * FROM reminders WHERE active = 1 AND triggered = 0 "
                 "AND status = 'pending' AND session_key != '' "
                 "AND trigger_time IS NOT NULL AND trigger_time <= ? "
                 "ORDER BY trigger_time ASC",
-                (now_local,),
+                (now_utc,),
             ).fetchall()
             return [dict(r) for r in rows]
 
     def mark_reminder_result(self, reminder_id: int, delivered: bool) -> None:
-        """记录投递结果：成功=已触发；失败累计，3 次后判死（可查不可发）"""
-        now = self._now_local()
+        """记录投递结果：成功=已触发；失败累计，3 次后判死（可查不可发）。"""
+        now = self._now_utc()
         with self._conn(write=True) as conn:
             if delivered:
                 conn.execute(
@@ -1757,12 +2053,15 @@ class StructuredMemory:
         self.mark_reminder_result(reminder_id, delivered=True)
 
     def get_reminder(self, reminder_id: int) -> dict[str, Any] | None:
-        """按 id 取单条提醒（含终态行：delivered / failed / cancelled）。"""
+        """按 id 取单条提醒（含终态行：delivered / failed / cancelled）。
+
+        读边界：时间列转回北京时间展示。
+        """
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT * FROM reminders WHERE id = ?", (reminder_id,)
             ).fetchone()
-            return dict(row) if row else None
+            return self._reminder_row_for_display(row) if row else None
 
     def list_reminders(
         self, session_key: str, status: str | None = None
@@ -1785,7 +2084,10 @@ class StructuredMemory:
             params.append(status)
         sql += " ORDER BY trigger_time IS NULL, trigger_time ASC, id ASC"
         with self._conn() as conn:
-            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+            return [
+                self._reminder_row_for_display(r)
+                for r in conn.execute(sql, params).fetchall()
+            ]
 
     def cancel_reminder(self, reminder_id: int, session_key: str) -> bool:
         """本人取消一条提醒（不再投递，行保留可查）。
@@ -1816,12 +2118,13 @@ class StructuredMemory:
         """
         if not session_key or not trigger_time:
             return None
+        stored_trigger = local_text_to_utc_text(trigger_time)
         with self._conn(write=True) as conn:
             cur = conn.execute(
                 "UPDATE reminders SET trigger_time = ?, status = 'pending', "
                 "active = 1, fail_count = 0 "
                 "WHERE id = ? AND session_key = ? AND status != 'delivered'",
-                (trigger_time, reminder_id, session_key),
+                (stored_trigger, reminder_id, session_key),
             )
             conn.commit()
             if cur.rowcount <= 0:
@@ -1829,7 +2132,7 @@ class StructuredMemory:
             row = conn.execute(
                 "SELECT * FROM reminders WHERE id = ?", (reminder_id,)
             ).fetchone()
-            return dict(row) if row else None
+            return self._reminder_row_for_display(row) if row else None
 
     def restore_reminder(self, reminder_id: int, session_key: str) -> bool:
         """显式恢复一条 failed / cancelled 提醒（回 pending、清失败计数）。
@@ -1865,11 +2168,12 @@ class StructuredMemory:
     ) -> int:
         """记录/更新一条待澄清任务（同会话只保留最新一条）
 
-        过期时刻必须与读侧 ``get_active_pending_intent`` / ``_now_local`` 同源：
-        旧写法用裸 ``datetime.now()``（依赖主机时区），在 UTC CI/容器上比
-        北京墙钟慢 8 小时，pending 一落库就被判过期。
+        时间口径（2026-11-21 统一批）：``updated_at`` / ``expires_at`` 一律
+        **UTC naive**；写入与读取（``get_active_pending_intent``）同源比较，
+        因此 15 分钟 TTL 在任何宿主时区下都不漂移。``created_at`` 由
+        ``DEFAULT CURRENT_TIMESTAMP`` 写入，本来即为 UTC。
         """
-        now_str = self._now_local()
+        now_str = self._now_utc()
         now_dt = datetime.strptime(now_str, "%Y-%m-%d %H:%M:%S")
         expires = (now_dt + timedelta(minutes=ttl_minutes)).strftime("%Y-%m-%d %H:%M:%S")
         with self._conn(write=True) as conn:
@@ -1919,7 +2223,7 @@ class StructuredMemory:
                 "WHERE session_key = ? AND status = 'active'",
                 (session_key,),
             ).fetchone()
-            if row and row["expires_at"] and row["expires_at"] <= self._now_local():
+            if row and row["expires_at"] and row["expires_at"] <= self._now_utc():
                 conn.execute(
                     "UPDATE pending_intents SET status = 'expired' WHERE id = ?",
                     (row["id"],),
@@ -1934,7 +2238,7 @@ class StructuredMemory:
             conn.execute(
                 "UPDATE pending_intents SET status = ?, updated_at = ? "
                 "WHERE session_key = ? AND status = 'active'",
-                (status, self._now_local(), session_key),
+                (status, self._now_utc(), session_key),
             )
             conn.commit()
 
@@ -1944,7 +2248,7 @@ class StructuredMemory:
             cursor = conn.execute(
                 "UPDATE pending_intents SET status = 'expired', updated_at = ? "
                 "WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= ?",
-                (self._now_local(), self._now_local()),
+                (self._now_utc(), self._now_utc()),
             )
             conn.commit()
             return cursor.rowcount  # type: ignore[no-any-return]

@@ -8,6 +8,7 @@
 
 支持的 provider:
   - agnes:     Agnes AI（agnes-3.0-flash，OpenAI 兼容，首选）
+  - nex:       Nex（nex-n2.6，OpenAI 兼容，第二备选；NEX_API_BASE/NEX_API_KEY 注入）
   - zhipu:     智谱AI
   - xunfei:    讯飞星火
   - baidu:     百度千帆
@@ -21,6 +22,7 @@ import inspect
 import json
 import logging
 import os
+import random
 import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -102,7 +104,11 @@ def _merge_attachments(
 
 
 # ── 默认 fallback 链 ──
-DEFAULT_FALLBACK_CHAIN = ["agnes", "zhipu", "xunfei", "baidu"]
+# 2026-11-21 nex 接入批：nex（nex-n2.6，OpenAI 兼容）插在 agnes 之后、zhipu 之前
+# 作为第二备选。调整优先级 = 调整本列表 / config/llm_providers.json 的
+# fallback_chain / config/system.yaml 的 llm.fallback_chain（三处真源必须一致，
+# 见 tests/test_provider_description_consistency.py）。
+DEFAULT_FALLBACK_CHAIN = ["agnes", "nex", "zhipu", "xunfei", "baidu"]
 
 # ── Provider 失败哨兵 ──
 # 各 provider 的 _handle_error()/_mock_reply() 统一返回**全角括号包裹**的固定文案。
@@ -239,6 +245,10 @@ def _resolve_env_override(provider_key: str, config: dict[str, Any]) -> dict[str
                   "secret": "BAIDU_API_SECRET"},
         "deepseek": {"key": "DEEPSEEK_API_KEY", "base": "DEEPSEEK_API_BASE", "model": "DEEPSEEK_MODEL"},
         "agnes": {"key": "AGNES_API_KEY", "base": "AGNES_API_BASE", "model": "AGNES_MODEL"},
+        # 2026-11-21 nex 接入批：nex-n2.6（OpenAI 兼容）。tracked json 里
+        # api_base/api_key 恒为空，真实值经 NEX_API_BASE / NEX_API_KEY 注入
+        # （或 config/llm_providers.local.json overlay），缺失时网关 fail-soft 跳过。
+        "nex": {"key": "NEX_API_KEY", "base": "NEX_API_BASE", "model": "NEX_MODEL"},
     }
 
     mapping = env_map.get(provider_key)
@@ -278,7 +288,7 @@ class MultiProviderGateway:
     多供应商网关 — 自动在多个 LLM 提供商之间 fallback
 
     按 fallback_chain 顺序尝试:
-      Agnes → 智谱AI → 讯飞星火 → 百度千帆
+      Agnes → Nex → 智谱AI → 讯飞星火 → 百度千帆
     如果用户配置了 DeepSeek，自动插入到最前面。
     """
 
@@ -295,6 +305,9 @@ class MultiProviderGateway:
     # 恢复更快（agnes 实测延迟 3.8~21s 波动，非持续故障）。
     _BREAKER_THRESHOLD = 2      # 连续失败次数达到即开闸
     _BREAKER_COOLDOWN = 120.0   # 开闸后跳过该 provider 的秒数（到期半开重探）
+    # 2026-11-21 429 尊重 Retry-After 批：
+    _RETRY_AFTER_BUFFER = 5.0    # Retry-After 提示之上的附加缓冲（秒）
+    _BREAKER_JITTER_MAX = 30.0   # 熔断时长随机抖动上限（秒）：错开多 worker 同步重试
 
     def __init__(
         self,
@@ -324,6 +337,10 @@ class MultiProviderGateway:
                 ds_cfg = provider_configs.get("deepseek") or DEFAULT_PROVIDER_CONFIG.get("deepseek", {})
                 if inherit_platform:
                     ds_cfg = _resolve_env_override("deepseek", ds_cfg)
+                # enabled 开关（2026-11-21）：管理端显式停用的供应商不入链
+                if ds_cfg.get("enabled") is False:
+                    logger.info("[MultiGateway] deepseek 已停用（enabled=false），跳过")
+                    continue
                 ds_key = ds_cfg.get("api_key") or (os.environ.get("DEEPSEEK_API_KEY", "") if inherit_platform else "")
                 if not ds_key:
                     logger.info("[MultiGateway] deepseek 未配置 API Key，跳过（避免 mock 入链）")
@@ -347,15 +364,33 @@ class MultiProviderGateway:
             if inherit_platform:
                 cfg = _resolve_env_override(key, cfg)
 
+            # enabled 开关（2026-11-21 nex 接入批）：管理端显式停用（enabled=false）
+            # 的供应商不入链——此前该字段只有管理端展示在消费，网关侧是死配置。
+            if cfg.get("enabled") is False:
+                logger.info("[MultiGateway] %s 已停用（enabled=false），跳过", key)
+                continue
+
             # 跳过没有 API Key 的 provider
             if not cfg.get("api_key"):
                 logger.info("[MultiGateway] %s 未配置 API Key，跳过", key)
                 continue
 
+            # fail-soft（2026-11-21）：有 key 但确实解析不出 api_base 的供应商
+            # 无法发请求，与其入链后每轮白打一发必失败请求再降级，不如构造期
+            # 直接跳过（nex 的 base_url 只来自环境变量，缺失时在此静默让路，
+            # 不阻塞现有链）。已知供应商缺省 base 回落 DEFAULT_PROVIDER_CONFIG
+            # ——hermetic 测试/旧调用方只传 api_key 的行为保持兼容。
+            api_base = cfg.get("api_base") or DEFAULT_PROVIDER_CONFIG.get(key, {}).get(
+                "api_base", ""
+            )
+            if not api_base:
+                logger.info("[MultiGateway] %s 未配置 API Base，跳过", key)
+                continue
+
             self._providers[key] = OpenAICompatibleProvider(
                 provider_name=key,
                 api_key=cfg.get("api_key", ""),
-                api_base=cfg.get("api_base", ""),
+                api_base=api_base,
                 model=cfg.get("model", ""),
                 auth_mode=cfg.get("auth_mode", "bearer"),
                 max_tokens=cfg.get("max_tokens", 2048),
@@ -410,6 +445,26 @@ class MultiProviderGateway:
             return False
         return True
 
+    def _breaker_cooldown_for(self, key: str) -> float:
+        """本次开闸的冷却时长：``max(默认冷却, Retry-After + 缓冲) + 随机抖动``。
+
+        2026-11-21 429 尊重 Retry-After 批：
+        - 上游 429 时会通过 ``Retry-After`` 头告知最早可重试时刻（生产对账实锤
+          旧退避不读它）。provider 已把提示暂存在实例上，这里消费（读取即清除），
+          冷却取 ``max(默认 120s, 提示 + 缓冲)``——既不早于解限撞墙，也不无谓
+          降温过久；
+        - 叠加 ``[0, _BREAKER_JITTER_MAX]`` 的随机抖动：多 worker 同时撞 429 时
+          各自的熔断到期时刻被错开，避免冷却一到大批请求同时惊醒再挤爆上游。
+        """
+        base = float(self._BREAKER_COOLDOWN)
+        provider = self._providers.get(key)
+        consume = getattr(provider, "consume_retry_after_hint", None)
+        if callable(consume):
+            hint = consume()
+            if hint and hint > 0:
+                base = max(base, float(hint) + self._RETRY_AFTER_BUFFER)
+        return base + random.uniform(0.0, self._BREAKER_JITTER_MAX)
+
     def _mark_provider_result(self, key: str, ok: bool, *, immediate: bool = False) -> None:
         """记账 provider 成败。
 
@@ -425,10 +480,11 @@ class MultiProviderGateway:
         n = self._breaker_failures.get(key, 0) + 1
         self._breaker_failures[key] = n
         if n >= 1 and (immediate or n >= self._BREAKER_THRESHOLD):
-            self._breaker_open_until[key] = time.time() + self._BREAKER_COOLDOWN
+            cooldown = self._breaker_cooldown_for(key)
+            self._breaker_open_until[key] = time.time() + cooldown
             logger.warning(
-                "[MultiGateway] provider %s 连续失败 %d 次，熔断 %.0fs",
-                key, n, self._BREAKER_COOLDOWN,
+                "[MultiGateway] provider %s 连续失败 %d 次，熔断 %.1fs（含 Retry-After/抖动）",
+                key, n, cooldown,
             )
 
     def _chain_keys(self, start_key: str = "") -> list[str]:

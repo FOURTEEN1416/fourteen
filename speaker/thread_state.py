@@ -145,3 +145,47 @@ class ThreadState:
         except Exception as e:  # noqa: BLE001
             logger.warning("[speaker][thread] mark_recalled 失败 session=%s: %s", self.session_key, e)
             return False
+
+    def followup_allowed(
+        self, topic: str, *, now: datetime | None = None, limit: int = 1,
+    ) -> bool:
+        """同话题未回复追问是否还有额度（2026-11-21 主动线治理批）。
+
+        默认最多 1 次追问；无匹配话题行/状态机关闭 → True（fail-open，
+        不能因为话题状态缺失把主动线整体打哑）。
+        """
+        if not self.character_id:
+            return True
+        try:
+            from utils import topic_state
+
+            return bool(
+                topic_state.topic_followup_allowed(
+                    self.session_key,
+                    self.character_id,
+                    topic,
+                    now=now,
+                    limit=limit,
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[speaker][thread] followup_allowed 失败 session=%s: %s", self.session_key, e)
+            return True
+
+    def note_followup(
+        self, topic: str, *, now: datetime | None = None,
+    ) -> bool:
+        """记录一次已投递的同话题追问；失败返回 False（不阻塞主链）。"""
+        if not self.character_id:
+            return False
+        try:
+            from utils import topic_state
+
+            return bool(
+                topic_state.note_topic_followup(
+                    self.session_key, self.character_id, topic, now=now
+                )
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[speaker][thread] note_followup 失败 session=%s: %s", self.session_key, e)
+            return False

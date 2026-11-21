@@ -8,16 +8,16 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-5312-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-5521-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **当前状态（2026-11-14 文档清理批）**：v1.70 语音真人感根治（`voice/voice_script.py` 唯一出口 + 情绪映射补全 + `pin_character_voice.py`）**已随 `cbb82aa` 三端部署（2026-11-09）**；v1.71 Speaker 统一出口原子施工（`speaker/` 承接人设/能力/话题提示词、拆条、投递回执与双账本）与 v1.72 六路对抗验收修复（**5 high + 6 medium** 全部修复：topic 旧表清场/迁移、提醒部分受理续投、语音回执守卫与续租、跨进程 peer 互斥、广播脚本契约）**本地已提交未 push、未部署**（本地领先 `origin/main` 6 提交）。全量 **5028 通过 + 2 跳过 / 收集 5030**（317 文件），ruff 0。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
+> **当前状态（2026-11-22 九问题根治批）**：v1.74 生产体检九问题根治——死会话六态状态机（`needs_reauth` 终态）/ UTC 时间口径统一（迁移脚本+启动版本闸）/ 出站质量守卫三道闸（历史去重·空台词重生成·模板与最小信息增量）/ 主动线资格门+投递熔断+topic 追问限 1 / 测试账号清理工具（dry-run 默认）/ 称呼语义拆分（`user_calls_ai` 逐行判别迁移）/ 可观测性降噪与工具账本成对落账 / agnes 429 尊重 Retry-After + **nex-n2.6 接入**（链序 agnes→nex→zhipu）。**本地全链验证绿；生产停机窗口（备份→UTC 迁移→测试账号删除→tool_call_log 下线→部署）待执行**。全量八块 328 文件 0 失败 / 收集 5238，ruff 0。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
 
-> **测试口径**（后端 = 2026-11-13 v1.72 实测）：后端 **5028 passed + 2 skipped / 0 failed**（收集 **5030** / **317 个测试文件**；现役角色卡 **45 张**；2 跳过=`test_cache.py:297` Redis 环境 + `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑））。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
-> 前端 `283 passed`（vitest 5，42 文件）+ `tsc --noEmit` 0 错误；ruff 全仓 0 错。徽章口径 **5312**（5028 Py + 283 FE + 1 标记）。
+> **测试口径**（后端 = 2026-11-22 九问题根治批实测）：后端 **5236 passed + 2 skipped / 0 failed**（收集 **5238** / **328 个测试文件**；现役角色卡 **45 张**；2 跳过=`test_cache.py:297` Redis 环境 + `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑））。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> 前端 `284 passed`（vitest 5，42 文件）+ `tsc --noEmit` 0 错误；ruff 全仓 0 错。徽章口径 **5521**（5236 Py + 284 FE + 1 标记）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
 ---
@@ -117,6 +117,9 @@ wechat: {}                # 微信直连，扫码自动配
 >   文档中的「角色卡库」指运行/部署侧需单独投递的目录（私有包或服务器本地），不是 git 真源。
 > - `config/llm_providers.json` 只存供应商元数据（`api_key` 恒为空）；
 >   真实 key 走 `config/llm_providers.local.json`（gitignored）或 `*_API_KEY` 环境变量。
+> - Nex（`nex-n2.6`，链上第 2 位备选）：`NEX_API_BASE` / `NEX_API_KEY` 环境变量
+>   （或 `config/llm_providers.local.json`）注入，二者任一缺失时该供应商自动跳过，
+>   不影响 Agnes/智谱等其它供应商；调整 `fallback_chain` 顺序即可改变优先级。
 
 ---
 

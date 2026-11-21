@@ -58,6 +58,22 @@ from utils import session_key as session_key_mod  # noqa: E402
 
 logger = logging.getLogger("run_api")
 
+
+def _ensure_time_caliber_migrated() -> None:
+    """启动期版本闸：UTC 迁移未落标记 → 生产拒绝启动 / 开发 CRITICAL 放行。
+
+    迁移本身必须在停机窗口由 ``scripts/migrate_time_columns_to_utc.py
+    --apply`` 显式执行（备份 + 幂等标记 + 失败按备份整体恢复）；本入口只做
+    **只读**校验，不在启动期隐式写库。未迁移就上线会把旧北京墙钟行当 UTC
+    读取（提醒提前 8 小时、话题 TTL 偏移），属不可上线的半迁移态。
+    """
+    from utils.time_caliber import ensure_time_caliber_migrated
+
+    ensure_time_caliber_migrated()
+
+
+_ensure_time_caliber_migrated()
+
 # ── 初始化编排器 ──
 orchestrator = OptimizedOrchestrator()
 if not orchestrator.initialize(config_dir="config"):
@@ -150,6 +166,12 @@ async def _ws_outbox_drain(
         return
     while True:
         try:
+            # 2026-11-21 主动线治理批：为所有已登记 session_key 的连接续 web
+            # 在线租约。资格门据此区分「有在线接收方的 web 会话」与死会话；
+            # 每 3 秒批量 UPSERT 一次（单事务），0 客户端时自然过期。
+            session_keys = ws_server.active_session_keys()
+            if session_keys:
+                await asyncio.to_thread(rp.session_touch_many, session_keys)
             # client_count 是 @property（返回 int）——当方法调用会抛
             # 'int' object is not callable，websocket 出站通道将永不消费（生产日志实锤）。
             if ws_server.client_count > 0:

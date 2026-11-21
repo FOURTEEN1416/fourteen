@@ -31,18 +31,25 @@ log "=== Remote build & restart started ==="
 
 cd "${APP_DIR}"
 
-log "[1/4] Installing / updating Python package..."
+log "[1/5] Installing / updating Python package..."
 source "${VENV}/bin/activate"
 pip install -e "${APP_DIR}"
 
-log "[2/4] Installing frontend dependencies..."
+log "[2/5] Installing frontend dependencies..."
 cd "${FRONTEND_DIR}"
 npm ci
 
-log "[3/4] Building frontend..."
+log "[3/5] Building frontend..."
 npm run build
 
-log "[4/4] Restarting services..."
+# 时间口径 UTC 迁移必须在冷停状态执行一次（脚本内幂等标记，重复部署直接跳过）。
+# 失败即阻断发布：带着旧北京墙钟行上线会让 topic next_at/expires_at 偏 8 小时。
+log "[4/5] Applying time-caliber UTC migration (cold stop)..."
+systemctl stop ai-girlfriend || true
+cd "${APP_DIR}"
+python scripts/migrate_time_columns_to_utc.py --apply
+
+log "[5/5] Restarting services..."
 systemctl restart ai-girlfriend
 
 if nginx -t >/dev/null 2>&1; then

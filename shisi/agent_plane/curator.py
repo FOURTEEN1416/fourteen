@@ -2,15 +2,42 @@
 
 用户裁决：P2 与主动消息参数、画像清洗一并做完。
 确定性部分：垃圾过滤 / near-dup 合并阈值；LLM 部分：可选摘要合并（失败降级纯规则）。
+
+2026-11-21 免费限流优化批：``run_curator_all_known`` 批量循环在持有 LLM 的
+会话之间加固定间隔（默认 3 秒，env 可覆盖）——生产 02:17 实证连续 10 次
+agnes 调用无间隔 → 供应商 429 + 120s 熔断，后续会话的 LLM 摘要全部降级。
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import re
+import time
 from typing import Any
 
 logger = logging.getLogger("memory_curator")
+
+#: 批量 LLM 调用最小间隔（秒）的 env 覆盖键。
+NIGHTLY_LLM_INTERVAL_ENV = "AI_GF_NIGHTLY_LLM_INTERVAL_SECONDS"
+
+#: 默认间隔（秒）：3 秒足够避开免费档的突发限流窗口，又不拖垮夜间窗口。
+_NIGHTLY_LLM_INTERVAL_DEFAULT = 3.0
+
+
+def nightly_llm_interval_seconds() -> float:
+    """夜间批量 LLM 调用之间的固定间隔（秒）。
+
+    env ``AI_GF_NIGHTLY_LLM_INTERVAL_SECONDS`` 可覆盖；非法值回落默认 3.0，
+    显式设 ``0`` 表示关闭间隔（不推荐，仅排障用）。
+    """
+    raw = str(os.environ.get(NIGHTLY_LLM_INTERVAL_ENV, "")).strip()
+    if not raw:
+        return _NIGHTLY_LLM_INTERVAL_DEFAULT
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return _NIGHTLY_LLM_INTERVAL_DEFAULT
 
 _GARBAGE = re.compile(
     r"^(叫我|叫你|上班|上学|学生|军训|嗯|好的|知道了|在吗)[吧啊呀呢~～!！。]*$"
@@ -187,10 +214,16 @@ def run_curator_all_known(
         except Exception as e:  # noqa: BLE001
             logger.warning("curator list keys failed: %s", e)
     done = []
-    for uk in keys:
+    interval = nightly_llm_interval_seconds()
+    for idx, uk in enumerate(keys):
         try:
             selected = llm_resolver(uk) if llm_resolver else llm
         except Exception:
             selected = None  # 无模型时只做确定性整理，绝不借用其他账号凭证
+        # 2026-11-21 免费限流优化批：持有 LLM 的会话之间固定间隔，防连续
+        # 调用触发供应商 429+熔断（生产 02:17 十连发实证）。只在本会话真的
+        # 解析到 LLM 时计入间隔——纯规则整理不 sleep，避免无谓拉长批处理。
+        if selected is not None and interval > 0 and idx > 0:
+            time.sleep(interval)
         done.append(run_curator_for_session(uk, sm=sm, llm=selected, apply=True))
     return {"sessions": len(done), "results": done}

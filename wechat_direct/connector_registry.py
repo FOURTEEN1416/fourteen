@@ -149,6 +149,33 @@ class ConnectorRegistry:
         self._release_poll_lock(uid, s)
         return True
 
+    def retire(self, user_id: int, slot: int = 0, connector: Any | None = None) -> bool:
+        """终态回收：从注册表摘除连接器并释放通道 flock，但**不调用 stop()**。
+
+        2026-11-21 死会话治理：needs_reauth 是 terminal state（状态文件已写
+        connected=False/status=needs_reauth）。旧 ``disconnect()`` 会调用
+        ``conn.stop()``，而 stop 会再写一次状态（旧实现写 disconnected），
+        把终态覆盖掉、前端永远看不到「需重新扫码」。因此终态路径必须走本
+        方法：只摘对象 + 释放 poll lock，状态文件由 ``_enter_needs_reauth``
+        唯一写定。
+
+        ``connector`` 非空时只摘除「同一个对象」，防止并发新建的替代连接器
+        被旧线程误删。返回 True=已摘除/本就不在；False=当前对象不是它。
+        """
+        uid, s = int(user_id), int(slot)
+        with self._lock:
+            key = self._key(uid, s)
+            current = self._connectors.get(key)
+            if connector is not None and current is not None and current is not connector:
+                logger.info(
+                    "终态回收跳过：registry 当前对象已替换 user=%s slot=%s", uid, s
+                )
+                return False
+            self._connectors.pop(key, None)
+        self._release_poll_lock(uid, s)
+        logger.info("通道终态回收 user=%s slot=%s", uid, s)
+        return True
+
     def purge_user(self, user_id: int) -> int:
         """账号生命周期（W9）：该账号全部 slot 断连 + 移除本地连接器对象。
 
@@ -230,16 +257,19 @@ class ConnectorRegistry:
         }
 
     def _state_for(self, user_id: int, slot: int, conn: Any) -> dict[str, Any]:
-        from wechat_direct.wechat_connector import load_session_state
+        from wechat_direct import wechat_connector as wc
 
-        base = load_session_state(user_id, slot)
+        base = wc.load_session_state(user_id, slot)
         if conn is not None and getattr(conn, "token", ""):
+            live: dict[str, Any] = {}
             try:
-                live = conn.get_status()
+                live = conn.get_status() or {}
                 base.update(live)
             except Exception:  # noqa: BLE001
                 pass
-            base["connected"] = True
+            # 2026-11-21：尊重连接器自己的在线判定（degraded/needs_reauth
+            # 不得被 registry 强制改回 True）；无 get_status 的旧替身按 True 兼容。
+            base["connected"] = bool(live.get("connected", True))
         else:
             base["connected"] = bool(base.get("connected")) and bool(base.get("bot_id"))
             # 无内存实例时，若状态文件写着 connected 但无 token，降为 disconnected
@@ -250,6 +280,21 @@ class ConnectorRegistry:
                     base["connected"] = False
                     if base.get("status") == "connected":
                         base["status"] = "idle"
+
+        # 2026-11-21 死会话治理：在线判定叠加 token 窗口真源。context_token
+        # 过期 ≥24h 的通道不可能完成主动发送，不得继续显示在线（生产 13/17
+        # 个 connected 通道 token 已死但状态仍显示 online 的直接修复）。
+        try:
+            window = wc.token_window_state(user_id, slot)
+            base["token_window_state"] = window.get("state")
+            base["token_window_age_hours"] = window.get("age_hours")
+            if window.get("state") == "dead":
+                base["connected"] = False
+                if base.get("status") not in ("needs_reauth", "disabled"):
+                    base["status"] = "degraded"
+        except Exception:  # noqa: BLE001 —— 探针故障不改变读面
+            pass
+
         base["owner_user_id"] = int(user_id)
         base["slot"] = int(slot)
         return base
@@ -274,6 +319,14 @@ class ConnectorRegistry:
         if lock_fd > 0:
             self._poll_lock_fds[(uid, pick)] = lock_fd
         conn = self.ensure(user_id, slot=pick, user_manager=user_manager)
+        # 2026-11-21：终态对象（needs_reauth / 已 stop）不可复用——其 _stop 已置位，
+        # 复用会导致 run() 立即退出。用户主动扫码时先摘除旧对象再新建。
+        if getattr(conn, "_terminal_state", False) or getattr(conn, "_stop", False):
+            self.retire(uid, pick, connector=conn)
+            conn = self.ensure(user_id, slot=pick, user_manager=user_manager)
+        # 2026-11-21：只有用户主动发起扫码才允许交互式 login（生成二维码并等待）。
+        # restore_on_boot / 自动重认证都不经过本方法，故不会自动弹码。
+        conn.allow_interactive_login = True
 
         def _run() -> None:
             try:
@@ -325,6 +378,8 @@ class ConnectorRegistry:
                     conn = self.ensure(uid, slot=slot, user_manager=user_manager)
                     if getattr(conn, "token", ""):
                         continue
+                    # 2026-11-21：开机恢复是自动路径，绝不自动弹二维码。
+                    conn.allow_interactive_login = False
                     t = threading.Thread(
                         target=conn.run, daemon=True, name=f"wx-restore-{uid}-{slot}"
                     )

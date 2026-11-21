@@ -44,6 +44,30 @@ AFFECTIONATE_TERMS = frozenset(
 _VOCATIVE_RE = re.compile(
     r"^[\s『「“\"'【\[（(]*([\u4e00-\u9fffA-Za-z0-9]{1,6})\s*[，,、：:！!~～]"
 )
+# 角色卡「叫你 X / 喊你 X」自称提取（2026-11-21 称呼语义矫正）
+# 卡文里的「你」指角色本人，所以这里的 X 是**角色自己的称呼**，不是用户名字。
+_SELF_VOCATIVE_RE = re.compile(
+    r"(?:叫你|喊你|称呼你(?:为|作)?|管你叫)\s*[「『“\"'【\[]?"
+    r"([\u4e00-\u9fffA-Za-z0-9]{1,8})"
+)
+# 提取结果尾部常见语气/连词清理（防「阿茹和」这类长尾被当成名字）
+_SELF_VOCATIVE_TRIM = "和跟与的吧呀啊呢哦嘛啦了，,。.！!？?~～"
+_SELF_VOCATIVE_STOP = {
+    "你", "您", "什么", "怎么", "老师", "同学", "大家",
+    # 常见动作补语，避免「叫你吃饭」被当成名字
+    "起床", "吃饭", "回家", "过来", "出去", "进来", "睡觉", "上课", "放学",
+    "作业", "一声", "一下", "名字",
+}
+# 用户自述名提取（"我是默默，做安全的" → 默默）；只在明确的「我叫X」句式取，
+# 避免把「我是做后端的」整句当名字。
+_SELF_INTRO_NAME_RE = re.compile(
+    r"(?:我叫|我的名字是|名字叫|(?<!别)(?<!不要)叫我)\s*"
+    r"([\u4e00-\u9fffA-Za-z0-9]{1,6})(?=[，,。.！!？?、\s]|$)"
+)
+_SELF_INTRO_STOP = {
+    "什么", "怎么", "这个", "那个", "一个", "上班", "学生", "军训", "后端",
+    "前端", "安全", "工作", "老师", "同学",
+}
 # 称呼剥除的「词边界」字符（汉字相邻 = 词内成分，不剥——防误伤「十七岁」「无名指」）
 _BOUNDARY_CHARS = r"\s，,、：:；;。！!？?~～·…—\-—"
 # 剥除后的残留标点清理
@@ -53,16 +77,135 @@ _PUNCT_HEAD_RE = re.compile(r"^[\s，,、：:；;。！!？?~～]+")
 _SPACE_DUP_RE = re.compile(r"[ \t]{2,}")
 
 
-def _profile_nickname(session_key: str) -> str:
-    """画像昵称（主链同款投影；内部已含读侧否决守卫）。"""
+def extract_self_vocatives(text: str) -> set[str]:
+    """从角色卡文本提取「叫你 X / 喊你 X」里的自称（2026-11-21）。
+
+    卡文中的「你」指**角色本人**，因此提取出的 X 是角色自己的称呼。它只能
+    用于角色自称，绝不能进入「AI 对用户」的合法称呼集合。
+    """
+    out: set[str] = set()
+    for m in _SELF_VOCATIVE_RE.finditer(str(text or "")):
+        name = m.group(1).strip().strip(_SELF_VOCATIVE_TRIM)
+        if name and name not in _SELF_VOCATIVE_STOP and 1 <= len(name) <= 8:
+            out.add(name)
+    return out
+
+
+def character_card_self_names(character_id: str) -> set[str]:
+    """角色卡 `creator_notes` / `mes_example` / `first_mes` 中的自称集合。"""
+    cid = str(character_id or "").strip()
+    if not cid:
+        return set()
+    try:
+        from utils.character_resolver import characters_dir
+
+        path = characters_dir() / f"{cid}.json"
+        if not path.exists():
+            return set()
+        import json
+
+        card = json.loads(path.read_text(encoding="utf-8"))
+        fields = ("creator_notes", "mes_example", "first_mes")
+        text = "\n".join(str(card.get(f) or "") for f in fields)
+        return extract_self_vocatives(text)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("character card self names resolve failed: %s", e)
+        return set()
+
+
+def card_vocative_guard(*texts: str) -> str:
+    """卡文自称守卫（仅当卡文确实出现「叫你 X」时返回非空串）。"""
+    names: set[str] = set()
+    for text in texts:
+        names |= extract_self_vocatives(text)
+    if not names:
+        return ""
+    return (
+        "⚠️ 卡文中的「叫你 X」指**你自己**的称呼（角色名/自称），"
+        "不是用户的名字；绝不能用来称呼用户。"
+    )
+
+
+def ai_self_name_from_profile(profile: dict | None) -> str:
+    """画像里的「用户对 AI 的称呼」——只允许干净短名，异常值一律丢弃。"""
+    p = profile or {}
+    name = str(p.get("user_calls_ai") or "").strip()
+    if not name or name in {"你", "您"} or len(name) > 12:
+        return ""
+    return name
+
+
+def self_intro_name(text: str) -> str:
+    """从用户自述提取名字（「我叫默默」「我的名字是默默」）。
+
+    只接受明确自述句式 + 短名 + 标点边界；「我是做后端的」这类不会命中。
+    """
+    m = _SELF_INTRO_NAME_RE.search(str(text or ""))
+    if not m:
+        return ""
+    name = m.group(1).strip().strip("吧啊呀呢哦嘛啦了")
+    if name in _SELF_INTRO_STOP or "的" in name or len(name) > 6:
+        return ""
+    return name
+
+
+def resolve_user_address_from_profile(
+    profile: dict | None,
+    character_id: str = "",
+    denied: set[str] | frozenset[str] | None = None,
+) -> str:
+    """纯函数：画像 → AI 对用户的唯一合法称呼（2026-11-21 称呼语义矫正）。
+
+    规则：
+    - `nickname` 只有在**语义已升级**（address_semantics >= 2）时才可信；
+      旧投影若已存在 `user_calls_ai`，说明 nickname 是历史污染值，回落「你」。
+    - 角色名派生词、角色卡「叫你 X」自称、用户否认名一律不得成为用户称呼。
+    """
+    p = profile or {}
+    nick = str(p.get("nickname") or "").strip()
+    blocked = set(denied or ())
+    blocked |= character_name_derivatives(character_id)
+    blocked |= character_card_self_names(character_id)
+    semantics = int(p.get("_address_semantics") or p.get("address_semantics") or 0)
+    nick_trusted = bool(
+        nick
+        and nick not in blocked
+        and nick not in {"你", "您"}
+        and not (semantics < 2 and str(p.get("user_calls_ai") or "").strip())
+    )
+    if nick_trusted:
+        return nick
+    # nickname 不可信时，回落到用户自述名（「我叫默默」）；仍受同一禁用集约束。
+    intro = self_intro_name(str(p.get("self_intro") or ""))
+    if intro and intro not in blocked:
+        return intro
+    return LEGAL_FALLBACK
+
+
+def _profile_projection(session_key: str) -> dict:
+    """画像投影（主链同款；异常返回空字典）。"""
     try:
         from shisi.agent_plane.runtime import project_profile_for
 
-        prof = project_profile_for(str(session_key or ""))
-        return str((prof or {}).get("nickname") or "").strip()
+        return project_profile_for(str(session_key or "")) or {}
     except Exception as e:  # noqa: BLE001
-        logger.debug("profile nickname resolve failed: %s", e)
-        return ""
+        logger.debug("profile projection resolve failed: %s", e)
+        return {}
+
+
+def _profile_nickname(session_key: str) -> str:
+    """用户明确自述、且语义已升级的称呼（否则回落「你」）。
+
+    2026-11-21：`nickname` 历史上被 profile_tool 写成「用户对 AI 的称呼」，
+    因此只要投影里已有 `user_calls_ai`（迁移信号），旧 nickname 一律不再作为
+    用户称呼使用。新写入（address_semantics=2）仍可正常使用。
+    """
+    return resolve_user_address_from_profile(_profile_projection(session_key))
+
+
+def _profile_user_calls_ai(session_key: str) -> str:
+    """用户对 AI 的称呼（user_calls_ai；旧库迁移后同样可读）。"""
+    return ai_self_name_from_profile(_profile_projection(session_key))
 
 
 def _denied_names(session_key: str) -> set[str]:
@@ -89,6 +232,10 @@ def character_name_derivatives(character_id: str) -> set[str]:
       - 相邻双字：林挽夏 → 林挽/挽夏；角色名本身
       - 末字「小/阿/老/大」变体：夏 → 小夏/阿夏/老夏/大夏
     """
+    # 空角色 id 表示「调用方没有角色上下文」：无法派生，宁缺勿滥。
+    # （内置默认角色只在调用方显式传 "default" 时参与派生。）
+    if not str(character_id or "").strip():
+        return set()
     try:
         from utils.character_resolver import display_name
 
@@ -114,35 +261,58 @@ def character_name_derivatives(character_id: str) -> set[str]:
 def resolve_address(session_key: str, character_id: str = "") -> tuple[str, frozenset[str]]:
     """解析 ``(唯一合法称呼, 非法称呼冻结集)``。
 
-    裁决优先级：**用户否认 > 画像昵称 > 角色名派生自动禁用**。
-    - 画像昵称非空且未被否认 → legal = 昵称（用户真实身份优先于角色名派生
-      冲突，例如用户真名恰与角色名叠字相同时也以用户为准）；
-    - 昵称被否认 / 昵称为空 → legal = 「你」；
-    - forbidden = 角色名派生 ∪ 双源否认（含被否认的画像昵称）。
+    裁决优先级：**用户否认 > 画像昵称 > 角色名派生/卡文自称自动禁用**。
+    - 画像昵称非空且未被否认、且不在角色名派生/卡文自称集 → legal = 昵称；
+    - 昵称被否认 / 昵称为空 / 昵称命中角色自称 → legal = 「你」；
+    - forbidden = 角色名派生 ∪ 角色卡「叫你 X」自称 ∪ 双源否认。
     """
     nick = _profile_nickname(session_key)
     denied = _denied_names(session_key)
-    forbidden: set[str] = character_name_derivatives(character_id) | denied
-    if nick and nick not in denied:
-        legal = nick
-        forbidden.discard(nick)
-    else:
-        legal = LEGAL_FALLBACK
+    forbidden: set[str] = (
+        character_name_derivatives(character_id)
+        | character_card_self_names(character_id)
+        | denied
+    )
+    legal = nick if nick and nick not in denied and nick not in forbidden else LEGAL_FALLBACK
+    # legal 自身不是非法称呼（出站/历史剥除不得误伤合法称呼）
+    forbidden.discard(legal)
     return legal, frozenset(forbidden)
 
 
 def address_prompt_block(session_key: str, character_id: str = "") -> str:
-    """【用户称呼】唯一合法段（正面指定 + 角色名自动禁用；替代黑名单式禁令）。"""
+    """【用户称呼】唯一合法段（正面指定 + 角色名/卡文自称自动禁用）。"""
     if not str(session_key or "").strip():
         return ""
     legal, _ = resolve_address(session_key, character_id)
     denied = _denied_names(session_key)
+    ai_name = _profile_user_calls_ai(session_key)
+    card_names = character_card_self_names(character_id)
     lines = [
         "# 用户称呼（最高优先级，唯一合法来源）",
         f"- 称呼用户**只能**用：「{legal}」；其余场合一律用代词「你/你的」。",
         "- **你自己的名字（以及名字里的字、字的各种叠写与变体）永远只能指你自己**，"
         "任何情况下不得用来称呼用户，也不得当成用户的名字。",
     ]
+    if ai_name and ai_name != legal:
+        lines.append(
+            f"- 用户平时叫你「{ai_name}」——这是**你**的称呼，不是用户的名字；"
+            "不得反过来用它称呼用户。"
+        )
+    if card_names:
+        lines.append(
+            "- 角色卡里出现的「叫你 X」（"
+            + "、".join(f"「{n}」" for n in sorted(card_names))
+            + "）是**角色自己的称呼**，不是用户的名字，绝不能用来称呼用户。"
+        )
+    else:
+        lines.append(
+            "- 角色卡/人设文本里若出现「叫你 X」，X 指**你自己**，"
+            "不是用户的名字，绝不能用来称呼用户。"
+        )
+    lines.append(
+        "- 自称只能用「我」（或角色名本身）；不得用「你」指代自己，"
+        "也不得把自己的名字/卡文自称当成对用户的称呼。"
+    )
     if denied:
         lines.append(
             "【被否认称呼】以下名字已被用户明确否认（用户说过「谁是X/X是谁/我不是X/别叫我X」）："

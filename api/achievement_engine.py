@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.database import CharacterAchievement
 from api.deps import deps
 from api.path_security import sanitize_id
+from utils.local_time import to_api_utc
 from utils.project_paths import project_path
 
 logger = logging.getLogger("api.achievement_engine")
@@ -237,7 +238,7 @@ async def recalculate_achievements(session: AsyncSession, character_id: str) -> 
                 "target": adef.target,
                 "progress": progress,
                 "unlocked": progress >= adef.target or row.unlocked_at is not None,
-                "unlocked_at": row.unlocked_at.isoformat() if row.unlocked_at else None,
+                "unlocked_at": to_api_utc(row.unlocked_at),
             }
         )
 

@@ -205,3 +205,37 @@ describe('WeChatPage 扫码弹窗状态机（NEW-4）', () => {
     expect(screen.getByText(/发第一条消息/)).toBeDefined()
   })
 })
+
+// ── 2026-11-21 死会话治理：needs_reauth 终态前端消费 ──
+describe('WeChatPage needs_reauth 终态（2026-11-21）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: { characters: [] },
+      isLoading: false,
+    })
+  })
+
+  it('登录态失效时显性提示并提供重新扫码入口', () => {
+    mockUseWechatStatus.mockReturnValue({
+      data: {
+        ...defaultStatus,
+        connected: false,
+        status: 'needs_reauth',
+        auth_state: 'needs_reauth',
+        needs_reauth: true,
+      },
+      isLoading: false,
+      isError: false,
+    })
+    renderPage()
+
+    expect(screen.getByText('我的微信 登录态失效')).toBeDefined()
+    expect(screen.getByTestId('needs-reauth-banner')).toBeDefined()
+    expect(screen.getAllByText(/微信登录态已失效/).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByTestId('reauth-btn'))
+    expect(screen.getByText('扫码连接微信')).toBeDefined()
+  })
+})

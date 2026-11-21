@@ -16,8 +16,11 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import time
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -34,6 +37,48 @@ logger = logging.getLogger("llm_provider.openai_compatible")
 
 # OAuth 刷新失败/缺 secret 时的重试冷却（秒）——避免每请求白打 token 端点
 _OAUTH_RETRY_COOLDOWN = 300.0
+
+# 429 Retry-After 提示的保鲜期（秒）。网关消费提示时，超过该时长的旧提示
+# 视为过期——防止很久以前的 429 反复抬高后续无关失败的熔断时长。
+_RETRY_AFTER_HINT_TTL = 300.0
+
+
+def parse_retry_after(value: str | None) -> float | None:
+    """解析 HTTP ``Retry-After`` 头（RFC 7231），返回应等待的秒数。
+
+    支持两种合法形态：
+      - 秒数（整数或小数，如 ``120`` / ``1.5``）；
+      - HTTP 日期（IMF-fixdate，如 ``Wed, 21 Oct 2026 07:28:00 GMT``），
+        按「目标时刻 - 当前 UTC 时刻」折算成秒。
+
+    缺失/无法解析/非有限数（inf/nan）时返回 ``None``，调用方维持原退避策略。
+    负数（已过期的日期）钳为 0.0。
+    """
+    if not value:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    # 形态一：纯数字秒数
+    try:
+        seconds = float(text)
+    except ValueError:
+        pass
+    else:
+        if not math.isfinite(seconds):
+            return None
+        return max(0.0, seconds)
+    # 形态二：HTTP 日期
+    try:
+        parsed = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if parsed is None:  # pragma: no cover —— 解析失败时 parsedate_to_datetime 抛异常
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    delta = (parsed - datetime.now(timezone.utc)).total_seconds()
+    return max(0.0, delta)
 
 # 单次 provider 调用的结构化耗时日志标记（2026-10-21 FIX-5）。
 # 排障时 `grep provider_call` 即可直接取延迟样本，不必再靠外挂探针反推。
@@ -109,6 +154,14 @@ class OpenAICompatibleProvider:
         self._oauth_token: str = ""
         self._oauth_expires_at: float = 0.0
         self._oauth_warned_no_secret: bool = False
+
+        # 429 Retry-After 提示（2026-11-21 限流退避批）：最近一次 429 响应告知的
+        # 等待秒数。由 `_capture_retry_after_hint` 写入，网关 `_mark_provider_result`
+        # 经 `consume_retry_after_hint` 消费（读取即清除），用于把熔断时长抬高到
+        # max(默认冷却, Retry-After + 缓冲)。provider 自身不做 sleep 重试——
+        # 限流退避由网关熔断层统一裁决，避免在请求热路径上挂住 worker。
+        self._retry_after_hint_seconds: float | None = None
+        self._retry_after_hint_at: float = 0.0
 
         # 连接池
         self._pool_limits = httpx.Limits(max_keepalive_connections=10, max_connections=50)
@@ -400,6 +453,7 @@ class OpenAICompatibleProvider:
                 "tool_calls": message.get("tool_calls"),
             }
         except Exception as e:  # noqa: BLE001
+            self._capture_retry_after_hint(e)
             if HAS_METRICS:
                 record_error("llm", type(e).__name__)
             # W2 三态契约（2026-09-27）：失败必须 raise ProviderFailure——
@@ -514,6 +568,7 @@ class OpenAICompatibleProvider:
             )
             return content.strip()
         except Exception as e:  # noqa: BLE001
+            self._capture_retry_after_hint(e)
             if HAS_METRICS:
                 record_error("llm", type(e).__name__)
             entry = self.registry.get_by_name(model_name)
@@ -619,6 +674,7 @@ class OpenAICompatibleProvider:
                 return
             raise RuntimeError(f"[{self.provider_name}] 流式生成超时") from e
         except Exception as e:  # noqa: BLE001
+            self._capture_retry_after_hint(e)
             if HAS_METRICS:
                 record_error("llm_stream", type(e).__name__)
             self._log_call_outcome(
@@ -672,6 +728,49 @@ class OpenAICompatibleProvider:
                     self.provider_name, self.model, entry.name, type(e).__name__, e,
                 )
         return None
+
+    def _capture_retry_after_hint(self, e: Exception) -> None:
+        """429 限流响应时记录 Retry-After 提示（2026-11-21 批）。
+
+        生产对账实锤：agnes 429 后旧退避不读 Retry-After，固定 120s 冷却可能
+        早于上游解限就重试（继续撞 429），也可能远晚于解限（白降温）。现在
+        429 时解析该头并暂存在实例上，供网关熔断时取 ``max(默认, 提示+缓冲)``。
+        非 429 失败会清掉旧提示，避免陈旧值污染本次记账。
+        """
+        if not isinstance(e, httpx.HTTPStatusError):
+            return
+        resp = getattr(e, "response", None)
+        if resp is None or getattr(resp, "status_code", None) != 429:
+            return
+        raw = resp.headers.get("retry-after")
+        hint = parse_retry_after(raw)
+        if hint is None:
+            # 429 但没带可解析的 Retry-After：清旧提示，网关按默认冷却退避
+            self._retry_after_hint_seconds = None
+            self._retry_after_hint_at = 0.0
+            return
+        self._retry_after_hint_seconds = hint
+        self._retry_after_hint_at = time.time()
+        logger.warning(
+            "[%s] 收到 429 限流，Retry-After=%r（折算 %.1fs），熔断时长将取 max(默认, 提示+缓冲)",
+            self.provider_name, raw, hint,
+        )
+
+    def consume_retry_after_hint(self) -> float | None:
+        """读取并清除 429 退避提示（网关记账失败时调用）。
+
+        读取即清除 + 保鲜期（``_RETRY_AFTER_HINT_TTL``）双保险：提示只对
+        紧随其后的一次熔断记账生效，不会反复抬高后续无关失败的冷却时长。
+        """
+        hint = self._retry_after_hint_seconds
+        at = self._retry_after_hint_at
+        self._retry_after_hint_seconds = None
+        self._retry_after_hint_at = 0.0
+        if hint is None or hint <= 0:
+            return None
+        if time.time() - at > _RETRY_AFTER_HINT_TTL:
+            return None
+        return hint
 
     async def _refresh_oauth_if_needed(self) -> None:
         """百度千帆 OAuth token 刷新。

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from typing import Any
 
 from shisi.core.conversation_turn import HISTORY_RECENT_LIMIT
@@ -655,9 +656,15 @@ EMOJI_USE_RULE = (
 USER_IDENTITY_RULE = (
     "\n# 用户身份铁则（最高优先级）\n"
     "- 用户是真实存在的人（注册账号本人），**不是**角色卡世界观里的人物。\n"
-    "- 不得给用户起名字（如自造一个名字当昵称）；对用户的称呼优先用「用户画像」"
-    "里的昵称，没有就用「你」。**但「笨蛋」「傻瓜」这类表达亲密的呼语不受此限**"
+    "- 不得给用户起名字（如自造一个名字当昵称）；对用户的称呼只能来自用户**本人**"
+    "自述的昵称/自述名，没有就用「你」。画像里的 nickname 只有语义升级"
+    "（address_semantics=2）后才可信；旧值可能被写成了「用户对 AI 的称呼」。"
+    "**但「笨蛋」「傻瓜」这类表达亲密的呼语不受此限**"
     "——那是你的语气，不是他的名字，按你的性格和关系亲密度正常使用。\n"
+    "- user_calls_ai 是**用户对你的称呼**（你的名字），不是用户的名字；不得反过来"
+    "用它称呼用户。角色卡 mes_example / creator_notes 里的「叫你 X」同样是"
+    "你自己的称呼，绝不能当成用户的名字。\n"
+    "- 自称只能用「我」（或角色名本身）；不得用「你」指代自己。\n"
     "- 用户消息里出现过的名字（如某个昵称），除非用户明确自称，不得当作用户的称呼。\n"
     "- 不得编造用户没说过的经历或「我们共同的过去」；**真实记得的事要自然地用**"
     "（那是你的记忆）；不得假设你与用户共处同一物理空间（不能说「门没锁灯给你"
@@ -911,25 +918,157 @@ def _normalize_for_echo(text: str) -> str:
     return re.sub(r"[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]+", "", str(text or ""))
 
 
-def _strip_verbatim_echo(text: str, user_msg: Any) -> str:
-    """剥掉回复开头对用户原话的逐字复述（2026-10-20 生产实证）。
+#: 短寒暄/问句：回复与用户原话等值时，若属于这一类，视为「直接回答」而非
+#: 机械复读（2026-11-21 出站质量批，生产 5789 误杀防护）。
+_SHORT_SOCIAL_USER_RE = re.compile(
+    r"^(?:哈喽|你好|您好|嗨|hi|hello|早|早安|晚安|在吗|在么|在不在)"
+    r"[。！!？?~～\s]*$",
+    re.IGNORECASE,
+)
+#: 真正的问句（问号/吗/么/在不在）：用于「短答放行」的判定，避免「我想你了呢」
+#: 这类语气尾巴被误当成提问。
+_DIRECT_QUESTION_RE = re.compile(r"[？?]\s*$|(?:吗|么|在不在)\s*[。！!]?\s*$")
 
-    只比对**首行**且要求归一化后等值（长度 ≥5），避免把「我吃过了」这类
-    正常短回应当复述误杀；剥空返回空串由上层兜底。
+
+def _is_short_direct_answer(reply_line: str, user_msg: Any) -> bool:
+    """短回复是否属于对问句/寒暄的直接回答（回声闸放行）。
+
+    只放行 <=4 字的短答；长句即使用户刚问过也仍按复述处理。
+    """
+    text = _normalize_for_echo(reply_line)
+    if not text or len(text) > 4:
+        return False
+    user = str(user_msg or "").strip()
+    # 对问句的直接回答：用户问句 + 回复本身不是问句（「在吗」回声仍拦）。
+    if _DIRECT_QUESTION_RE.search(user):
+        return not _DIRECT_QUESTION_RE.search(text)
+    return bool(_SHORT_SOCIAL_USER_RE.match(user))
+
+
+#: 亲密/应答/寒暄语料（2026-11-21 用户裁决「白名单 + 只拦整条回复=回声且零
+#: 附加信息」）：① 剥除回声后整条回复为空时，若被回声的内容属于这一**精确
+#: 匹配**集合，视为自然的情感应答（镜像式撒娇/应声），放行不拦；② 属于集合的
+#: 回声**不做任何剥除**——「哈喽」对「哈喽」是自然招呼，把招呼从多段回复里
+#: 切掉反而 mutilate 正文（生产原句回归 10-19 实证）。公开为模块常量便于按
+#: 生产复核扩删（注意「想你了」≠「想你」：单发仍拦，见 5689 口径）。
+ECHO_INTIMACY_LEXICON = frozenset({
+    "想你", "爱你", "哈哈", "嘿嘿", "嗯嗯", "好的", "好呀",
+    "晚安", "早安", "抱抱", "亲亲", "呜呜", "在", "哦",
+    "哈喽", "你好", "嗨", "hello", "hi",
+})
+
+#: 回声剥除的「干净边界」：行首/行尾镜像回声之后（之前）必须紧跟标点或空白，
+#: 才允许只剥回声、保留余下正文；边界不干净（如「想你了的时候我就看看照片」）
+#: 保守不剥，避免把正常正文切残。
+_ECHO_SEP_RE = re.compile(r"[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]")
+_ECHO_LEADING_SEP_RE = re.compile(r"^[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]+")
+_ECHO_TRAILING_SEP_RE = re.compile(r"[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]+$")
+
+
+def _normalize_echo_key(text: Any) -> str:
+    """回声判定键：NFKC 归一（全半角统一）+ casefold + 去标点/空白。"""
+    s = unicodedata.normalize("NFKC", str(text or "")).casefold()
+    return re.sub(r"[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]+", "", s)
+
+
+def _split_echo_prefix(line: str, cur: str) -> str | None:
+    """行首逐字镜像：把与 ``cur`` 逐字相同的开头剥掉，返回剩余正文。
+
+    按「归一化逐字符对齐」匹配（标点/空白不参与比对、全半角等价）；回声
+    之后必须紧跟标点/空白（干净边界）才剥，否则返回 ``None`` 保守不动。
+    """
+    j = 0
+    for i, ch in enumerate(line):
+        nk = unicodedata.normalize("NFKC", ch).casefold()
+        if not nk or _ECHO_SEP_RE.match(nk):
+            continue
+        if j >= len(cur) or nk != cur[j]:
+            return None
+        j += 1
+        if j == len(cur):
+            rest = line[i + 1:]
+            if rest and not _ECHO_SEP_RE.match(rest[0]):
+                return None
+            return _ECHO_LEADING_SEP_RE.sub("", rest)
+    return None
+
+
+def _split_echo_suffix(line: str, cur: str) -> str | None:
+    """行尾逐字镜像：把与 ``cur`` 逐字相同的结尾剥掉，返回剩余正文。"""
+    j = len(cur)
+    for i in range(len(line) - 1, -1, -1):
+        nk = unicodedata.normalize("NFKC", line[i]).casefold()
+        if not nk or _ECHO_SEP_RE.match(nk):
+            continue
+        if j <= 0 or nk != cur[j - 1]:
+            return None
+        j -= 1
+        if j == 0:
+            head = line[:i]
+            if head and not _ECHO_SEP_RE.match(head[-1]):
+                return None
+            return _ECHO_TRAILING_SEP_RE.sub("", head)
+    return None
+
+
+def _strip_verbatim_echo(text: str, user_msg: Any) -> str:
+    """剥除回复中对用户最后一条消息的逐字回声（2026-11-21 重设计）。
+
+    规则（用户裁决：白名单 + 只拦「整条回复=回声且零附加信息」）：
+    1. **行级剥除**——回复中某一行与用户消息逐字相同（归一化后，全半角/
+       标点等价）→ 剥除该行、保留其余内容；行首/行尾的镜像前缀/后缀
+       （「想你了，我也想你」→「我也想你」）按标点干净边界剥除。
+    2. **整条=回声**（剥除后为空，零附加信息）→ 默认拦截（返回空串，由
+       调用方走 empty_reply/重生成路径）；但回声内容属于亲密/应答语料
+       （``ECHO_INTIMACY_LEXICON``，镜像式撒娇是自然对话）或属于对问句/
+       寒暄的直接短答（``_is_short_direct_answer``，生产 5789「在。」对
+       「在吗」）时放行。
+    3. **白名单回声不剥除**——招呼/情感词（哈喽/你好/想你…）的镜像不参与
+       行级/前后缀剥除：把「哈喽」从「哈喽 你刚说的那个咳」里切掉属于误伤
+       正文（生产原句回归实证），整条=招呼回声同样放行。
+    4. 5641/5717 的跨轮长文逐字重复由 ``terminal_reply_guard`` 的
+       ``recent_assistant_messages`` 历史闸负责，本函数不感知历史、不受影响。
     """
     s = str(text or "")
-    cur = _normalize_for_echo(user_msg)
-    if len(cur) < 5:
+    cur = _normalize_echo_key(user_msg)
+    if len(cur) < 2:
         return s
-    lines = s.splitlines()
-    for idx, line in enumerate(lines):
-        if not line.strip():
+    if cur in ECHO_INTIMACY_LEXICON:
+        # 白名单回声：招呼/情感镜像不剥（见 docstring 第 3 条），整条放行。
+        return s
+    out_lines: list[str] = []
+    stripped = False
+    first_echo_line = ""
+    for line in s.splitlines():
+        ln = line.strip()
+        if not ln:
             continue
-        if _normalize_for_echo(line) == cur:
-            del lines[idx]
-            return "\n".join(lines).strip()
-        break
-    return s
+        if _normalize_echo_key(line) == cur:
+            stripped = True
+            first_echo_line = first_echo_line or ln
+            continue
+        rest = _split_echo_prefix(line, cur)
+        if rest is None:
+            rest = _split_echo_suffix(line, cur)
+        if rest is not None:
+            stripped = True
+            first_echo_line = first_echo_line or ln
+            rest = rest.strip()
+            if rest:
+                out_lines.append(rest)
+            continue
+        out_lines.append(line)
+    if not stripped:
+        return s
+    rest = "\n".join(out_lines).strip()
+    if rest:
+        return rest
+    # 整条回复 = 回声（零附加信息）：白名单放行，其余拦截交重生成。
+    if cur in ECHO_INTIMACY_LEXICON:
+        return s
+    if _is_short_direct_answer(first_echo_line or s, user_msg):
+        return s
+    return ""
 
 
 def _strip_meta_memory_talk(text: str) -> str:
@@ -1169,6 +1308,7 @@ def terminal_reply_guard(
     character_id: str = "",
     last_turn_age_seconds: float | None = None,
     reply_mode: str = "",
+    recent_assistant_messages: Any = None,
 ) -> str:
     """出站终审守卫（发送与落库之前的最后一道门，2026-10-14 生产事故批）。
 
@@ -1200,6 +1340,12 @@ def terminal_reply_guard(
     ``example.com/.org/.net`` 占位 URL 时剥除所在行（幻觉 URL 防线，生产实证
     10-30 假链接案）；剥空返回空串走 empty_reply 兜底。真实域名不在黑名单，
     不误伤正常内容。
+
+    2026-11-21 出站质量批：新增 ``recent_assistant_messages``（最近 N 条
+    assistant 正文）。传入时执行两道历史相关闸：**闸一**长回复与历史高度
+    相似 → 句级去重/整段拦空（生产 5641/5717 的 288 字逐字重复）；**闸三**
+    模板句去重 + 最小信息增量（「把手机放下」类空泛关心连续复读）。缺省
+    ``None`` 时行为与旧版完全一致（后台线/单测向后兼容）。
     """
     from llm_provider.multi_provider_gateway import _is_error_reply
 
@@ -1249,6 +1395,20 @@ def terminal_reply_guard(
     _guard_log("ungrounded_reciprocal", _before, s)
     if not s:
         return ""
+    # 2026-11-21 出站质量批：历史相关两道闸（缺省不传历史时不启用）。
+    if recent_assistant_messages:
+        from utils.outbound_quality import strip_repeated_reply, strip_repeated_templates
+
+        _before = s
+        s = strip_repeated_reply(s, recent_assistant_messages)
+        _guard_log("history_repeat", _before, s)
+        if not s:
+            return ""
+        _before = s
+        s = strip_repeated_templates(s, recent_assistant_messages, user_msg=user_msg)
+        _guard_log("template_repeat", _before, s)
+        if not s:
+            return ""
     s = strip_emoji_echo(s, user_msg)
     name = str(character_name or "").strip()
     if name and s in {name, name + "。", name + "！", name + "!"}:

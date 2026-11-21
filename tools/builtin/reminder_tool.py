@@ -45,11 +45,12 @@ def normalize_trigger_time(raw: str, now: datetime | None = None) -> str:
         raise TriggerTimeError(
             f"trigger_time_bad_format:{text}（必须为北京时间 YYYY-MM-DD HH:MM）"
         )
-    # 🔴 2026-09-22 二次根治：参照时刻必须与写入格式同一时区口径。
-    # 落库串是**北京时间**（LLM 按 `utils.local_time.now_local()` 注入的当前
-    # 时间换算），而旧实现用裸 `datetime.now()` 取宿主墙钟 —— UTC 容器下比
-    # 北京慢 8 小时，「现在/几分钟内提醒我」会被判成「8 小时前」，
-    # `trigger_time_in_past` 直接拒收：最常见的诉求在最需要它的部署形态下失效。
+    # 🔴 2026-09-22 二次根治：参照时刻必须与输入格式同一时区口径。
+    # 工具层输入/输出统一为**北京时间**（LLM 按 `now_local()` 注入的当前
+    # 时间换算）；`StructuredMemory.add_reminder` 在写边界转 UTC 落库。
+    # 旧实现用裸 `datetime.now()` 取宿主墙钟 —— UTC 容器下比北京慢 8 小时，
+    # 「现在/几分钟内提醒我」会被判成「8 小时前」，`trigger_time_in_past`
+    # 直接拒收：最常见的诉求在最需要它的部署形态下失效。
     ref = now if now is not None else now_local()
     if ref.tzinfo is not None:
         # 归一为 naive 本地墙钟，与 parsed（naive 北京时间）可直接比较

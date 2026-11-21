@@ -35,6 +35,7 @@ from api.main_routes import ConfigUpdateRequest, _sanitize_config
 from api.routers.character_routes import require_character_access
 from llm_provider import reconfigure_llm
 from observability.logging_setup import ring_buffer
+from utils.local_time import to_api_utc
 
 logger = logging.getLogger("api.routers.misc_routes")
 
@@ -380,10 +381,19 @@ async def memory_facts(
     orch = deps.orch
     if orch and orch._memory:
         if prefix is None:
-            return {"facts": orch._memory.semantic.get_facts(category, limit=limit)}
-        sm = getattr(orch._memory, "structured_memory", None)
-        rows = sm.get_facts(category, limit=limit, owner_prefix=prefix) if sm else []
-        return {"facts": rows}
+            rows = orch._memory.semantic.get_facts(category, limit=limit)
+        else:
+            sm = getattr(orch._memory, "structured_memory", None)
+            rows = sm.get_facts(category, limit=limit, owner_prefix=prefix) if sm else []
+        # 2026-11-21 时间口径统一批：user_facts 三列均为 UTC naive，API 边界补 +00:00。
+        out = []
+        for row in rows:
+            item = dict(row)
+            for key in ("created_at", "updated_at", "last_seen_at"):
+                if item.get(key):
+                    item[key] = to_api_utc(item[key])
+            out.append(item)
+        return {"facts": out}
     return {"facts": []}
 
 

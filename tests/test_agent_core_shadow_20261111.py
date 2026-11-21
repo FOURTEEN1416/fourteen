@@ -435,7 +435,8 @@ def test_dispatch_tool_call_set_reminder_creates_commitment(tmp_path, monkeypatc
     row = rows[0]
     assert row["kind"] == "remind"
     assert row["detail"] == "叫我起床"
-    assert row["due_at"] == "2026-11-12 06:00:00", "due_at 必须归一补秒"
+    # 提醒工具返回北京时间展示串；承诺账本按 2026-11-21 UTC 口径落库。
+    assert row["due_at"] == "2026-11-11 22:00:00", "due_at 必须归一补秒并转 UTC"
     assert row["ref"] == "reminder:12"
     assert row["dedupe_key"] == "reminder:12"
     assert row["source_turn_id"] == "m:m10"

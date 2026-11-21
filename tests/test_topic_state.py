@@ -745,12 +745,13 @@ def test_empty_turn_id_not_replay(tmp_path):
 
 
 def test_aware_now_normalized(tmp_path):
+    """2026-11-21 时间口径统一批：aware 输入按真实时刻转 UTC naive 落库。"""
     _enable(tmp_path)
-    aware = datetime(2026, 10, 27, 2, 0, 0, tzinfo=timezone.utc)  # 北京 10:00
+    aware = datetime(2026, 10, 27, 10, 0, 0, tzinfo=timezone(timedelta(hours=8)))
     ts.update_after_turn(KEY, "default", "我明天去面试", now=aware, turn_id="aware")
     with closing(ts._connect(ensure_schema=False)) as conn:
         row = conn.execute("SELECT last_active_at FROM topic_state").fetchone()
-    assert row[0] == "2026-10-27 10:00:00"
+    assert row[0] == "2026-10-27 02:00:00"
     # 后续用 naive 时间做差不得抛 TypeError
     ts.update_after_turn(KEY, "default", "我明天去面试有点紧张", now=BASE + timedelta(minutes=1))
 
@@ -1136,7 +1137,8 @@ def test_recall_max_two(tmp_path):
 def test_quiet_hours_blocks(tmp_path):
     _enable(tmp_path)
     _insert_topic_row(topic_id="p1", title="话题", status="parked", last_active_at=BASE - timedelta(hours=10))
-    quiet_now = BASE.replace(hour=2)
+    # 静默窗是北京墙钟；2026-11-21 后 now 入参按 UTC 解释，用 aware 北京时刻表达「本地 02:00」。
+    quiet_now = BASE.replace(hour=2, tzinfo=timezone(timedelta(hours=8)))
     assert ts.select_proactive_recall(KEY, now=quiet_now, quiet_hours=(23, 7)) == []
 
 
@@ -1200,7 +1202,8 @@ def test_recall_disabled_zero_db(monkeypatch):
 def test_recall_quiet_hours_zero_db(tmp_path, monkeypatch):
     _enable(tmp_path)
     monkeypatch.setattr(ts, "_connect", lambda **_: (_ for _ in ()).throw(AssertionError("db")))
-    assert ts.select_proactive_recall(KEY, now=BASE.replace(hour=2), quiet_hours=(23, 7)) == []
+    quiet_now = BASE.replace(hour=2, tzinfo=timezone(timedelta(hours=8)))
+    assert ts.select_proactive_recall(KEY, now=quiet_now, quiet_hours=(23, 7)) == []
 
 
 # ── 坏行 / 坏 JSON / 库锁容错 ───────────────────────────────────────────

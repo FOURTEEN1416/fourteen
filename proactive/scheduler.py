@@ -5,7 +5,7 @@
 - ``reminder_check`` 提醒到期投递检查（每分钟）
 - ``ase_check`` ASE 主动消息检查（每 5 分钟）
 - ``daily_maintenance`` 每日维护（00:05）
-- ``memory_curator`` 夜间记忆整理（02:17）
+- ``memory_curator`` 夜间记忆整理（默认 03:40，env 可覆盖）
 - ``daily_reset`` 每日 ASE 重置（00:00）
 - ``save_state`` 状态持久化（每 10 分钟）
 - ``health_check_channels`` 通道健康检查（每 60 秒）
@@ -28,6 +28,7 @@ import math
 import os
 import random
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -49,6 +50,11 @@ from utils.project_paths import project_path
 from utils.reply_mode import read_reply_mode
 
 logger = logging.getLogger("scheduler")
+
+# 2026-11-21 可观测性批：后台 job 起止只记 DEBUG，避免 5 秒一次的
+# 「控制命令消费」把 app.log 刷成心跳噪声；只有超过该阈值的慢 job 打
+# WARNING（仍保留异常 ERROR 与慢任务可观测性）。
+_SLOW_JOB_WARN_SECONDS = 30.0
 
 
 def apply_wait_jitter(
@@ -101,6 +107,53 @@ _LEDGER_TTL_SECONDS = 7 * 86400.0
 _JUDGE_STASH_CAP = 64
 #: A4：账本驱逐总开关（env `SCHEDULER_LEDGER_EVICT=0` 一行回滚）。
 _LEDGER_EVICT_DISABLED = {"0", "false", "off", "no"}
+
+# ── 主动线治理批（2026-11-21）模块级常量 ──────────────────
+#: 连续投递失败熔断阈值：同一会话连续失败 ≥N 次即停止周期性重决策。
+_DELIVER_CIRCUIT_THRESHOLD = 5
+#: 半开探测基础冷却（分钟）：第 5 次失败后 30 分钟才放行一次探测，之后
+#: 每次再失败翻倍，封顶 6 小时。
+_DELIVER_CIRCUIT_BASE_MINUTES = 30
+_DELIVER_CIRCUIT_MAX_MINUTES = 360
+_CIRCUIT_DISABLED = {"0", "false", "off", "no"}
+_TARGET_GATE_DISABLED = {"0", "false", "off", "no"}
+
+
+def _deliver_circuit_enabled() -> bool:
+    """熔断开关（env ``PROACTIVE_DELIVER_CIRCUIT=0`` 一行回滚）。"""
+    return str(os.environ.get("PROACTIVE_DELIVER_CIRCUIT", "1")).strip().lower() not in (
+        _CIRCUIT_DISABLED
+    )
+
+
+def _target_eligibility_enabled() -> bool:
+    """目标集合资格门开关（env ``PROACTIVE_TARGET_ELIGIBILITY=0`` 一行回滚）。"""
+    return str(
+        os.environ.get("PROACTIVE_TARGET_ELIGIBILITY", "1")
+    ).strip().lower() not in _TARGET_GATE_DISABLED
+
+
+def _memory_curator_cron() -> tuple[int, int]:
+    """夜间记忆整理的执行时刻（北京墙钟），返回 ``(hour, minute)``。
+
+    2026-11-21 免费限流优化批：默认从 02:17 挪到 **03:40**——生产 02:17 的
+    memory_curator 连续 10 次 agnes 调用触发 429+120s 熔断；02:17 与其他夜间
+    任务（00:05 每日维护的余波、每小时重要日期检查）存在叠加可能，挪到更
+    低谷时段降低撞限概率。env ``AI_GF_MEMORY_CURATOR_AT``（"HH:MM"）可覆盖；
+    非法值回落默认，不因配置错误炸调度器。
+    """
+    raw = str(os.environ.get("AI_GF_MEMORY_CURATOR_AT", "")).strip()
+    if not raw:
+        return 3, 40
+    try:
+        hour_s, _, minute_s = raw.partition(":")
+        hour = int(hour_s.strip())
+        minute = int(minute_s.strip()) if minute_s.strip() else 0
+    except ValueError:
+        return 3, 40
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return 3, 40
+    return hour, minute
 
 # 成就兜底重算的角色库目录。锚定项目根而非 CWD（从非仓库根启动时
 # CWD 相对路径会扫到空目录，导致成就兜底静默失效）；
@@ -199,6 +252,11 @@ class ProactiveScheduler:
         # P1-22：投递连续失败计数（指数退避；旧实现失败零退避，
         # 不可达用户每 5 分钟「生成→失败→再生成」，一天 288 次 LLM 零投递）
         self._deliver_fail_counts: dict[str, int] = {}
+        # 2026-11-21 主动线治理批：连续失败熔断。键 = 会话键，值 = 半开探测
+        # 时刻（epoch 秒）。连续失败达阈值后写入，到期后放行**一次**探测；
+        # 探测成功清计数与熔断，失败按指数拉长下一窗口（跨重启随节流账本
+        # 持久化）。熔断只跳过决策/生成，不写 vital_signs、不烧 provider。
+        self._deliver_circuit_open: dict[str, float] = {}
         # P1-23：通道资产（WebSocketServer 连接/锁）所属事件循环的 getter，
         # 由装配层注入——调度线程直接 asyncio.run 跨循环调用属未定义行为
         self._delivery_loop_getter: Callable[[], Any] | None = None
@@ -488,6 +546,158 @@ class ProactiveScheduler:
         self._persist_throttle_ledger()
         return True
 
+    # ── 连续投递失败熔断（2026-11-21 主动线治理批） ─────────────
+
+    def _deliver_circuit_active(self, user_key: str) -> bool:
+        """熔断是否仍拦截该会话；到期则原子放行**一次**半开探测。
+
+        ``_deliver_circuit_open`` 的值是「允许下一次探测的时刻」。到期时
+        把它改写成一个很短的**探测租约**（60s）：第一个 tick 领取并放行，
+        其余并发 tick 在租约内继续被拦下，避免半开瞬间并发探测打爆
+        provider；探测失败由 `_register_deliver_failure` 覆盖为完整冷却。
+        """
+        key = str(user_key or "")
+        now = time.time()
+        with self._ledger_scope():
+            circuit = getattr(self, "_deliver_circuit_open", None)
+            if not isinstance(circuit, dict):
+                return False
+            until = circuit.get(key)
+            if until is None:
+                # 跨重启兜底：熔断映射丢失但失败计数已到阈值 → 重新开闸
+                fails = int(self._deliver_fail_counts.get(key, 0) or 0)
+                if fails >= _DELIVER_CIRCUIT_THRESHOLD:
+                    circuit[key] = now + _DELIVER_CIRCUIT_BASE_MINUTES * 60.0
+                    until = circuit[key]
+                else:
+                    return False
+            if now < float(until):
+                return True
+            # 到期：写入探测租约（不是 pop；pop 会让并发第二线程也看到 None）
+            circuit[key] = now + 60.0
+            # 2026-11-21 治理批：登记「本轮是半开探测放行」。若这次决策最终
+            # 未产生真实投递（should_contact=False 且无等待窗），由
+            # `_rearm_deliver_circuit_after_probe` 把该会话重置回完整冷却，
+            # 避免死会话每 60s 租约到期就再烧一次决策 LLM。
+            probe_keys = getattr(self, "_deliver_circuit_probe_keys", None)
+            if not isinstance(probe_keys, set):
+                probe_keys = self._deliver_circuit_probe_keys = set()
+            probe_keys.add(key)
+        persist = getattr(self, "_persist_throttle_ledger", None)
+        if callable(persist):
+            persist()
+        return False
+
+    def _rearm_deliver_circuit_after_probe(self, user_key: str) -> None:
+        """半开探测未产生真实投递 → 重新置回完整熔断冷却（2026-11-21 治理批）。
+
+        半开探测租约（60s）放行的决策若 ``should_contact=False`` 且未给出
+        等待窗（wait_minutes<=0），本轮既没有投递、也没有退避窗——60s 后
+        探测租约到期又会放行一次决策，死会话从此每分钟白烧一次决策 LLM
+        （真失败路径有 `_register_deliver_failure` 兜底，此路径没有）。
+        处理：按**当前失败计数**对应的完整冷却重新开闸（不递增失败计数——
+        本轮没有真实投递，不应污染失败退避阶梯），并同步覆盖 wait-window 闸
+        （与 `_register_deliver_failure` 同纪律）。非探测轮次（标记不在册）
+        与熔断开关关闭时是 no-op。
+        """
+        key = str(user_key or "")
+        probe_keys = getattr(self, "_deliver_circuit_probe_keys", None)
+        if not isinstance(probe_keys, set) or key not in probe_keys:
+            return
+        # 消费探测标记：无论后续是否真的重开闸，本轮探测已闭环
+        probe_keys.discard(key)
+        if not _deliver_circuit_enabled():
+            return
+        now = time.time()
+        with self._ledger_scope():
+            fails = int(self._deliver_fail_counts.get(key, 0) or 0)
+            if fails >= _DELIVER_CIRCUIT_THRESHOLD:
+                cooldown_min = min(
+                    _DELIVER_CIRCUIT_BASE_MINUTES
+                    * (2 ** (fails - _DELIVER_CIRCUIT_THRESHOLD)),
+                    _DELIVER_CIRCUIT_MAX_MINUTES,
+                )
+            else:
+                # 计数不足阈值（如重启丢账）：按基础冷却兜底重开
+                cooldown_min = _DELIVER_CIRCUIT_BASE_MINUTES
+            circuit = getattr(self, "_deliver_circuit_open", None)
+            if not isinstance(circuit, dict):
+                circuit = self._deliver_circuit_open = {}
+            circuit[key] = now + cooldown_min * 60.0
+            # 半开时刻必须同时覆盖 wait-window 闸（同 `_register_deliver_failure`）
+            next_ok = getattr(self, "_llm_proactive_next_ok", None)
+            if not isinstance(next_ok, dict):
+                next_ok = self._llm_proactive_next_ok = {}
+            next_ok[key] = circuit[key]
+        persist = getattr(self, "_persist_throttle_ledger", None)
+        if callable(persist):
+            persist()
+        logger.info(
+            "proactive 半开探测未投递，重置熔断冷却 user=%s cooldown=%smin",
+            key, cooldown_min,
+        )
+
+    def _register_deliver_failure(self, user_key: str) -> tuple[int, int]:
+        """记一次投递失败，返回 ``(连续失败数, 本次退避分钟)``。
+
+        失败数达 ``_DELIVER_CIRCUIT_THRESHOLD`` 时写熔断时刻：第 5 次后
+        30 分钟、之后每次再失败翻倍，封顶 6 小时。计数、退避与熔断在同一
+        临界区一次算好（A2 并发纪律），落盘由调用方在锁外执行。
+        """
+        import time as _time
+
+        key = str(user_key or "")
+        now = _time.time()
+        with self._ledger_scope():
+            # 真实投递失败：本轮不再是「未投递的半开探测」（下方会按完整
+            # 冷却重开闸），消费探测标记防残留。
+            probe_keys = getattr(self, "_deliver_circuit_probe_keys", None)
+            if isinstance(probe_keys, set):
+                probe_keys.discard(key)
+            fails = self._deliver_fail_counts.get(key, 0) + 1
+            self._deliver_fail_counts[key] = fails
+            backoff_min = min(5 * (3 ** (fails - 1)), 120)
+            self._llm_proactive_next_ok[key] = now + backoff_min * 60.0
+            seen = getattr(self, "_deliver_fail_seen", None)
+            if seen is None:
+                seen = self._deliver_fail_seen = {}
+            seen[key] = now
+            if fails >= _DELIVER_CIRCUIT_THRESHOLD and _deliver_circuit_enabled():
+                circuit = getattr(self, "_deliver_circuit_open", None)
+                if circuit is None:
+                    circuit = self._deliver_circuit_open = {}
+                cooldown = min(
+                    _DELIVER_CIRCUIT_BASE_MINUTES
+                    * (2 ** (fails - _DELIVER_CIRCUIT_THRESHOLD)),
+                    _DELIVER_CIRCUIT_MAX_MINUTES,
+                )
+                circuit[key] = now + cooldown * 60.0
+                # 半开时刻必须同时覆盖 wait-window 闸：否则熔断到期后仍会被
+                # 120 分钟的退避封顶挡住，30 分钟探测永远到不了投递层。
+                self._llm_proactive_next_ok[key] = circuit[key]
+                # 日志/账本写实际等待（30/60/...），不写阶梯封顶的 120m
+                backoff_min = int(cooldown)
+        return fails, backoff_min
+
+    def _clear_deliver_failure(self, user_key: str) -> bool:
+        """成功送达：清连续失败计数、盖章 sidecar 与熔断（自动解除）。"""
+        key = str(user_key or "")
+        cleared = False
+        with self._ledger_scope():
+            # 真实投递成功：探测闭环，消费半开探测标记
+            probe_keys = getattr(self, "_deliver_circuit_probe_keys", None)
+            if isinstance(probe_keys, set):
+                probe_keys.discard(key)
+            if self._deliver_fail_counts.pop(key, None) is not None:
+                cleared = True
+            seen = getattr(self, "_deliver_fail_seen", None)
+            if isinstance(seen, dict) and seen.pop(key, None) is not None:
+                cleared = True
+            circuit = getattr(self, "_deliver_circuit_open", None)
+            if isinstance(circuit, dict) and circuit.pop(key, None) is not None:
+                cleared = True
+        return cleared
+
     def register_channel(self, name: str, sender_factory: Callable[[], Any]) -> None:
         """
         注册并初始化消息通道
@@ -532,10 +742,27 @@ class ProactiveScheduler:
             # 才证明"驻留运行时活着"。四 worker 部署里只有 master 会走到这里，
             # 于是别的过程第一次能跨进程读出「调度主在跑 / 多久没跳 / 宿主是谁」。
             self._beat_resident_runtime()
+            started = time.monotonic()
+            logger.debug("[scheduler][step=job_start] job=%s", job_name)
             try:
                 return job_fn(*args, **kwargs)
             except Exception as e:
                 logger.error("Scheduled job '%s' failed: %s", job_name, e, exc_info=True)
+            finally:
+                elapsed = time.monotonic() - started
+                # 2026-11-21：短 job 的起止降为 DEBUG；慢 job 才 WARNING。
+                if elapsed >= _SLOW_JOB_WARN_SECONDS:
+                    logger.warning(
+                        "[scheduler][step=job_slow] job=%s elapsed=%.1fs",
+                        job_name,
+                        elapsed,
+                    )
+                else:
+                    logger.debug(
+                        "[scheduler][step=job_end] job=%s elapsed=%.1fs",
+                        job_name,
+                        elapsed,
+                    )
         return wrapper
 
     def _beat_resident_runtime(self) -> None:
@@ -564,7 +791,12 @@ class ProactiveScheduler:
             return True
 
         try:
-            self._scheduler = BackgroundScheduler(daemon=True)
+            # 2026-11-21 时间口径统一批：cron 必须显式北京时区。APScheduler 默认
+            # 跟随宿主本地时区——部署到 UTC 容器时 00:05 会跑成本地 08:05，
+            # 每日维护/早安/情绪衰减的「本地日」边界整体错 8 小时。
+            from utils.local_time import _BEIJING
+
+            self._scheduler = BackgroundScheduler(daemon=True, timezone=_BEIJING)
 
             # 1. ASE 检查（每5分钟）
             self._scheduler.add_job(
@@ -587,10 +819,13 @@ class ProactiveScheduler:
                 misfire_grace_time=60,
                 coalesce=True,
             )
-            # AX P2：夜间记忆 curator（02:17）
+            # AX P2：夜间记忆 curator（默认 03:40，env 可覆盖；2026-11-21
+            # 免费限流优化批——原 02:17 的批量 LLM 调用曾连续触发供应商
+            # 429+120s 熔断，挪到流量更低的时段并降低与其他任务的叠加概率）
+            _curator_hour, _curator_minute = _memory_curator_cron()
             self._scheduler.add_job(
                 self._safe_job_wrapper(self._run_memory_curator, "memory_curator"),
-                CronTrigger(hour=2, minute=17),
+                CronTrigger(hour=_curator_hour, minute=_curator_minute),
                 id="memory_curator",
                 name="夜间记忆整理",
                 replace_existing=True,
@@ -1090,6 +1325,13 @@ class ProactiveScheduler:
                     break
                 cid = int(row.get("id") or 0)
                 sk = str(row.get("session_key") or "")
+                # 2026-11-21：只在真的领到命令时记一条 DEBUG；空轮询不落日志
+                # （APScheduler 自身的 Running job INFO 已由 logging_setup 压掉）。
+                logger.debug(
+                    "[scheduler][step=control_command] claimed id=%s session=%s",
+                    cid,
+                    sk,
+                )
                 try:
                     payload = json.loads(str(row.get("payload") or "{}"))
                 except Exception:  # noqa: BLE001
@@ -1402,14 +1644,46 @@ class ProactiveScheduler:
                 seen.add(k)
                 keys.append(k)
 
+        def _add_index_key(k: str) -> None:
+            """历史索引键先过资格门（2026-11-21 主动线治理批）。
+
+            只对 `known_user_keys` / `load_user_key_index` 这两类**可能含
+            死会话**的来源设闸；活绑定与连接器注册表来源不设闸（它们本来
+            就要求账号可登录/通道在线）。异常一律 fail-open，资格门故障
+            不能把主动线整体打哑。
+            """
+            raw = str(k or "").strip()
+            if not raw:
+                return
+            if not _target_eligibility_enabled():
+                _add(raw)
+                return
+            reason = ""
+            try:
+                from proactive import target_eligibility
+
+                reason = target_eligibility.skip_reason(raw)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("资格门异常（fail-open）key=%s: %s", raw, exc)
+                reason = ""
+            if not reason:
+                _add(raw)
+                return
+            try:
+                emit = getattr(self, "_emit_skip_event_daily", None)
+                if callable(emit):
+                    emit(raw, reason)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("资格门 skip 落账失败（忽略）key=%s: %s", raw, exc)
+
         try:
             from proactive.ase_hub import ASEHub, load_user_key_index
 
             if isinstance(self.ase, ASEHub):
                 for k in self.ase.known_user_keys():
-                    _add(k)
+                    _add_index_key(k)
                 for k in load_user_key_index():
-                    _add(k)
+                    _add_index_key(k)
         except Exception:  # noqa: BLE001
             pass
 
@@ -1591,6 +1865,18 @@ class ProactiveScheduler:
                             removed += 1
                 # ④ judge stash 裁剪到上限（弹最旧）
                 self._trim_judge_stash()
+                # ⑤ 投递熔断条目：半开时刻早已过期的历史键（>7 天）驱逐；
+                # 未过期条目必须保留（跨重启熔断语义），到期条目由
+                # `_deliver_circuit_active` 在下一拍原子领取探测权。
+                circuit = getattr(self, "_deliver_circuit_open", None)
+                if isinstance(circuit, dict):
+                    stale_circuit = [
+                        k for k, ts in circuit.items()
+                        if not isinstance(ts, (int, float)) or float(ts) <= cutoff
+                    ]
+                    for k in stale_circuit:
+                        circuit.pop(k, None)
+                        removed += 1
             if removed:
                 # 锁外落盘（persist 自身再取锁做快照——锁序纪律）
                 self._persist_throttle_ledger()
@@ -1849,6 +2135,16 @@ class ProactiveScheduler:
             project_profile_for,
         )
         from speaker import ThreadState
+
+        # 2026-11-21 主动线治理批：连续投递失败熔断必须在**任何业务写入**
+        # （vital_signs / 决策上下文 / provider 调用）之前短路。到期自动
+        # 半开：放行一次探测，成功由 `_clear_deliver_failure` 解除。
+        if _deliver_circuit_enabled() and self._deliver_circuit_active(str(user_key)):
+            self._emit_skip_event_daily(str(user_key), "deliver_circuit_open")
+            logger.debug(
+                "proactive 投递熔断中，跳过决策 user=%s", user_key,
+            )
+            return
 
         # 原子 C1（2026-11-12）：话题计划读写的唯一入口是 speaker.ThreadState，
         # 本函数不再直接触碰 utils.topic_state 的计划 API（归属键由 facade 显式带）。
@@ -2236,6 +2532,16 @@ class ProactiveScheduler:
         # 材料注入（未答澄清/将到提醒/未闭环承诺/近日热点），非模型自觉。
         hooks = load_live_hooks(str(user_key), memory)
         now = _local_now()
+        # 2026-11-21 时间口径统一批：`now` 是北京墙钟（决策 prompt/静默判定用）；
+        # 话题状态机内部已统一 UTC，写计划/复提记账必须用同一时刻的 UTC naive，
+        # 否则 UTC+8 下 next_at / last_recalled_at 会整体偏 8 小时。
+        from utils.local_time import local_naive_to_utc, to_utc_naive
+
+        now_utc = (
+            to_utc_naive(now)
+            if getattr(now, "tzinfo", None) is not None
+            else local_naive_to_utc(now)
+        )
         # 2026-10-30 D20：上下文里的免打扰说明也用该会话的窗口（与决策闸同源）。
         # 未覆盖静默键 → 保持旧取值（调度器内存里的全局时段）。
         if _quiet_window is not None:
@@ -2253,18 +2559,54 @@ class ProactiveScheduler:
             str(user_key),
             char_id,
             quiet_hours=quiet,
-            now=now,
+            now=now_utc,
             judge_available=bool(
                 getattr(self, "_llm_provider", None)
                 or getattr(self, "_session_llm_resolver", None)
             ),
         )
         _next_plan = None
+        # 同一归属视图一次构造、多处委托：预读与追问限判定复用同一实例，
+        # 避免同一拍为同一 (session_key, character_id) 重复构造 ThreadState。
+        _thread_plan = ThreadState(str(user_key), char_id)
         try:
-            _next_plan = ThreadState(str(user_key), char_id).take_plan(now=now)
+            _next_plan = _thread_plan.take_plan(now=now_utc)
         except Exception as _plan_err:  # noqa: BLE001
             logger.debug("取下次计划失败（忽略）user=%s: %s", user_key, _plan_err)
             _next_plan = None
+        # 2026-11-21 主动线治理批：topic 级追问限。到期计划若是**同一话题的
+        # 第二次未回复追问**（followup_count 已达 1），在决策 LLM 之前短路：
+        # 消费计划（防下一拍复活）+ 每日一条 skip 账本，不烧 provider。
+        # 用户任何一轮发言会在 update_after_turn 里清零计数（自动解除）。
+        _plan_topic = str((_next_plan or {}).get("topic") or "").strip()
+        if _plan_topic:
+            _followup_blocked = False
+            try:
+                _followup_blocked = not _thread_plan.followup_allowed(
+                    _plan_topic, now=now_utc
+                )
+                if _followup_blocked:
+                    _thread_plan.take_plan(now=now_utc, consume=True)
+            except Exception as _followup_err:  # noqa: BLE001
+                # fail-open：话题状态读/消费失败不能拦主动线
+                logger.debug(
+                    "话题追问限判定失败（放行）user=%s: %s", user_key, _followup_err,
+                )
+                _followup_blocked = False
+            if _followup_blocked:
+                try:
+                    self._emit_skip_event_daily(
+                        str(user_key), "topic_followup_limit", character_id=char_id,
+                    )
+                except Exception as _emit_err:  # noqa: BLE001
+                    logger.debug(
+                        "话题追问限 skip 落账失败（忽略）user=%s: %s",
+                        user_key, _emit_err,
+                    )
+                logger.info(
+                    "proactive 同话题未回复追问已达上限，跳过 user=%s", user_key,
+                )
+                return
         # 关怀下限（2026-10-11 批，arXiv 2510.23853 依据）：失联超 48h 且今日
         # 零主动 → 给决策器一句显式提示，破"低热度→永远别打扰"死循环
         # （2026-10-08 起账本实证：连续 4 天 15-25 次决策全部 should=False）。
@@ -2507,11 +2849,11 @@ class ProactiveScheduler:
                         _next_topic,
                         _next_intent,
                         wait_minutes=wait_m if isinstance(wait_m, int) else 0,
-                        planned_at=now,
+                        planned_at=now_utc,
                     )
                 elif _next_plan is not None:
                     ThreadState(str(user_key), char_id).take_plan(
-                        now=now, consume=True,
+                        now=now_utc, consume=True,
                     )
             except Exception as _plan_err:  # noqa: BLE001
                 logger.debug("保存/放弃下次计划失败（忽略）user=%s: %s", user_key, _plan_err)
@@ -2533,6 +2875,12 @@ class ProactiveScheduler:
                         _now + float(CONTRACT_REJECT_BACKOFF_MINUTES) * 60.0
                     )
                 self._persist_throttle_ledger()
+            # 2026-11-21 治理批：本轮若是半开探测放行、且模型既不发送也不给
+            # 等待窗（wait<=0 / None），本轮没有任何真实投递与退避窗——60s
+            # 探测租约到期后下一拍又会放行一次决策，死会话从此每分钟白烧
+            # 一次决策 LLM。把该会话重置回完整熔断冷却（不递增失败计数）。
+            if not (isinstance(wait_m, int) and wait_m > 0):
+                self._rearm_deliver_circuit_after_probe(str(user_key))
             append_proactive_event(
                 session_key=user_key,
                 sent=False,
@@ -2679,9 +3027,9 @@ class ProactiveScheduler:
             # ⚠️ due_at 必须写成 B-1 `_normalize_ts` 认得的**精确格式**
             # "%Y-%m-%d %H:%M:%S"（它只认 "%Y-%m-%d %H:%M[:%S]"）：带 "T" / 微秒 /
             # "+08:00" 尾巴一律判不可解析 → 落空串 ⇒ 这条承诺**永不过期**（两个
-            # expire 谓词都依赖非空时间）。`expires_at()` 自 2026-11-11 复核修复起
-            # 恒返回北京 naive 墙钟（非 UTC+8 主机不再产出 aware 串），这里再用
-            # strftime 收口格式，两道都不靠调用方自觉。
+            # expire 谓词都依赖非空时间）。`expires_at()` 自 2026-11-21 时间口径
+            # 统一批起恒返回 UTC naive（与迁移后的 agent_commitments 列同口径），
+            # 这里再用 strftime 收口格式，两道都不靠调用方自觉。
             # 闸门（B-2 复核修复）：`_ac_gate_on` = 账本 on **且** SPEAKER_PROACTIVE
             # on —— 置 0 时既不登记也不消费，才真的是可回滚开关。
             try:
@@ -2708,13 +3056,17 @@ class ProactiveScheduler:
             # 不覆盖旧计划（保留到 TTL，见下方 else）。
             try:
                 _thread = ThreadState(str(user_key), char_id)
-                _thread.take_plan(now=now, consume=True)
+                _thread.take_plan(now=now_utc, consume=True)
                 _thread.save_plan(
                     str(decision.get("next_topic") or ""),
                     str(decision.get("next_intent") or ""),
                     wait_minutes=0,
-                    planned_at=now,
+                    planned_at=now_utc,
                 )
+                # 2026-11-21：本轮若消费的是一个同话题计划，说明这条主动消息
+                # 是「追问」；投递成功才记账（失败用户没看到，不能消耗额度）。
+                if _plan_topic:
+                    _thread.note_followup(_plan_topic, now=now_utc)
             except Exception as _plan_err:  # noqa: BLE001
                 logger.debug("消费/保存计划失败（忽略）user=%s: %s", user_key, _plan_err)
             # 复提记账（2026-11-07 对抗验收残余缺口②）：本轮决策注入了 parked
@@ -2728,7 +3080,7 @@ class ProactiveScheduler:
                     for _item in _recall.items:
                         _thread.mark_recalled(
                             str(_item.get("topic_id") or ""),
-                            now=now,
+                            now=now_utc,
                         )
                 except Exception as _recall_err:  # noqa: BLE001
                     logger.debug("复提记账失败（忽略）user=%s: %s", user_key, _recall_err)
@@ -2754,32 +3106,17 @@ class ProactiveScheduler:
                 character_id=char_id,
             )
             logger.info("proactive LLM delivered user=%s %s", user_key, message[:40])
-            _cleared = False
-            with self._ledger_scope():
-                _cleared = self._deliver_fail_counts.pop(str(user_key), None) is not None
-                if _cleared:
-                    # A4 ③：sidecar 成对清（缺章残留无意义）
-                    seen = getattr(self, "_deliver_fail_seen", None)
-                    if isinstance(seen, dict):
-                        seen.pop(str(user_key), None)
+            _cleared = self._clear_deliver_failure(str(user_key))
             if _cleared:
-                # 块E：成功送达清零退避（仅当确实有计数时落盘）
+                # 块E：成功送达清零退避/熔断（仅当确实有存量时落盘）
                 self._persist_throttle_ledger()
         else:
             # P1-22：投递失败指数退避（5m→15m→45m→2h 封顶），成功送达即清零。
             # 旧实现失败侧无任何 backoff：不可达用户每 5 分钟「生成→失败→再生成」，
             # 一天 288 次 LLM 零投递（v1.13 把记账移到投递后是对的，但没补退避）。
-            # A2：计数、退避时刻与 sidecar 盖章在同一临界区内一次算好。
-            with self._ledger_scope():
-                fails = self._deliver_fail_counts.get(str(user_key), 0) + 1
-                self._deliver_fail_counts[str(user_key)] = fails
-                backoff_min = min(5 * (3 ** (fails - 1)), 120)
-                self._llm_proactive_next_ok[str(user_key)] = _time.time() + backoff_min * 60.0
-                # A4 ③：sidecar 盖章（随 throttle 段持久化；缺章=驱逐时不碰）
-                seen = getattr(self, "_deliver_fail_seen", None)
-                if seen is None:
-                    seen = self._deliver_fail_seen = {}
-                seen[str(user_key)] = _time.time()
+            # 2026-11-21：计数/退避/熔断时刻在同一临界区内一次算好（A2 纪律），
+            # 连续失败达阈值后由 `_deliver_circuit_active` 在决策前拦截。
+            fails, backoff_min = self._register_deliver_failure(str(user_key))
             # 块E：退避阶梯与下一次可试时刻一并落盘 —— 重启不重置阶梯，
             # 否则 5m 永远重新开始、永远升不到 120m 封顶。
             self._persist_throttle_ledger()
@@ -2896,6 +3233,43 @@ class ProactiveScheduler:
 
         threading.Thread(target=_worker, daemon=True, name="voice-reconcile").start()
 
+    def _recent_assistant_texts_for_guard(
+        self, session_key: str | None, character_id: str | None = None,
+    ) -> list[str] | None:
+        """取该会话最近 assistant 正文，供出站终审守卫的历史重复闸使用。
+
+        2026-11-21 出站质量批扩面：此前 ``recent_assistant_messages`` 只覆盖
+        聊天主链（orchestrator），主动线（决策/手动/祝福三线共用的 ``_deliver``
+        入口）不传 → 模板句去重/历史重复闸在主动线失效。这里复用决策线同款
+        历史读取路径（``memory.get_chat_context``）+ 主链同款提取器
+        （``extract_recent_assistant_messages``）。**fail-open**：memory 缺位 /
+        读库失败 / 无会话键 / 无 assistant 行一律返回 None，守卫按缺省行为放行
+        ——历史读不到不能把主动线打哑。
+        """
+        key = str(session_key or "").strip()
+        if not key:
+            return None
+        try:
+            memory = self._resolve_memory()
+            getter = getattr(memory, "get_chat_context", None)
+            if getter is None:
+                return None
+            rows, _summary = getter(
+                session_id=key,
+                keep_recent=10,
+                character_id=str(character_id or ""),
+                summarize=False,
+            )
+            from utils.outbound_quality import extract_recent_assistant_messages
+
+            texts = extract_recent_assistant_messages(rows)
+            return texts or None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "主动线终审守卫历史读取失败（fail-open）session=%s: %s", key, exc,
+            )
+            return None
+
     def _deliver(
         self, message: str, session_key: str | None = None, character_id: str | None = None,
         quiet_hours: tuple[int, int] | None = None, *, voice: bool = False,
@@ -2932,6 +3306,8 @@ class ProactiveScheduler:
         # 不传则沉浸式括号动作（含上游已剥一次的决策线之外的路径）原样出站。
         # 2026-10-21 R7 / D-C 2026-11-08：模式跟随「会话 × 角色」快照；
         # session_key 为空（广播/手动线）→ 回落全局默认，与旧行为一致。
+        # 2026-11-21 出站质量批扩面：透传该会话最近 assistant 正文，历史
+        # 重复闸/模板句去重在主动线生效（取不到时 None=守卫 fail-open）。
         guarded = terminal_reply_guard(
             message,
             user_msg="",
@@ -2940,6 +3316,9 @@ class ProactiveScheduler:
             character_id=str(character_id or ""),
             reply_mode=read_reply_mode(
                 str(session_key or "") or None, str(character_id or "") or None,
+            ),
+            recent_assistant_messages=self._recent_assistant_texts_for_guard(
+                session_key, character_id,
             ),
         )
         if not guarded:
@@ -3292,6 +3671,16 @@ class ProactiveScheduler:
                 logger.info("话题状态 TTL 清理：删除 %d 条过期行", _removed)
         except Exception as e:  # noqa: BLE001
             logger.warning("话题状态 TTL 清理失败: %s", e)
+        # 2026-11-21 数据生命周期：登录会话全局 TTL（user_sessions 过期行）。
+        # 同步 SQLite 清理，避免在调度线程里跨事件循环操作 async engine。
+        try:
+            from api.lifecycle import purge_expired_user_sessions_sync
+
+            _removed = purge_expired_user_sessions_sync()
+            if _removed:
+                logger.info("过期登录会话清理：删除 %d 行", _removed)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("过期登录会话清理失败: %s", e)
         if self._daily_maintenance:
             try:
                 self._daily_maintenance()
@@ -3741,6 +4130,20 @@ class ProactiveScheduler:
         if isinstance(sent, list):
             self._important_dates_sent = {str(x) for x in sent if str(x or "")}
 
+        # 2026-11-21 主动线治理批：投递熔断跨重启保留（否则重启即重新烧
+        # 决策，死会话永远在「重启后试一次」的循环里）。
+        circuit = raw.get("deliver_circuit_open")
+        if isinstance(circuit, dict):
+            loaded_circuit: dict[str, float] = {}
+            for k, v in circuit.items():
+                try:
+                    fv = float(v)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(fv) and fv > 0:
+                    loaded_circuit[str(k)] = fv
+            self._deliver_circuit_open = loaded_circuit
+
     def _ledger_snapshot(self) -> dict[str, Any]:
         """A2：取全部账本的一致性快照（**调用方须已持 `_ledger_scope()`**）。
 
@@ -3762,6 +4165,10 @@ class ProactiveScheduler:
             # stub → 空段；load 侧缺该字段=不驱逐）
             "deliver_fail_counts_ts": {
                 k: float(v) for k, v in getattr(self, "_deliver_fail_seen", {}).items()
+            },
+            # 2026-11-21 主动线治理批：投递熔断半开时刻（跨重启）
+            "deliver_circuit_open": {
+                k: float(v) for k, v in getattr(self, "_deliver_circuit_open", {}).items()
             },
             "disabled_event_day": dict(self._disabled_event_day),
             # skip 账本治理（2026-10-12）：等待窗/静默闸的每日去重键
@@ -3817,7 +4224,7 @@ class ProactiveScheduler:
         _persist 把已删账号的条目复活。返回移除的条目总数。
         """
         uid = int(owner_id)
-        explicit = {str(k) for k in (session_keys or []) if str(k)}
+        explicit = {str(k) for k in (session_keys or []) if str(k)} | {str(uid)}
 
         def _owned(key: str) -> bool:
             if key in explicit:
@@ -3869,6 +4276,13 @@ class ProactiveScheduler:
             if isinstance(seen, dict):
                 for k in [k for k in list(seen) if _owned(str(k))]:
                     seen.pop(k, None)
+            # 2026-11-21：投递熔断同样按 owner 清（漏了会让已删账号的熔断
+            # 条目随 _persist 复活，白占账本）。
+            circuit = getattr(self, "_deliver_circuit_open", None)
+            if isinstance(circuit, dict):
+                for k in [k for k in list(circuit) if _owned(str(k))]:
+                    circuit.pop(k, None)
+                    removed += 1
             date_victims = [
                 x for x in list(self._important_dates_sent)
                 if _owned(_dedup_user_key(str(x)))

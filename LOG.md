@@ -7,6 +7,16 @@
 
 ---
 
+## 2026-11-21/22 — 生产体检九问题根治批（取证 → 实施 → 对抗验收 → 修复轮，全链闭环）
+
+- **触发**：用户 `/workflow`「查系统日志/用户数据/最近聊天记录，找优化点」→ 生产只读体检（swu-prod，零写入）产出 10 条机会（5 high + 4 medium + 1 low，全部独立复核 verified）；用户裁决：**安全闸（未成年防护）暂缓、测试账号彻底删除、死会话治本不打补丁、UTC 本轮直接迁移**；复以 `/workflow`「所有问题深入代码级检查修复，治彻底」。
+- **取证（dwfrun-f2c10ba4，七域 48 条代码级发现）**：关键更正三处——死会话真实对象=owner=27（284 次 -14，非 owner=28）；出站守卫真源=`utils/prompt_sanitize.py::terminal_reply_guard`（`utils/terminal_reply_guard.py` 不存在）；降级对账=197 轮中 65 轮（33%）zhipu 代写（称呼率 63.1% vs 82.6%、建议腔 10.8% vs 1.5%）+ 02:17 memory_curator 连续 10 调用自触发 429+熔断。
+- **实施（六域 92 文件）→ 独立验收 19 条高优先 → 修复轮 6 组并行**：全部 19 条闭环 + 五项用户裁决落地（回声守卫白名单重设计/无绑定即跳过/昵称逐行判别迁移+JSONL 备份/一个冷停窗口打包/免费限流优化+nex-n2.6 接入）。修复轮另抓出 2 个真缺陷：网关 `api_base` 缺省需回落 `DEFAULT_PROVIDER_CONFIG`（否则 hermetic 构造全跳过）、回声剥除误伤招呼正文（生产原句「哈喽 你刚说的那个咳」回归钉死，`ECHO_INTIMACY_LEXICON` 扩招呼词且白名单回声不剥）。
+- **验证**：定向 568 例 + 全量八块 328 文件块级全绿（收集 **5238**；首轮 5 失败=4 处测试侧写错 + 网关 api_base 回归，均已修正复跑）+ ruff 0（仅并行进程 `out/` 未跟踪产物 5 错，非本批）+ 前端 vitest **284/42** + tsc 0。 nex 凭据经 `~/.zcode/v2/provider_config.json`（Mosi - Nex N2.6，api.mosi.cn 实测 OpenAI 兼容 `/v1` 可用且 `nex-n2.6` 在列）搬入本地 `.env`/local overlay，**未回显未入 git**。
+- **未决（下一窗口）**：生产停机窗口执行——冷停 → 四库备份 → `scripts/migrate_time_columns_to_utc.py --apply` → `scripts/purge_e2e_accounts.py --apply`（wbtest1027/TEST）→ `scripts/retire_tool_call_log.py --apply` → 代码部署 → 健康核验。**次序硬约束：先迁移后启动新代码**（`utils/time_caliber.py` 版本闸生产 fail-closed）。安全闸（未成年防护）按用户裁决暂缓。
+
+---
+
 ## 2026-11-15 — 仓库收尾批（测试卫生 + 状态文件污染清理，零生产代码变更）
 
 - **触发**：用户指令「再次整理一下仓库，做一下收尾」。对部署批 + CI 修复批之后的仓库做整理与收口。

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from utils.local_time import now_utc_naive
+
 from .affinity_level import AffinityLevel
 from .emotion_type import EmotionType
 
@@ -16,7 +18,7 @@ class EmotionalState:
     energy: float = 1.0
     affinity_level: AffinityLevel = AffinityLevel.STRANGER
     affection_points: float = 0.0
-    updated_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=now_utc_naive)
 
     def __post_init__(self):
         self.intensity = max(0.0, min(1.0, self.intensity))

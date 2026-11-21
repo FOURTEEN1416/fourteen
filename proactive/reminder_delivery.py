@@ -19,12 +19,12 @@ import inspect
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime
 from typing import Any
 
 from proactive.ase_engine import sanitize_message
 from utils import character_resolver
 from utils import session_key as session_key_mod
+from utils.local_time import now_local
 
 # 回复模式单一真源（沉浸式/小说式）。出站守卫需要它来决定是否剥括号动作段
 # ——不传时 terminal_reply_guard 的 reply_mode 缺省空串，沉浸式括号会原样
@@ -42,8 +42,12 @@ PLANE_RECEIPT_TIMEOUT = 30.0
 
 
 def _now_local_text() -> str:
-    """续投提醒的 trigger_time 格式（与 StructuredMemory._now_local 同形）。"""
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    """续投提醒的 trigger_time（北京墙钟文本，与 add_reminder 入参契约同形）。
+
+    2026-11-21 时间口径统一批：原裸 ``datetime.now()`` 依赖宿主时区，改为
+    公共墙钟真源 ``now_local``；``add_reminder`` 会在写边界转成 UTC 落库。
+    """
+    return now_local().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _remainder_after_prefix(text: str, delivered: str) -> str:
@@ -504,6 +508,8 @@ class ReminderDeliveryTask:
 
         # 2026-11-08 D-C：提醒线也按「会话 × 角色」快照解析回复模式
         # （未设置/缺角色 → 全局默认 → 沉浸式）。
+        # 2026-11-21 出站质量批扩面：透传该会话最近 assistant 正文，历史
+        # 重复闸/模板句去重在提醒线生效（取不到时 None=守卫 fail-open）。
         guarded = terminal_reply_guard(
             cleaned,
             user_msg="",
@@ -513,6 +519,9 @@ class ReminderDeliveryTask:
             reply_mode=read_reply_mode(
                 session_key or None,
                 str(character_id or "") or None,
+            ),
+            recent_assistant_messages=self._recent_assistant_texts(
+                session_key, str(character_id or ""),
             ),
         )
         # 终审剥空时兜底文案同样要过守卫（旧实现 `guarded or fallback` 让
@@ -549,6 +558,11 @@ class ReminderDeliveryTask:
                     str(session_key or "") or None,
                     str(character_id or "") or None,
                 ),
+                # 2026-11-21 出站质量批扩面：兜底文案同属提醒线出站，
+                # 历史重复闸/模板句去重一致生效（fail-open）。
+                recent_assistant_messages=self._recent_assistant_texts(
+                    str(session_key or ""), str(character_id or ""),
+                ),
             )
             if not guarded:
                 logger.warning("[reminder] 兜底文案被终审剥空，不发送")
@@ -558,6 +572,42 @@ class ReminderDeliveryTask:
             # 不能按原文返回——异常路径同样不得绕过守卫。
             logger.warning("[reminder] 兜底文案终审异常，不发送: %s", e)
             return ""
+
+    def _recent_assistant_texts(
+        self, session_key: str, character_id: str = "",
+    ) -> list[str] | None:
+        """取该会话最近 assistant 正文，供出站终审守卫的历史重复闸使用。
+
+        2026-11-21 出站质量批扩面：此前 ``recent_assistant_messages`` 只覆盖
+        聊天主链，提醒线不传 → 模板句去重/历史重复闸在提醒线失效。复用装配层
+        注入的 ``memory.get_chat_context``（与主链同一读取路径）+ 主链同款提取器
+        （``extract_recent_assistant_messages``）。**fail-open**：memory 缺位 /
+        读库失败 / 无会话键 / 无 assistant 行一律返回 None，守卫按缺省行为放行
+        ——历史读不到不能把提醒线打哑。
+        """
+        key = str(session_key or "").strip()
+        if not key:
+            return None
+        try:
+            getter = getattr(self._memory, "get_chat_context", None)
+            if getter is None:
+                return None
+            rows, _summary = getter(
+                session_id=key,
+                keep_recent=10,
+                character_id=str(character_id or ""),
+                summarize=False,
+            )
+            from utils.outbound_quality import extract_recent_assistant_messages
+
+            texts = extract_recent_assistant_messages(rows)
+            return texts or None
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "[reminder] 终审守卫历史读取失败（fail-open）session=%s: %s",
+                key, exc,
+            )
+            return None
 
     async def _maybe_gc_intents(self) -> None:
         """节流清理过期澄清任务（失败不影响投递主流程）。

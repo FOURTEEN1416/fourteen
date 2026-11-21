@@ -613,11 +613,16 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             # turn_id：事实/画像写入口的来源水位与回执归属（W4 缺陷 B）
             # message_id：入站消息身份（缺陷 I）——副作用幂等的去重键成分，
             # 服务端注入，LLM 不可决定。
+            # character_id（2026-11-21 验收修复）：画像/称呼闸
+            # （shisi/agent_plane/runtime.py 写侧门）按 character_id 判别
+            # 「角色卡自称 → 改存 user_calls_ai」。缺它时 L1/主链
+            # update_user_profile 的闸门永不触发（与画像同步路径不一致）。
             args["_meta"] = {
                 "session_key": session_key, "user_id": user_id,
                 "turn_id": str(turn_id or ""),
                 "message_id": current_message_id(),
                 "call_id": call_id,
+                "character_id": str(character_id or ""),
             }
         # ── agent_core 影子账本（B-1，2026-11-11）：模型请求的这次调用 ──
         # 锚点在 send_voice 提前 return 之后（伪工具不是 registry 工具，不进账本）。
@@ -649,6 +654,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             logger.debug("[agent_core][step=hook_tool_call_skipped] %s", _agent_exc)
         success = False
         error = ""
+        started_at = time.perf_counter()
         try:
             result = await asyncio.to_thread(
                 tools.dispatch, name, args,
@@ -663,6 +669,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             result = ToolResult(False, error="tool_execution_failed")
             rd = result.to_dict()
             error = "tool_execution_failed"
+        duration_ms = (time.perf_counter() - started_at) * 1000.0
         # ── agent_core 影子账本：调用结果 + 提醒承诺 ──
         # 承诺是「我答应过要做什么」的唯一影子源：`set_reminder` 成功才写，
         # reminder_id 为确定性去重键（同 call 重放不产生第二行）。
@@ -691,6 +698,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 _ac_data = rd.get("data") if isinstance(rd, dict) else None
                 if isinstance(_ac_data, dict):
                     from agent_core.commitments import add_commitment
+                    from utils.local_time import local_text_to_utc_text
 
                     _ac_rid = str(_ac_data.get("reminder_id") or "")
                     add_commitment(
@@ -698,7 +706,9 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                         kind="remind",
                         session_key=str(session_key or ""),
                         character_id=str(character_id or ""),
-                        due_at=str(_ac_data.get("trigger_time") or ""),
+                        # 提醒工具返回的是北京时间展示串；承诺账本存 UTC，
+                        # 在写边界转换一次（2026-11-21 时间口径统一批）。
+                        due_at=local_text_to_utc_text(_ac_data.get("trigger_time")),
                         source_turn_id=_ac_turn2,
                         ref=f"reminder:{_ac_rid}" if _ac_rid else "",
                         dedupe_key=f"reminder:{_ac_rid}" if _ac_rid else "",
@@ -722,6 +732,25 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             )
         except Exception as e:  # noqa: BLE001
             logger.debug("tool call ledger failed: %s", e)
+        # 2026-11-21 可观测性批：结果与调用一一对应（同一 call_id），
+        # 主链 tool loop 与 L1 都走本方法，天然覆盖两条路径。
+        try:
+            from shisi.agent_plane.runtime import append_tool_result_event
+
+            append_tool_result_event(
+                session_key=str(session_key or ""),
+                tool_name=name,
+                call_id=call_id,
+                provider="builtin",
+                success=success,
+                error=error,
+                turn_id=str(turn_id or ""),
+                character_id=str(character_id or ""),
+                result_preview=json.dumps(rd, ensure_ascii=False, default=str)[:400],
+                duration_ms=duration_ms,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("tool result ledger failed: %s", e)
         return {"name": name, "result": rd, "call_id": call_id, "success": success}
 
     async def _main_chain_tool_loop(
@@ -1680,6 +1709,18 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except Exception as e:  # noqa: BLE001
             logger.debug("历史回灌净化失败: %s", e)
 
+        # 2026-11-21 出站质量批：把最近 N 条 assistant 历史挂到 ctx，供
+        # `_finalize_reply` 的闸一/闸三消费。此前终审拿不到历史，生产
+        # 5641/5717 的 288 字逐字重复两轮都被原样放行。取不到时为空列表
+        # （fail-open，与旧行为一致）。
+        recent_assistant_messages: list[str] = []
+        try:
+            from utils.outbound_quality import extract_recent_assistant_messages
+
+            recent_assistant_messages = extract_recent_assistant_messages(chat_history)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("recent_assistant_messages 提取失败（忽略）: %s", e)
+
         # ── 时间感知（2026-10-11 批，参照 SillyTavern {{idleDuration}} 语义 +
         #    hermes-agent #62369 [time anchor] 单行锚点惯例；AGPL 项目仅语义对齐）──
         # 历史按真实间隔加时间前缀；锚点（当前时间+距上条消息时长）进
@@ -1959,29 +2000,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             system_prompt = inject_tool_context_before_phi(system_prompt, tool_results)
             context_lengths = dict(context_lengths or {})
             context_lengths["tool"] = len(str(tool_results))
-            # AX P2：工具结果入因果账本（可回放「这句是否因工具而变」）
-            if session_id:
-                try:
-                    import uuid as _uuid
-
-                    from shisi.agent_plane.event_ledger import EVENT_TOOL_RESULT
-                    from shisi.agent_plane.runtime import get_ledger
-
-                    _tid = ax_turn_id
-                    get_ledger().append(
-                        session_key=session_id,
-                        event_type=EVENT_TOOL_RESULT,
-                        character_id=str(character_id or ""),
-                        actor="orchestrator",
-                        turn_id=str(_tid),
-                        reply_id=str(ax_reply_id),
-                        payload={
-                            "chars": len(str(tool_results)),
-                            "preview": str(tool_results)[:400],
-                        },
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("tool result ledger append failed: %s", e)
+            # 2026-11-21 可观测性批：工具结果的逐调用落账已前移到
+            # `_dispatch_tool_call`（带 call_id / success / error / duration），
+            # 这里不再写无 call_id 的聚合 tool_result——否则会与逐调用结果
+            # 重复计数，账本永远无法做到 call:result 1:1。
 
         # ── 回复模式（web 控制端可切换，2026-09-19）──
         # 必须放在**最后**：角色卡/人格块里常写着"必须写动作神态"之类的格式要求，
@@ -2064,6 +2086,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             # 2026-10-21 R7：本轮回复模式（单次解析）——下游终裁/兜底/流式透传，
             # 禁止再次热读（同一轮内模式必须一致）。
             "reply_mode": turn_reply_mode,
+            # 2026-11-21 出站质量批：最近 N 条 assistant 正文（闸一/闸三输入）。
+            "recent_assistant_messages": recent_assistant_messages,
             # 2026-11-08 语音 LLM 化批：L1 send_voice 裁决结果（逐轮局部状态，
             # 经 ctx 透传给 process_message 的语音块——不进 self，orchestrator
             # 跨会话共享，实例属性会串台）。
@@ -2368,6 +2392,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         session_id: str = "",
         last_turn_age_seconds: float | None = None,
         reply_mode: str | None = None,
+        recent_assistant_messages: list[str] | None = None,
     ) -> str:
         """唯一输出定稿：清洗、空回复降级、安全检查均发生在发送和落库之前。
 
@@ -2383,6 +2408,10 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         ``reply_mode``（2026-10-21 R7 / D-C 2026-11-08）：本轮已解析的模式。
         缺省时回落到热读真源（会话键 × 角色 id 的快照）—— 后台线/单测直接调
         本函数时仍按全局默认（旧行为）。
+
+        ``recent_assistant_messages``（2026-11-21 出站质量批）：最近 N 条
+        assistant 正文，透传给 ``terminal_reply_guard`` 做历史重复/模板复读
+        闸。缺省 ``None`` 时行为与旧版完全一致（向后兼容，fail-open）。
         """
         from utils.prompt_sanitize import sanitize_reply_text, terminal_reply_guard
         from utils.reply_mode import read_reply_mode
@@ -2404,6 +2433,7 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
             character_name=char_name,
             last_turn_age_seconds=last_turn_age_seconds,
             reply_mode=effective_mode,
+            recent_assistant_messages=recent_assistant_messages,
         )
         try:
             from utils.address_terms import resolve_address, strip_forbidden_vocatives
@@ -2475,6 +2505,52 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
         except Exception as _agent_exc:  # noqa: BLE001 —— 影子写绝不改真实行为
             logger.debug("[agent_core][step=hook_final_skipped] %s", _agent_exc)
         return final
+
+    async def _regenerate_action_only_reply(
+        self,
+        reply: str,
+        *,
+        request_llm: Any,
+        system_prompt: str = "",
+        history: list | None = None,
+        user_msg: str = "",
+        reply_mode: str | None = None,
+        session_id: str = "",
+    ) -> str:
+        """闸二（2026-11-21 出站质量批）：沉浸式动作-only → 同模型补一次台词。
+
+        仅在**剥括号动作后没有任何台词**时触发；novel 模式动作是合法格式，
+        ``is_action_only_reply`` 直接返回 False。重试只用当前请求的
+        ``request_llm``（同模型/同供应商链），失败回退 ``SAFE_MINIMAL_REPLY``。
+        非流式/流式共用此方法；流式调用点必须在**首屏前**（guard 未发任何
+        内容）才允许进入，已发前缀不可撤回。
+        """
+        from utils.outbound_quality import (
+            is_action_only_reply,
+            regenerate_action_only_reply,
+        )
+
+        if not is_action_only_reply(reply, reply_mode):
+            return reply
+        logger.info(
+            "[quality][gate=action_only] session=%s chars=%d",
+            session_id,
+            len(str(reply or "")),
+        )
+        regenerated = await regenerate_action_only_reply(
+            request_llm,
+            previous_reply=reply,
+            user_msg=user_msg,
+            system_prompt=system_prompt,
+            history=history,
+            reply_mode=reply_mode or "immersive",
+        )
+        logger.info(
+            "[quality][step=action_only_regenerated] session=%s chars=%d",
+            session_id,
+            len(str(regenerated or "")),
+        )
+        return regenerated
 
     @request_scoped_llm
     async def process_message(
@@ -2737,6 +2813,19 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                 )
                 # === 检查结束 ===
 
+                # 2026-11-21 出站质量批（闸二）：沉浸式「只有动作没有台词」→
+                # 同模型补一次台词；失败回退安全句。必须在 _finalize_reply 前
+                # 执行——终审剥完动作只会走 empty_reply，不会再有生成机会。
+                reply = await self._regenerate_action_only_reply(
+                    reply,
+                    request_llm=request_llm,
+                    system_prompt=system_prompt,
+                    history=chat_history,
+                    user_msg=user_msg_clean,
+                    reply_mode=ctx.get("reply_mode"),
+                    session_id=session_id,
+                )
+
                 reply = self._finalize_reply(
                     reply,
                     character_id,
@@ -2746,6 +2835,8 @@ class OptimizedOrchestrator(_InitPhasesMixin, _StreamPipelineMixin):
                     last_turn_age_seconds=ctx.get("last_turn_age_seconds"),
                     # 2026-10-21 R7：本轮模式透传（终裁内不再热读）
                     reply_mode=ctx.get("reply_mode"),
+                    # 2026-11-21 出站质量批（闸一/闸三）：最近 assistant 历史
+                    recent_assistant_messages=ctx.get("recent_assistant_messages"),
                 )
 
                 # ── 语音轮（2026-11-08 用户裁决「仅发语音条，不要发文字气泡了」）──

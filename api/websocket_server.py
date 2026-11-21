@@ -21,6 +21,25 @@ logger = logging.getLogger("websocket_server")
 MAX_CLIENTS = 1000
 
 
+def _lease_touch(session_key: str) -> None:
+    """续 web 在线租约（失败静默：租约只是资格门优化，不能影响聊天）。"""
+    try:
+        from proactive import runtime_plane
+
+        runtime_plane.session_touch(session_key)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _lease_release(session_key: str) -> None:
+    try:
+        from proactive import runtime_plane
+
+        runtime_plane.session_release(session_key)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class WebSocketServer:
     def __init__(self, orchestrator=None, host: str = "127.0.0.1", port: int = 8765):
         self._orch = orchestrator
@@ -280,6 +299,9 @@ class WebSocketServer:
                         if session_id:
                             async with self._client_lock:
                                 self._client_sessions[websocket] = str(session_id)
+                            # 2026-11-21：入站即续租（在线会话的实时信号；
+                            # 空闲连接由 outbox drain 每 3 秒批量续租）。
+                            await asyncio.to_thread(_lease_touch, str(session_id))
                         use_stream = data.get("stream", False)
                         # P0: 支持 message_type 和 file_url 字段
                         message_type = data.get("message_type", "text")
@@ -386,11 +408,19 @@ class WebSocketServer:
             logger.debug("WebSocket handler cancelled for %s", getattr(websocket, "id", ""))
             raise
         finally:
+            released_key = ""
             async with self._client_lock:
+                released_key = str(self._client_sessions.get(websocket) or "")
                 self._clients.discard(websocket)
                 self._client_tasks.pop(websocket, None)
                 self._client_identity.pop(websocket, None)
                 self._client_sessions.pop(websocket, None)
+                # 同一 session_key 可能有多条连接；只有最后一条断开才释放租约
+                if released_key and released_key in self._client_sessions.values():
+                    released_key = ""
+            if released_key:
+                with contextlib.suppress(Exception):
+                    await asyncio.to_thread(_lease_release, released_key)
             with contextlib.suppress(Exception):
                 await websocket.close()
 
@@ -520,3 +550,11 @@ class WebSocketServer:
     @property
     def client_count(self) -> int:
         return len(self._clients)
+
+    def active_session_keys(self) -> set[str]:
+        """当前连接已登记的会话键集合（供主动线资格门续租，2026-11-21）。"""
+        return {
+            str(sid)
+            for ws, sid in self._client_sessions.items()
+            if sid and ws in self._clients
+        }

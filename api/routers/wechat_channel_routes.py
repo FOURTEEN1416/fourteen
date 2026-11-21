@@ -68,9 +68,20 @@ async def _upsert_session_row(db, user_id: int, slot: int, **fields) -> None:
 
 def _safe_channel_payload(st: dict) -> dict:
     """对外状态：永不返回 token/凭证。"""
-    return {
+    status = st.get("status") or ("connected" if st.get("connected") else "idle")
+    auth_state = st.get("auth_state") or status
+    needs_reauth = status == "needs_reauth" or auth_state == "needs_reauth"
+    payload = {
         "connected": bool(st.get("connected")),
-        "status": st.get("status") or ("connected" if st.get("connected") else "idle"),
+        "status": status,
+        # 2026-11-21 死会话治理：状态机口径 + 终态引导字段。
+        "auth_state": auth_state,
+        "needs_reauth": needs_reauth,
+        "last_error": st.get("last_error") or "",
+        "reauth_required_at": st.get("reauth_required_at"),
+        "reauth_attempts": int(st.get("reauth_attempts") or 0),
+        "auth_failures": int(st.get("auth_failures") or 0),
+        "token_window_state": st.get("token_window_state") or "",
         "bot_id": st.get("bot_id") or "",
         "owner_user_id": st.get("owner_user_id"),
         "slot": st.get("slot", 0),
@@ -80,6 +91,10 @@ def _safe_channel_payload(st: dict) -> dict:
         "last_activity": st.get("last_activity"),
         "nickname": st.get("nickname", ""),
     }
+    if needs_reauth:
+        payload["action"] = "reconnect"
+        payload["message"] = "微信登录态已失效，请重新扫码连接（角色与记忆数据保留）"
+    return payload
 
 
 @router.get("")
@@ -116,12 +131,16 @@ async def get_my_channel(
         "channels": channels,
         "max_per_user": channel_paths.MAX_CHANNELS_PER_USER,
         "max_global": channel_paths.max_channels(),
+        # 2026-11-21：needs_reauth 时保留上方 payload 的重新扫码引导，不覆盖。
         "message": "仅显示你自己的微信通道",
     }
+    if payload.get("needs_reauth"):
+        payload["message"] = "微信登录态已失效，请重新扫码连接（角色与记忆数据保留）"
     # NEW-4（2026-10-29）：扫码等待期把二维码时效带给前端——旧实现 is_expired
     # 只在 /qrcode 端点返回，前端拿到二维码后切入的连接轮询完全不检查过期，
     # 延误扫码后旧码永远显示「等待扫描」。等待/已扫态下补算时效（一次磁盘读）。
-    if payload.get("status") in ("waiting_qr", "scanned"):
+    # 2026-11-21：显式状态机的 connecting 态同样属于「等扫码」，一并补算。
+    if payload.get("status") in ("waiting_qr", "scanned", "connecting"):
         from wechat_direct.wechat_connector import load_session_qrcode
 
         qr_ts = float(
@@ -287,12 +306,28 @@ async def admin_list_channels(
     items = []
     for row in rows:
         conn = live.get((row.user_id, row.slot))
-        connected = bool(getattr(conn, "token", "")) if conn else row.status == "connected"
+        if conn is not None:
+            try:
+                connected = bool(conn.get_status().get("connected", True))
+            except Exception:  # noqa: BLE001
+                connected = bool(getattr(conn, "token", ""))
+        else:
+            connected = row.status == "connected"
+        # 2026-11-21：管理面同样叠加 token 窗口真源——死 token 不得显示在线。
+        try:
+            from wechat_direct.wechat_connector import token_window_state
+
+            window = token_window_state(row.user_id, row.slot)
+        except Exception:  # noqa: BLE001
+            window = {}
+        if window.get("state") == "dead":
+            connected = False
         items.append(
             {
                 **row.to_dict(),
                 "connected": connected,
                 "bot_id": getattr(conn, "bot_id", row.bot_id) if conn else row.bot_id,
+                "token_window_state": window.get("state", ""),
             }
         )
     # 磁盘有凭证但库无行的，也列出

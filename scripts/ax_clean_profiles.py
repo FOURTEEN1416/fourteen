@@ -24,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from utils.local_time import now_utc_naive  # noqa: E402
+
 # 报告落点：与被清洗库同目录（沙箱友好；不再无条件写仓库 data/）
 REPORT_PATH = ROOT / "data" / "ax_profile_clean_report.json"
 
@@ -68,11 +70,15 @@ def _clean_profile_row(row: dict) -> tuple[dict, list[str]]:
     if occ and _BAD_OCC_RE.search(occ):
         out["occupation"] = ""
         notes.append(f"clear_occupation:{occ}")
-    # 昵称过长像整句 → 清空
+    # 昵称过长像整句 → 清空（nickname 与 user_calls_ai 分开清洗）
     nk = str(out.get("nickname") or "").strip()
     if len(nk) > 12:
         out["nickname"] = ""
         notes.append("clear_long_nickname")
+    aic = str(out.get("user_calls_ai") or "").strip()
+    if len(aic) > 12:
+        out["user_calls_ai"] = ""
+        notes.append("clear_long_user_calls_ai")
     prefs = [str(x).strip() for x in (out.get("preferences") or []) if str(x).strip()]
     prefs = [p for p in prefs if not _is_garbage_fact(p)][:20]
     if len(prefs) != len(out.get("preferences") or []):
@@ -138,23 +144,36 @@ def _profile_apply(conn: sqlite3.Connection) -> list[dict]:
         }
         results.append(entry)
         if notes:
-            conn.execute(
-                """
-                UPDATE user_profile SET
-                  birthday=?, occupation=?, nickname=?,
-                  preferences=?, commitments=?, updated_at=?
-                WHERE user_key=?
-                """,
-                (
-                    cleaned.get("birthday") or "",
-                    cleaned.get("occupation") or "",
-                    cleaned.get("nickname") or "",
-                    json.dumps(cleaned.get("preferences") or [], ensure_ascii=False),
-                    json.dumps(cleaned.get("commitments") or [], ensure_ascii=False),
-                    __import__("datetime").datetime.now().isoformat(timespec="seconds"),
-                    row.get("user_key"),
+            # 兼容旧 schema：user_calls_ai 是 2026-11 称呼批新增列，历史库可能
+            # 尚未迁移；旧实现 UPDATE 直接引用该列会整条失败，清洗结果被
+            # 静默丢弃（清理脚本对旧库必须仍能工作）。
+            existing_cols = {
+                str(r[1]) for r in conn.execute("PRAGMA table_info(user_profile)")
+            }
+            values: dict[str, object] = {
+                "birthday": cleaned.get("birthday") or "",
+                "occupation": cleaned.get("occupation") or "",
+                "nickname": cleaned.get("nickname") or "",
+                "user_calls_ai": cleaned.get("user_calls_ai") or "",
+                "preferences": json.dumps(
+                    cleaned.get("preferences") or [], ensure_ascii=False
                 ),
-            )
+                "commitments": json.dumps(
+                    cleaned.get("commitments") or [], ensure_ascii=False
+                ),
+                "updated_at": now_utc_naive().isoformat(timespec="seconds"),
+            }
+            assignments = [f"{col}=?" for col in values if col in existing_cols]
+            params: list[object] = [
+                values[col] for col in values if col in existing_cols
+            ]
+            if assignments:
+                params.append(row.get("user_key"))
+                conn.execute(
+                    f"UPDATE user_profile SET {', '.join(assignments)} "
+                    "WHERE user_key=?",
+                    params,
+                )
     conn.commit()
     return results
 

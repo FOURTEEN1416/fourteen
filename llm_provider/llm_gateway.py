@@ -46,7 +46,11 @@ class ModelEntry:
         if self.retry_count >= self.max_retries:
             self.cooldown_until = time.time() + self.cooldown_seconds
             self.retry_count = 0
-            logger.warning("Model %s entering cooldown for %.0fs", self.name, self.cooldown_seconds)
+            # 2026-11-21 可观测性批：structlog 不做 stdlib 的 % 格式化，
+            # 必须先格式化再交给 renderer（否则落盘成未渲染 dict）。
+            logger.warning(
+                f"Model {self.name} entering cooldown for {self.cooldown_seconds:.0f}s"
+            )
 
     def mark_success(self):
         self.retry_count = 0

@@ -128,7 +128,8 @@ class TestFallbackChainSingleSource:
         assert chain[: len(DEFAULT_FALLBACK_CHAIN)] == list(DEFAULT_FALLBACK_CHAIN)
 
     def test_auto_guide_shows_the_real_chain_order(self, providers_config):
-        aliases = {"agnes": "Agnes", "zhipu": "智谱", "xunfei": "讯飞", "baidu": "百度"}
+        # 2026-11-21 nex 接入批：链上新增 nex（展示别名 Nex）
+        aliases = {"agnes": "Agnes", "nex": "Nex", "zhipu": "智谱", "xunfei": "讯飞", "baidu": "百度"}
         auto = providers_config["special_options"]["auto"]["guide"]
         text = " ".join(list(auto.get("steps") or []) + list(auto.get("tips") or []))
         positions = []

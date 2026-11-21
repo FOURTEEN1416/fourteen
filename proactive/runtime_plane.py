@@ -133,6 +133,11 @@ CREATE TABLE IF NOT EXISTS runtime_beat (
     holder       TEXT NOT NULL,
     renewed_at   REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS session_presence (
+    session_key  TEXT PRIMARY KEY,
+    host_pid     TEXT NOT NULL,
+    heartbeat    REAL NOT NULL
+);
 """
 
 _db_lock = threading.Lock()
@@ -287,6 +292,80 @@ def live_slots(owner_id: int, ttl: float = PRESENCE_TTL) -> list[int]:
             (int(owner_id), _now() - ttl),
         ).fetchall()
     return [int(r["slot"]) for r in rows]
+
+
+# ── web 会话在线租约（2026-11-21 主动线治理批） ──────────────
+# WS 持有者每 3 秒为「已登记 session_key 的连接」续租；调度器资格门据此
+# 判定 web 会话是否真的有在线接收方（跨进程可见，0 客户端时租约自然过期）。
+
+SESSION_LEASE_TTL = 90.0
+
+
+def session_touch(session_key: str, ttl: float = SESSION_LEASE_TTL) -> None:
+    """续租一个 web 会话；空键 no-op。"""
+    key = str(session_key or "").strip()
+    if not key:
+        return
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO session_presence (session_key, host_pid, heartbeat) "
+            "VALUES (?, ?, ?) ON CONFLICT(session_key) DO UPDATE SET "
+            "host_pid=excluded.host_pid, heartbeat=excluded.heartbeat",
+            (key, host_id(), _now() + float(ttl)),
+        )
+        conn.commit()
+
+
+def session_touch_many(
+    session_keys: list[str] | set[str], ttl: float = SESSION_LEASE_TTL,
+) -> int:
+    """批量续租；返回实际写入键数（单事务，避免每 3 秒 N 次 fsync）。"""
+    keys = sorted({str(k).strip() for k in (session_keys or []) if str(k).strip()})
+    if not keys:
+        return 0
+    expires = _now() + float(ttl)
+    with _conn() as conn:
+        conn.executemany(
+            "INSERT INTO session_presence (session_key, host_pid, heartbeat) "
+            "VALUES (?, ?, ?) ON CONFLICT(session_key) DO UPDATE SET "
+            "host_pid=excluded.host_pid, heartbeat=excluded.heartbeat",
+            [(key, host_id(), expires) for key in keys],
+        )
+        conn.commit()
+    return len(keys)
+
+
+def session_release(session_key: str, *, host_pid: str | None = None) -> None:
+    """释放租约；只删本宿主持有的行（避免误删其他 worker 的活连接）。"""
+    key = str(session_key or "").strip()
+    if not key:
+        return
+    with _conn() as conn:
+        conn.execute(
+            "DELETE FROM session_presence WHERE session_key=? AND host_pid=?",
+            (key, host_pid or host_id()),
+        )
+        conn.commit()
+
+
+def session_live(
+    session_key: str, ttl: float = SESSION_LEASE_TTL,
+) -> bool:
+    """该 web 会话是否有未过期的在线租约。
+
+    ``heartbeat`` 列存的是**到期时刻**；``ttl`` 小于默认值时按缩短后的租约
+    判定（调用方显式收紧，不影响写侧）。
+    """
+    key = str(session_key or "").strip()
+    if not key:
+        return False
+    threshold = _now() - max(0.0, SESSION_LEASE_TTL - float(ttl))
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT heartbeat FROM session_presence WHERE session_key=?",
+            (key,),
+        ).fetchone()
+    return bool(row) and float(row["heartbeat"]) >= threshold
 
 
 # ── 驻留后台运行时心跳（缺陷 A 收口） ────────────────────────
@@ -956,3 +1035,110 @@ def effect_once(dedup_key: str, producer) -> tuple[bool, Any]:
         )
         conn.commit()
     return True, value
+
+
+# ── 账号生命周期：owner 级 purge / count（2026-11-21 主动线治理批） ──
+# 审计实况：api/lifecycle.py 原删号步骤完全没有触碰 runtime_plane，导致
+# 已删账号仍留在 channel_desired_state / channel_presence / outbound_commands /
+# control_commands / inbound_seen / followup_budget / effect_dedup /
+# session_presence 里（删号后可能被恢复或继续被认领）。本函数是这些表的
+# **唯一 owner 清理入口**，脚本与生命周期步骤共用，禁止各自拼接 SQL。
+
+
+def _owner_scope_clause(
+    column: str, owner_id: int,
+) -> tuple[str, list[Any]]:
+    """归属谓词：精确 owner 列 + 会话键前缀（``N:``）。
+
+    前缀必须带冒号，防止 owner 9 误删 90 的键。
+    """
+    return f"({column}=? OR {column} LIKE ?)", [int(owner_id), f"{int(owner_id)}:%"]
+
+
+def purge_owner(
+    owner_id: int, session_keys: list[str] | None = None,
+) -> dict[str, int]:
+    """删除一个账号在控制面全部表中的归属行（单事务）。
+
+    返回逐表删除计数。``session_keys`` 用于 ``effect_dedup`` 这类键不是以
+    ``N:`` 开头的派生键（如 ``set_reminder:N:peer:...``）。
+    """
+    uid = int(owner_id)
+    keys = sorted({str(k).strip() for k in (session_keys or []) if str(k).strip()})
+    counts: dict[str, int] = {}
+    with _conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            for table in ("channel_desired_state", "channel_presence"):
+                cur = conn.execute(
+                    f"DELETE FROM {table} WHERE owner_id=?", (uid,)
+                )
+                counts[table] = int(cur.rowcount or 0)
+            for table in (
+                "outbound_commands", "control_commands", "inbound_seen",
+                "followup_budget", "session_presence",
+            ):
+                where, params = _owner_scope_clause("session_key", uid)
+                if table == "outbound_commands":
+                    # 该表有 owner_id 直列；两路并集（历史行可能 owner 为空）
+                    where = "(owner_id=? OR session_key LIKE ?)"
+                    params = [uid, f"{uid}:%"]
+                cur = conn.execute(f"DELETE FROM {table} WHERE {where}", tuple(params))
+                counts[table] = int(cur.rowcount or 0)
+            # effect_dedup 键形："{tool}:{session_key}:{message_id}:{hash}"
+            conds = ["dedup_key LIKE ?"]
+            params: list[Any] = [f"%:{uid}:%"]
+            if keys:
+                conds.extend("dedup_key LIKE ?" for _ in keys)
+                params.extend(f"%:{key}:%" for key in keys)
+            cur = conn.execute(
+                f"DELETE FROM effect_dedup WHERE {' OR '.join(conds)}", tuple(params)
+            )
+            counts["effect_dedup"] = int(cur.rowcount or 0)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return counts
+
+
+def count_owner(
+    owner_id: int, session_keys: list[str] | None = None,
+) -> int:
+    """统计账号在控制面全部表中的残留行数（生命周期 verify）。"""
+    uid = int(owner_id)
+    keys = sorted({str(k).strip() for k in (session_keys or []) if str(k).strip()})
+    total = 0
+    with _conn() as conn:
+        for table in ("channel_desired_state", "channel_presence"):
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE owner_id=?", (uid,)
+            ).fetchone()
+            total += int(row[0] or 0) if row else 0
+        for table in (
+            "outbound_commands", "control_commands", "inbound_seen",
+            "followup_budget", "session_presence",
+        ):
+            if table == "outbound_commands":
+                row = conn.execute(
+                    "SELECT COUNT(*) FROM outbound_commands "
+                    "WHERE owner_id=? OR session_key LIKE ?",
+                    (uid, f"{uid}:%"),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE session_key LIKE ?",
+                    (f"{uid}:%",),
+                ).fetchone()
+            total += int(row[0] or 0) if row else 0
+        conds = ["dedup_key LIKE ?"]
+        params: list[Any] = [f"%:{uid}:%"]
+        if keys:
+            conds.extend("dedup_key LIKE ?" for _ in keys)
+            params.extend(f"%:{key}:%" for key in keys)
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM effect_dedup WHERE {' OR '.join(conds)}",
+            tuple(params),
+        ).fetchone()
+        total += int(row[0] or 0) if row else 0
+    return total

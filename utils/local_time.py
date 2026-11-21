@@ -1,4 +1,20 @@
-"""本地时间单一真源 —— 凡按「墙钟语义」（现在几点 / 今天是哪天）判定的一律走这里。
+"""时间口径单一真源 —— 存储一律 UTC naive，墙钟只在读边界本地化。
+
+**2026-11-21 时间口径统一批**：全库历史存在三套时钟（chat_history 的 SQLite
+UTC naive、topic_state/reminders/agent_core 的北京本地 naive、event_ledger 的
+aware 本地 +08:00）。本模块新增三个 UTC 函数作为**写入口径唯一入口**：
+
+- :func:`now_utc_naive`：当前 UTC（naive）—— 所有落库时间戳的默认取值；
+- :func:`to_utc_naive`：任意 datetime → UTC naive（naive 视为已是 UTC，幂等）；
+- :func:`utc_to_local_naive`：UTC → 北京墙钟 naive，**只允许在读边界调用**
+  （静默窗、日期界、prompt 渲染、API 展示）。
+
+另提供 :func:`local_naive_to_utc`（用户输入的北京墙钟 → 存储 UTC）、
+:func:`local_text_to_utc_text` / :func:`utc_text_to_local_text`（提醒等
+文本时间列的双向边界转换）与 :func:`to_api_utc`（API 序列化带 +00:00）。
+
+墙钟语义（现在几点 / 今天是哪天）仍走 :func:`now_local`；它只用于读侧判断，
+不得把返回值直接写进数据库。
 
 **背景（2026-09-20 修复）**：`shisi/memory/legacy/memory_pipeline.py` 与
 `my_character/enhanced_prompt_engine.py` 曾用 ``datetime.now(tz=timezone.utc)``
@@ -12,9 +28,9 @@
 本实现的逻辑原在 ``proactive/ase_engine._local_now``（全项目唯一正确的一处，
 ``proactive/scheduler.py`` 已明确与之共用）。本次提为公共真源，避免"多套时钟"。
 
-**使用纪律**：只用于墙钟字段（``hour`` / ``date()`` / ``weekday()`` /
-``strftime``）。**不要**拿它做跨时区的时间差运算 —— 历史时间戳的
-``updated_at`` 等落库/比较路径仍应统一用 UTC，混用会算错经过时长。
+**使用纪律**：``now_local`` 只用于墙钟字段（``hour`` / ``date()`` / ``weekday()`` /
+``strftime``）。**不要**拿它做跨时区的时间差运算 —— 历史时间戳的落库/比较
+路径统一走 UTC（见上方三个函数），混用会算错经过时长。
 """
 
 from __future__ import annotations
@@ -26,6 +42,8 @@ from datetime import datetime, timedelta, timezone
 _UTC8_OFFSET_SECONDS = 8 * 3600
 # 偏差容忍：超过 1 小时即认为系统时区不是北京时区
 _UTC8_TOLERANCE_SECONDS = 3600
+# 北京固定时区（中国无夏令时，用固定偏移，避免依赖 tzdata）
+_BEIJING = timezone(timedelta(hours=8))
 
 
 def now_local() -> datetime:
@@ -37,14 +55,138 @@ def now_local() -> datetime:
     返回值形态与原 ``ase_engine._local_now`` 完全一致：系统时区正确时返回
     **naive** datetime，回退分支返回 **aware**（UTC+8）datetime —— 调用方因此
     必须只读墙钟字段，不得与历史时间戳做跨时区算术。
+
+    ⚠️ 本函数是**读边界**工具（静默窗/日期界/prompt 渲染）。所有写库时间戳
+    必须走 :func:`now_utc_naive`，禁止把本函数返回值直接落库。
     """
     # 系统时区偏移（秒）：夏令时生效时用 altzone
     offset_sec = (
         -time.altzone if time.daylight and time.localtime().tm_isdst else -time.timezone
     )
     if abs(offset_sec - _UTC8_OFFSET_SECONDS) > _UTC8_TOLERANCE_SECONDS:
-        return datetime.now(tz=timezone.utc).astimezone(timezone(timedelta(hours=8)))
+        return datetime.now(tz=timezone.utc).astimezone(_BEIJING)
     return datetime.now()
+
+
+# ── UTC 写入口径（2026-11-21 时间口径统一批）────────────────────────
+
+
+def now_utc_naive() -> datetime:
+    """当前 UTC 时间（naive）—— 全库时间戳写入口径的唯一真源。
+
+    返回 naive 是为了与 SQLite ``CURRENT_TIMESTAMP`` 的
+    ``YYYY-MM-DD HH:MM:SS`` 文本口径逐字对齐；需要 aware 时调用方自行补
+    ``tzinfo=timezone.utc``。
+    """
+    return datetime.now(tz=timezone.utc).replace(tzinfo=None)
+
+
+def to_utc_naive(value: datetime) -> datetime:
+    """任意 datetime → UTC naive（幂等）。
+
+    - aware：按真实时刻换算到 UTC，再摘掉 tzinfo；
+    - naive：视为**已经是 UTC 存储口径**，原样返回（不重复减 8 小时）。
+
+    用户输入的北京墙钟请先用 :func:`local_naive_to_utc` 标记时区再进入本函数。
+    """
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def local_naive_to_utc(value: datetime) -> datetime:
+    """北京墙钟 naive → UTC naive（LLM/用户输入、旧本地口径迁移用）。
+
+    aware 输入按真实时刻换算；naive 输入一律按北京墙钟解释。
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=_BEIJING)
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def utc_to_local_naive(value: datetime) -> datetime:
+    """UTC naive/aware → 北京墙钟 naive（**只允许在读边界调用**）。
+
+    静默窗、日期界（每日总结/早安）、prompt 渲染与 API 展示统一经此转换；
+    转换结果不得再写回数据库时间列。
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(_BEIJING).replace(tzinfo=None)
+
+
+def local_text_to_utc_text(value: object) -> str:
+    """北京墙钟文本 ``YYYY-MM-DD HH:MM[:SS]`` → UTC 文本 ``YYYY-MM-DD HH:MM:SS``。
+
+    用于提醒等「用户/模型给本地时间、数据库存 UTC」的文本时间列。空值返回空串；
+    畸形值原样返回（由上层校验报错，不在这里静默吞掉）。
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    for fmt in (_SQLITE_TS_FMT, "%Y-%m-%d %H:%M"):
+        try:
+            local_dt = datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+        return local_naive_to_utc(local_dt).strftime(_SQLITE_TS_FMT)
+    return raw
+
+
+def utc_text_to_local_text(value: object) -> str:
+    """UTC 文本 ``YYYY-MM-DD HH:MM:SS`` → 北京墙钟文本（读边界展示用）。
+
+    空值返回空串；畸形值原样返回（fail-open，旧数据/合成值不炸）。
+    """
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        utc_dt = datetime.strptime(raw, _SQLITE_TS_FMT)
+    except ValueError:
+        return raw
+    return utc_to_local_naive(utc_dt).strftime(_SQLITE_TS_FMT)
+
+
+def parse_storage_ts(value: object) -> datetime | None:
+    """解析存储时间值 → UTC naive datetime；不可解析返回 None（fail-open）。
+
+    兼容 ``YYYY-MM-DD HH:MM[:SS]`` 与 ISO（带 ``T`` / 微秒 / 时区偏移）。
+    naive 一律按 UTC 解释；aware 先换算到 UTC 再摘 tzinfo。
+    """
+    if isinstance(value, datetime):
+        return to_utc_naive(value)
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    # Python 3.10 的 fromisoformat 不认尾缀 Z；统一换成显式偏移。
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        for fmt in (_SQLITE_TS_FMT, "%Y-%m-%d %H:%M"):
+            try:
+                parsed = datetime.strptime(raw, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+    return to_utc_naive(parsed)
+
+
+def to_api_utc(value: object) -> str | None:
+    """数据库时间值 → 带 ``+00:00`` 的 ISO（API 序列化统一口径）。
+
+    浏览器把不带时区的 ISO 当**本地时间**解析（审计实证：UTC naive 串在
+    UTC+8 浏览器上整体偏移 8 小时）。API 边界一律输出显式时区，前端
+    ``new Date(...)`` 才能正确换算。空值/畸形返回 ``None``。
+    """
+    parsed = parse_storage_ts(value)
+    if parsed is None:
+        return None
+    return parsed.replace(microsecond=0).isoformat() + "+00:00"
 
 
 # SQLite 的 CURRENT_TIMESTAMP / datetime('now') 输出的格式（UTC 墙钟）
@@ -110,7 +252,6 @@ def local_day_utc_bounds(now: datetime | None = None) -> tuple[str, str]:
 #   （AGPL-3.0 项目，仅语义对齐，未抄代码）。
 
 _WEEKDAY_CN = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
-_BEIJING = timezone(timedelta(hours=8))
 
 
 def weekday_cn(wall: datetime) -> str:

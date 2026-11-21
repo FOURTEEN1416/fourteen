@@ -38,7 +38,7 @@ from api.deps import deps
 from api.main_routes import ChatRequest, ChatResponse, CreateSessionRequest
 from api.session_manager import resolve_owned_session
 from utils.character_resolver import BUILTIN_CHARACTER_ID
-from utils.local_time import now_local
+from utils.local_time import now_local, to_api_utc
 
 logger = logging.getLogger("api.routers.chat_routes")
 
@@ -480,7 +480,14 @@ def _query_history_sync(sm, session_id: str, limit: int, before: int, before_id:
             f"WHERE {where_clause} ORDER BY id DESC LIMIT ?",
             tuple(params),
         ).fetchall()
-        return [dict(r) for r in rows][::-1]
+        # 2026-11-21 时间口径统一批：created_at 是 SQLite UTC naive 文本，
+        # API 边界补显式 +00:00，浏览器 new Date(...) 才不会当本地时间解析。
+        out: list[dict] = []
+        for r in rows:
+            item = dict(r)
+            item["created_at"] = to_api_utc(item.get("created_at"))
+            out.append(item)
+        return out[::-1]
 
 
 # ═══════════════════════════════════════════════════════

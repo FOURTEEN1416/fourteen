@@ -211,6 +211,18 @@ export function useWechatStatus() {
         missed_heartbeats: Number(d.missed_heartbeats ?? 0),
         owner_user_id: d.owner_user_id,
         channels: d.channels,
+        // 2026-11-21 死会话治理：needs_reauth 终态与重认证记账透传给页面。
+        status: typeof d.status === 'string' ? d.status : undefined,
+        auth_state: typeof d.auth_state === 'string' ? d.auth_state : undefined,
+        needs_reauth: Boolean(d.needs_reauth),
+        last_error: typeof d.last_error === 'string' ? d.last_error : '',
+        reauth_required_at:
+          typeof d.reauth_required_at === 'number' ? d.reauth_required_at : null,
+        reauth_attempts: Number(d.reauth_attempts ?? 0),
+        auth_failures: Number(d.auth_failures ?? 0),
+        token_window_state:
+          typeof d.token_window_state === 'string' ? d.token_window_state : '',
+        message: typeof d.message === 'string' ? d.message : undefined,
       } as WeChatStatus & { bot_id?: string; owner_user_id?: unknown; channels?: unknown }
     }),
     // 本人通道状态轮询兜底
