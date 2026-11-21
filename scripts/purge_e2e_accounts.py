@@ -847,18 +847,75 @@ def _purge_throttle(
     config_path: Path, target: dict[str, Any], keys: list[str],
     peers: list[str] | None = None,
 ) -> int:
+    """清 ``scheduler_config.json`` 节流账本段（脚本自含版）。
+
+    与 ``api/lifecycle.py::_purge_throttle_file`` 同语义、同段清单；脚本场景
+    **不能 import ``api`` 包**（``api/auth_jwt.py`` 启动 fail-closed，裸机无
+    ``JWT_SECRET`` 即崩——2026-11-22 生产副本演练实证），故内联实现。两处
+    段清单改动必须同步（tests/test_purge_e2e_accounts_20261121.py 钉死行为）。
+    """
     from proactive.scheduler import ProactiveScheduler
+    from utils import json_state
 
     original = ProactiveScheduler._CONFIG_PATH
     ProactiveScheduler._CONFIG_PATH = Path(config_path)
     try:
-        from api.lifecycle import _purge_throttle_file
+        owner_id = int(target["id"])
+        explicit = {
+            str(k) for k in list(keys) + list(peers or []) + [str(owner_id)]
+        }
 
-        return int(
-            _purge_throttle_file(
-                int(target["id"]), keys, peers or []
-            ).get("entries", 0)
-        )
+        def _owned(key: str) -> bool:
+            if key in explicit:
+                return True
+            left, sep, _rest = key.partition(":")
+            return bool(sep) and left.isdigit() and int(left) == owner_id
+
+        removed = 0
+
+        def _mutate(data: dict) -> None:
+            nonlocal removed
+            throttle = data.get("throttle")
+            if not isinstance(throttle, dict):
+                return
+            # 与 ProactiveScheduler._ledger_snapshot 的账本段一一对齐——
+            # 漏一段就会在下次 _persist 时把已删账号条目复活。
+            for section in (
+                "llm_proactive_next_ok", "deliver_fail_counts",
+                "deliver_fail_counts_ts", "disabled_event_day",
+                "wait_window_event_day", "quiet_event_day",
+                "model_degraded_event_day", "deliver_circuit_open",
+            ):
+                seg = throttle.get(section)
+                if isinstance(seg, dict):
+                    victims = [k for k in list(seg) if _owned(str(k))]
+                    for k in victims:
+                        seg.pop(k, None)
+                        removed += 1
+            # gate_skip 的键形是 "{user_key}|{reason}"：先剥尾段再判归属
+            gate = throttle.get("gate_skip_event_day")
+            if isinstance(gate, dict):
+                victims = [
+                    k for k in list(gate)
+                    if _owned(str(k).rpartition("|")[0])
+                ]
+                for k in victims:
+                    gate.pop(k, None)
+                    removed += 1
+            sent = throttle.get("important_dates_sent")
+            if isinstance(sent, list):
+                keep = [
+                    x for x in sent
+                    if not (len(str(x).split("|")) >= 2 and _owned(str(x).split("|")[1]))
+                ]
+                removed += len(sent) - len(keep)
+                throttle["important_dates_sent"] = keep
+
+        try:
+            json_state.update_json(config_path, _mutate)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(f"节流账本文件清除失败: {e}") from e
+        return int(removed)
     finally:
         ProactiveScheduler._CONFIG_PATH = original
 
