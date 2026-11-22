@@ -8,16 +8,16 @@
   <img src="https://img.shields.io/badge/TypeScript-6-3178c6">
   <img src="https://img.shields.io/badge/Tailwind-4-38bdf8">
   <img src="https://img.shields.io/badge/Zustand-5-orange">
-  <img src="https://img.shields.io/badge/Tests-5521-brightgreen">
+  <img src="https://img.shields.io/badge/Tests-5633-brightgreen">
   <img src="https://img.shields.io/badge/license-MIT-yellow">
 </p>
 
 微信扫码就能聊，控制台调角色和语音。基于 LLM 的智能情感陪伴系统。
 
-> **当前状态（2026-11-22 九问题根治批）**：v1.74 生产体检九问题根治——死会话六态状态机（`needs_reauth` 终态）/ UTC 时间口径统一（迁移脚本+启动版本闸）/ 出站质量守卫三道闸（历史去重·空台词重生成·模板与最小信息增量）/ 主动线资格门+投递熔断+topic 追问限 1 / 测试账号清理工具（dry-run 默认）/ 称呼语义拆分（`user_calls_ai` 逐行判别迁移）/ 可观测性降噪与工具账本成对落账 / agnes 429 尊重 Retry-After + **nex-n2.6 接入**（链序 agnes→nex→zhipu）。**本地全链验证绿；已随 `308ae3a8` 三端部署（2026-11-22 冷停窗口一次完成：四库备份 → UTC 迁移 → 测试账号 9/14 彻底删除 → tool_call_log 下线 → nex 环境变量 → 部署启动；health/ready 200、openapi 208/250、重启后 0 ERROR）**。全量八块 328 文件 0 失败 / 收集 5238，ruff 0。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
+> **当前状态（2026-11-22 对抗验收修复批）**：v1.75 对抗验收 **28 条（4H/13M/11L）全数确认**并七域修复完毕（复核 **7/7 一次通过、零残留**）——网关熔断冷却上界 600s + local overlay 补 `api_base`/`model` / 称呼裸词保守保留、显式「叫你X」才迁移 / UTC 环境判定下沉 `utils/runtime_env`（版本闸不再导 api 包）/ 死会话 `needs_reauth` 终态探针 + 登录降级对象摘除 + 前端重新扫码引导 / 清理脚本六面补全（persona TEXT scope、chroma、作业账残留扫描）/ 提醒线 `guard_category` 豁免历史闸 + 流式首行回声闸序修正 / 主动线资格门强弱标记 + 内容拦截不计投递熔断。**本地全链门禁绿（ruff 0、定向 327 例、全量 5346+2 / 收集 5348、前端 286 + tsc 0）；本批未提交未部署**（27 改 + 3 新增文件等主控按文件暂存；生产仍 @ `308ae3a8` = v1.74）。批次详情见 `LOG.md`，当前状态见 `docs/HANDOFF_REPORT.md`。
 
-> **测试口径**（后端 = 2026-11-22 九问题根治批实测）：后端 **5236 passed + 2 skipped / 0 failed**（收集 **5238** / **328 个测试文件**；现役角色卡 **45 张**；2 跳过=`test_cache.py:297` Redis 环境 + `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑））。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
-> 前端 `284 passed`（vitest 5，42 文件）+ `tsc --noEmit` 0 错误；ruff 全仓 0 错。徽章口径 **5521**（5236 Py + 284 FE + 1 标记）。
+> **测试口径**（后端 = 2026-11-22 对抗验收修复批实测）：后端 **5346 passed + 2 skipped / 0 failed**（收集 **5348** / **330 个测试文件**；现役角色卡 **45 张**；2 跳过=`test_cache.py:297` Redis 环境 + `tests/golden/test_golden_set.py:48`（live_llm 用例默认不跑，设 `GOLDEN_LIVE=1` 才跑））。⚠️ **口径勘误**：分块清单必须 **`find` 递归生成**——`ls tests/*.py tests/core/*.py` **漏子目录 `tests/api/`**（2 文件 32 例，2026-10-17 实证）；单进程整跑会在随机位置停住，分块跑法见 `AGENTS.md` §4.3；
+> 前端 `286 passed`（vitest 5，42 文件）+ `tsc --noEmit` 0 错误；ruff 全仓 0 错。徽章口径 **5633**（5346 Py + 286 FE + 1 标记）。
 > ⚠️ **基线随 `config/characters/` 卡数浮动**（该目录被 `.gitignore` 忽略、内容不随 git 复现；用例数 = 2 × 卡数 + 13）。**引用基线必须同时声明卡数**。
 
 ---

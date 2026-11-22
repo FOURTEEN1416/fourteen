@@ -7,6 +7,23 @@
 
 ---
 
+## 2026-11-22 — 对抗验收 28 条全面修复批（v1.75）
+
+- **背景**：v1.74 上线后对抗验收，**28 条发现全数确认**（4 high + 13 medium + 11 low，无误报）→ 用户裁决全面修复。七域并行实施，复核 **7/7 域一次通过、未修复残留：无**（无返工轮）。
+- **七域修复**：
+  - **网关与供应商（H1/M1/L1）**：熔断冷却加总上界 `BREAKER_COOLDOWN_MAX_SECONDS=600s`——`_breaker_cooldown_for` 改 `min(max(默认, Retry-After+缓冲)+抖动, 上界)`，与 parse 层 `RETRY_AFTER_HINT_MAX_SECONDS=300s` 双保险，根治「天文数字 Retry-After（实测 999999999s）→ 数年冷却」把供应商打成只能重启恢复的准永久熔断（主动决策线一次 429 即中招）；local overlay `_apply_local_overlay` 除 `api_key` 外同步拷贝 `api_base`/`model` 并接受 `base_url` 别名归一——修「只配 `llm_providers.local.json` 的供应商（nex）因 base 丢失被网关 fail-soft 跳过、永不入链」；Retry-After 解析层加上界。测试扩写 `test_provider_retry_after_20261121.py` +14 例。
+  - **称呼迁移（M13/L4/L5）**：裸亲属/爱称（老公/姐姐/宝贝等）**方向逐行不可判**——旧「叫我X」写入路径产生同样存储值（如「叫我姐姐」→ nickname=姐姐 是用户自述称呼）→ 一律 ambiguous 保守保留 + 待复核日志，仅显式「叫你X/喊你X」语境才判 `ai_address` 迁移，迁移值取干净称呼名（「叫你老公」→「老公」，避免「叫你」动词残留）；`_clean_address_name` 与写侧 `apply_user_utterance` 同源过滤；store 渲染路径补 `denied_names` 取数（对齐 `format_profile_prompt_block`）。`python -I` 只读验证判别矩阵（18 裸词/显式语境/动作句/冲突句/自述名/裸名）、迁移落库、幂等、双渲染器同数据一致。
+  - **UTC 时间口径（M10/L7/L8/L9）**：新增 `utils/runtime_env.py` 轻量唯一真源（只依赖标准库、禁导入 api/*），`api.runtime_config` 改 re-export；`utils/time_caliber` 版本闸不再运行时 `from api.runtime_config import is_production`——旧路径经 `api/__init__→app_factory→auth_jwt` 拉起重链，裸环境（无 JWT_SECRET 且非显式 dev）import 即 RuntimeError，闸检查根本执行不到（与 purge 脚本 `308ae3a` 修掉的「脚本导入 api 包」同类缺陷）。用例按「测试优先扩写本域现有测试文件」全部进 `test_time_caliber_20261121.py`（新增 §9-§12）。
+  - **死会话与登录（H4/M9/L6）**：`token_window_state` 探针优先读 registry 状态——`needs_reauth` 是已确认终态（凭证已删、等待重新扫码），此刻窗口文件再新鲜也不可能完成发送；只看 token 文件新鲜度会让死会话在 ≤24h 内持续通过烧前闸、决策 LLM 被白烧（读盘失败落回 token 判据，宁宽勿误）；登录超时/刷尽的降级对象从注册表摘除（`retire(connector=self)` 防误摘并发新建的替代对象）——否则 `MAX_CHANNELS_PER_USER=1` 下滞留对象令重扫 `/connect` 恒 429（ChannelSlotError），用户只能 disconnect 解锁；前端 `WeChatPage.tsx` 补 needs_reauth 重新扫码引导。
+  - **清理脚本（H2/M3/M4/M5/L2 + EXTRA-1）**：`scripts/purge_e2e_accounts.py` 六面补全——persona 画像两表 TEXT scope 键（`{character_id}:{session_id}`）按 scope 判属清除（旧整型谓词是盲的）；chroma 向量库（`data/chroma_db`）与 `data/affinity_state.json` 纳入（与 lifecycle 权威链同 owner 口径）；reminders/pending_intents 数字 user_id 直列兜底（会话键族未必带 owner 前缀）；作业账（job journal）未完结项全数据面残留扫描——目标集合为空 ≠ 无事发生，半途失败作业的残留响亮告警并退出非零、提示显式 `--user-id` 重跑；话题状态机四表含 v1.72 已退役的遗留表 `topic_plan`；EXTRA-1（验证中发现的相邻真实缺陷）：`--apply` 节流清除复用与 `api.lifecycle._purge_throttle_file` 同语义。
+  - **出站守卫与提醒（H3/M6/M7/M8/L3）**：`terminal_reply_guard` 新增 `guard_category`——提醒线等**确定性重复投递**豁免历史重复闸/模板句闸（`GUARD_CATEGORY_REMINDER` 白名单，仅提醒线正文与兜底文案传入；否则同文每日重发必被判重吞掉——兜底文案逐字稳定 jaccard=1.0 必撞，静默失联），普通聊天跨轮去重行为不变、其余守卫对豁免类别照常生效；`stream_guard` 首行回声闸先取「本片段是否首逻辑行」再推进状态（M6：首行以裸换行收尾成段时，旧序先翻状态导致首行回声闸被跳过，批式能剥的回声行在真流式下原样放行）；回声判定 emoji 码位段扩全（🚄/补充符号/ZWJ/变体选择符等，M7）+ 直角引号「」『』只进归一化键不进边界类（L3）+ 新增 `_is_echo_unit_repeat_key`（整行=回声单元重复 ≥2 次的叠词形态，零附加信息）；**回声剥离先于时间词改写**（M8：>45min「刚刚→之前」改写会破坏与 user_msg 的逐字等值判定，含时间词的复述换词漏网）。
+  - **主动线治理（M2/M12/M11/L10/L11）**：资格门判定序拆**强弱标记**——`wbtest1027` 类「前缀+纯数字」强标记确定性命中、不依赖活跃证据，弱标记由 `skip_reason` 结合活跃证据裁决；topic 级追问限补齐**无计划路径**（投递之前判定，第 2 次同话题追问不再直达用户；无计划路径同样按本轮正文锚点记账）；`_deliver` 结果 per-session 镜像标注——**内容质量拦截（守卫剥空/judge 拒绝）不是通道故障，不计入投递熔断阶梯**（否则连续 5 次守卫拦截即开 30 分钟起翻倍的熔断，把好线路误判成死线路），单独记账供运维分辨；memory_curator 注册前同分钟撞车检测 + WARNING 留痕（L10，env 配置执行时刻撞车防呆）。
+- **门禁（全部新鲜实跑）**：`ruff check .` 退出码 0；定向回归 13 个测试文件串行逐个执行（后端 `PYTHONPATH= python -m pytest <文件> -q -p no:cacheprovider`；前端 `npx vitest run src/tests/components/WeChatPage.test.tsx` 串行单文件）**327 通过 / 0 失败 / 0 跳过**；全量后端按 AGENTS §4.3 分块协议——`find tests -name "test_*.py" | sort` 递归生成清单 **330 文件**（含 tests/api 4 + tests/core 6）→ `--collect-only` 收集 **5348** → NR%8 八块串行 **578+546+840+690(+2跳)+632+670+750+640 = 5346 通过 + 2 跳过 / 0 失败**（与收集数精确吻合）；前端 `npm test`（vitest run）**42 文件 286 例全过** + `npm run typecheck`（tsc --noEmit）0 错误。
+- **门禁后追记（复核新发现 · medium 已修）**：复核员抓出 L11 修复的连带缺口——judge 供应商故障/超时（`judge_unavailable`）被并入「内容拦截豁免面」，judge 挂掉期间会每 5 分钟照烧决策 LLM、零投递且无熔断兜底（P1-22 病型新形态）。已修：`_deliver` 对 `judge_unavailable` 单独标注（不进 `_CONTENT_REJECT_OUTCOMES`）→ 决策线按投递失败计入退避/熔断阶梯；内容拒绝豁免面不变。新增回归测试 `test_deliver_judge_unavailable_counts_toward_backoff`；受影响面复跑 109+128 例全绿、全仓 ruff 0。其余 4 条复核新发现（low：overlay 静默覆盖告警、双渲染器文案注记分歧、控制台连接器不入册并发扫码、`WECHAT_CONSOLE_OWNER_ID` 无存在性校验）登记为后续 backlog，不阻塞本批。
+- **改动面**：27 文件修改（+3549/−389）+ 新增 3 文件（`utils/runtime_env.py`、`tests/test_provider_gateway_20261122.py`、`tests/test_wechat_console_mode_20261122.py`）。**未提交**（等主控按文件暂存，禁 `git add .`）、未 push、未部署；生产仍 @ `308ae3a8`（v1.74）。
+
+---
+
 ## 2026-11-21/22 — 生产体检九问题根治批（取证 → 实施 → 对抗验收 → 修复轮，全链闭环）
 
 - **触发**：用户 `/workflow`「查系统日志/用户数据/最近聊天记录，找优化点」→ 生产只读体检（swu-prod，零写入）产出 10 条机会（5 high + 4 medium + 1 low，全部独立复核 verified）；用户裁决：**安全闸（未成年防护）暂缓、测试账号彻底删除、死会话治本不打补丁、UTC 本轮直接迁移**；复以 `/workflow`「所有问题深入代码级检查修复，治彻底」。
