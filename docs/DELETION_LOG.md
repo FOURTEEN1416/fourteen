@@ -1393,3 +1393,32 @@ equire() in MessageList.tsx even though MessageList is unused
 - **删除前核验**：① 全部候选与 `config/characters` 真实卡 id **零重叠**（45 卡 + default）；② 今日 17 对 birthtime=今日全量跑时刻，uuid4 新建**非覆写**，零数据损失；③ 第一版孤儿清理曾把 39 个真实卡卡派生索引（无上传源、仅卡名/锚点 chunk 的合法态）误判为垃圾——「真实卡重叠即中止」断言拦截，人工复核后保留；④ 删除脚本走 UTF-8 落盘文件执行（bash 内联中文匹配三次跑出 157/0/105 的编码不稳定教训，见 LOG 本批条目）。
 - **可恢复性**：全部为 gitignore 未跟踪文件，git 历史无轨迹；测试角色由夹具随时可再造，派生索引由 `ensure_index` 重建——无需备份。
 - **终态**：sources=1553 / 派生索引=1592 / 孤儿=39（全为真实卡合法派生）；标记残留 0、今日残留 0。
+
+
+## 2026-11-22 — 淘汰清理批：前后端一致性审计（dwfrun-8ff3816a）确认的 20 条零消费端点 + 前端死封装整删
+
+- **依据**：2026-11-21 一致性审计（后端 249 操作/207 路径 vs 前端 175 调用点，仅前端断裂 0、行为不一致 0）定性 20 条「仅后端且全仓零消费」端点 + 4 条「双端皆死」候选；删除前逐条 grep 复验（tests/scripts/tools/frontend/src/e2e）零命中后执行。用户授权「完成研讨之后直接执行相关修复」。
+- **删除清单（后端 23 操作 / 20 路径；实测内省 250→227 操作、208→188 唯一路径）**：
+  - `api/routers/users_routes.py` **整文件**（7 端点：`GET /api/users`、`GET /api/users/{id}`、`GET /api/users/{id}/chat`、`GET /api/users/{id}/emotion`、`POST /api/users/{id}/role`、`POST /api/users/{id}/reset`、`DELETE /api/users/{id}`）——前端消费链（src/api/users.ts）已随 08-27 批删除（DELETION_LOG 2026-08-27 条目），功能由 `/api/admin/users` 族承接；`api/app_factory.py` 装配两行连带删除。
+  - `api/routers/chat_routes.py`：`GET /api/sessions`（列出本人活跃会话）——全仓零消费（同族 `POST /api/session` 有 e2e 探针消费故保留）。
+  - `api/routers/misc_routes.py`：`GET /api/meta`（docstring 声称「前端启动判断 BYOK 引导」从未实现，前端实际走 `X-Error-Code: BYOK_REQUIRED` 响应头拦截链）——连带删除 e2e 契约钉（`frontend/e2e/capabilities.spec.ts` 该用例与头注释同步改写）；`GET /api/logs/stream`（SSE 日志流全仓零消费，前端日志页走 `GET /api/logs` 轮询）。
+  - `api/routers/wechat_routes.py`：**connections 块整删**（`GET/POST/PUT/DELETE /api/wechat/connections*` 4 端点 + `CONNECTIONS_FILE`/`_load_connections`/`_save_connections`/`WechatConnectionCreate`/`WechatConnectionUpdate` + 孤儿导入 json/time/Path）——D16（2026-10-12「谁扫码谁聊」）前旧多连接 CRUD 模型，存储文件仅自引用；文件头注释改为绑定管理 API 定位。
+  - `api/routers/wechat_channel_routes.py`：`GET /api/wechat/channel/list`——与 `GET /api/wechat/channel`（返回体已含 channels 数组）功能重复，前端死封装 `wechatChannelList` 连带删。
+  - `api/routers/memory_routes.py`：`DELETE /api/characters/{id}/favorites/{memory_id}`——前后端均零消费（shisi 面 DELETE favorite 按 fav_id 的 admin 端点保留）。
+  - `shisi/api/sticker_routes.py`：`GET /api/shisi/stickers` + `POST /api/shisi/stickers/recommend` + `RecommendRequest`——HTTP 面零消费；**服务层保留**（`list_by_category`/`recommend` 经 `shisi/wechat/sticker_adapter.py` 在役）。
+  - `shisi/api/memory_routes.py`：`GET /api/shisi/memory/{character_id}` 占位端点（返回「记忆查询需要对接现有MemoryPipeline」文案）——占位假文案不如 404 干脆，连带删除通配路由顺序注释。
+  - `api/routers/training_routes.py`：`POST /api/training/clean` + `POST /api/training/test` + 孤儿 `_style_preview_sync`——前端 training.ts 死封装连带；`_training_dir`/`_live_tone_mimic` 有其他消费保留。
+  - `api/routers/storyline_routes.py`：`GET /api/characters/{id}/storyline/progress` + `POST /api/characters/{id}/storyline/reset`——双端皆死候选经删除前复验确认（前端唯一消费方 StorylineIndicator 是孤儿组件）。
+- **删除清单（前端）**：
+  - `frontend/src/api/wechat.ts` **整文件**（4 个 connections 封装 + DTO，连 client.ts 桶导出都有）；
+  - `frontend/src/components/storyline/StorylineIndicator.tsx` **整文件**（孤儿组件，全仓无挂载点）；
+  - `frontend/src/api/characters.ts`：`removeFavorite`/`getStorylineProgress`/`resetStoryline` 三函数；`StorylineProgress` 类型 import 连带；
+  - `frontend/src/types/api.ts`：`StorylineState`/`StorylineCurrentStage`/`StorylineProgress` 三类型（仅 progress 端点消费链使用）；
+  - `frontend/src/hooks/useQueries.ts`：`useStorylineProgress`/`useResetStoryline` 两死 hook；
+  - `frontend/src/api/training.ts`：`trainingClean`/`trainingTest`；`frontend/src/api/system.ts`：`wechatChannelList`；
+  - `frontend/src/api/client.ts`：四处桶导出/import 区同步收口（wechat 域 import+export 块整删）；
+  - `frontend/src/tests/components/WeChatPage.test.tsx`：`vi.mock('../../api/wechat')` 死 mock 块删除。
+- **测试连带**：`tests/test_ops_lifecycle.py` expected_paths 去 `/api/users` 代表路径（docstring 同步 8→7）；e2e capabilities.spec.ts /api/meta 用例删除（注释改指 X-Error-Code 契约链）；`tests/test_api_routes.py` 挂载矩阵全量更新（misc 17→15 / chat 11→10 / users 行删除 / training 19→17、总贡献断言 `test_total_contribution_is_93`→`_is_81` 与 docstring 演进史、模块清单 9→8）——🔴 该矩阵系删除前 grep 盲区（参数化描述串未含路径字面量），八块全量暴露后补修；`tests/test_attribution_context_contract.py::test_session_create_and_list_use_authenticated_owner` 函数级调用 `chat_routes.list_sessions`（同为 grep 盲区）→ 归属隔离语义改挂 SessionManager 层（读侧唯一实现）；`tests/test_p1_batch5_api_tools.py` 的 `test_test_clone_route_returns_style_via_live_mimic` + `test_test_clone_runs_blocking_part_off_event_loop` 两用例随被测函数 `test_clone` 整体退役（收集 5348→5346 精确吻合）。
+- **删除前核验**：每条目标删除前全文读完；两轮 grep（审计独立复核 + 本批执行前）tests/scripts/tools/frontend/src/e2e 零命中；内省实测 227/188；受影响面定向 7 文件 138 passed；ruff 全仓 0。
+- **未删（明确登记）**：`GET /api/meta` 的替换契约=前端 `client.ts` X-Error-Code 拦截（在役）；shisi stickers 服务层（`list_by_category`/`recommend`）与 `POST /api/shisi/stickers/import`/`PUT /characters/{cid}/stickers`/`DELETE /{sticker_id}` admin 面（有测试消费）保留；`POST /api/memory/diary/seed`（FUNCTION_INVENTORY N-DIARY-2 登记的演示注入面）与 `GET /api/characters/{id}/knowledge/vault/features`（调试面）**保留**——零消费但用途声明明确，存疑项留 owner 裁决。
+- **可恢复性**：全部 git 跟踪文件，`git show <commit>^:<path>` 可取回；无数据删除。

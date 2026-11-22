@@ -53,7 +53,7 @@ api/ (52 py 文件)            ← FastAPI 路由层
     ├── tools_routes.py       (6，system/tools + plugins/*)
     ├── voice_routes.py       (6，character/voice/*)
     ├── mimo_voice_routes.py  (6，mimo/*)
-    ├── storyline_routes.py   (6)
+    ├── storyline_routes.py   (4)
     ├── llm_providers_routes.py (6，admin)
     ├── agent_plane_routes.py (5，agent-plane/*，admin 门槛)
     ├── memory_routes.py      (5，/api/characters/{id}/favorites* 收藏/转发回执，桥接 shisi Favorite/ForwardManager)
@@ -79,31 +79,30 @@ api/ (52 py 文件)            ← FastAPI 路由层
 | 模块文件 | 端点数 | 路径 |
 |------|------|------|
 | character_routes | 22 | /api/characters/*, /api/presets/*（含 .png 导入/导出；v1.63 +`POST /api/characters/deactivate`） |
-| training_routes | 19 | /api/training/* 5 + /api/proactive/* 6（state/config GET+POST/pause/send/history；config 含 reply_mode 全局默认与 **dice_gate 块（4C 骰子闸）**）+ /api/humanize/config 3（GET/POST/PUT，全局默认唯一写面）+ /api/knowledge/collect-config×2 + **/api/user/proactive/history（只读）** + **/api/user/self-profile GET/PUT**。**2026-11-08 退役 11 条**：`/api/user/reply-mode` ×2、`/api/user/humanize` ×4、`DELETE /api/humanize/config`、`/api/user/proactive-config` ×3、`/api/user/proactive/pause`；替代 owner = `character_settings_routes`（见下） |
+| training_routes | 17 | /api/training/* 3（clean/test 已随 2026-11-22 淘汰批删除）+ /api/proactive/* 6（state/config GET+POST/pause/send/history；config 含 reply_mode 全局默认与 **dice_gate 块（4C 骰子闸）**）+ /api/humanize/config 3（GET/POST/PUT，全局默认唯一写面）+ /api/knowledge/collect-config×2 + **/api/user/proactive/history（只读）** + **/api/user/self-profile GET/PUT**。**2026-11-08 退役 11 条**：`/api/user/reply-mode` ×2、`/api/user/humanize` ×4、`DELETE /api/humanize/config`、`/api/user/proactive-config` ×3、`/api/user/proactive/pause`；替代 owner = `character_settings_routes`（见下） |
 | **character_settings_routes（2026-11-08 新增）** | **3** | /api/characters/{id}/my-settings GET/PUT/DELETE——「用户 × 角色」全量快照（`user_character_settings`），回复模式 / 拟人节奏 / 主动调度的唯一用户可写真源 |
-| misc_routes | 17 | /api/stats, /api/stats/dashboard, /api/meta, /api/memory/diary*（seed/diary）, /api/characters/{id}/important-dates×2, /api/memory/facts, /api/logs*, /api/config×2, /api/user/llm-config×2, **/api/user/llm-config/test（批5 BYOK 反馈环）**, /api/channels, /api/routes |
+| misc_routes | 15 | /api/stats, /api/stats/dashboard, /api/memory/diary*（seed/diary）, /api/characters/{id}/important-dates×2, /api/memory/facts, /api/logs*, /api/config×2, /api/user/llm-config×2, **/api/user/llm-config/test（批5 BYOK 反馈环）**, /api/channels, /api/routes |
 | auth_routes | 13 | /api/auth/*：register/login/refresh/logout/me/change-password/admin reset + consent(AGREEMENT_VERSION) + W9 自服务 consent/status、consent/withdraw、account/delete、account/export、account/export/chats |
 | safety_routes | 12 | /api/safety/*, /api/rag/*, /api/voice/*, /api/files/*, /api/cache/* |
-| chat_routes | 11 | /api/chat/*, /api/session/*, /api/wechat/status |
-| wechat_channel_routes | 8 | /api/wechat/channel/*（本人 6：status/list/connect/qrcode/disconnect/reconnect）+ /api/admin/wechat/*（admin 2：摘要/强制下线；双 router 同文件） |
+| chat_routes | 10 | /api/chat/*, /api/session, /api/wechat/status（GET /api/sessions 已随 2026-11-22 淘汰批删除） |
+| wechat_channel_routes | 7 | /api/wechat/channel/*（本人 5：status/connect/qrcode/disconnect/reconnect；/list 已随 2026-11-22 淘汰批删除）+ /api/admin/wechat/*（admin 2：摘要/强制下线；双 router 同文件） |
 | personality_routes | 10 | /api/emotion/*, /api/persona/*, /api/psych/* |
 | clone_routes | 8 | /api/clone/*（含 /api/clone/upload） |
 | knowledge_routes | 8 | /api/characters/{id}/knowledge/*, /api/characters/{id}/enrich |
 | wechat_routes | 8 | /api/wechat/*（另有 qrcode_store 1 端点独立挂载，admin 兼容） |
 | **admin_routes** | **8** | /api/admin/users* CRUD（**批7 NEW-22：`GET /api/admin/users` 增 `sort`/`sort_dir` 白名单 Literal 校验 + `_USER_SORT_COLUMNS` 双列 asc/desc 排序，默认 created_at/desc 与旧行序一致**；`GET /api/admin/users/{id}`）+ **/api/admin/global-view GET/POST（批3 V2-1 全局运维视图）** + **/api/admin/audit GET（批3 NEW-21 操作员审计）**；delete 接 lifecycle |
 | announcement_routes | 6 | **批4 V2-5 公告**：active 读面 2（active/已读标记）+ admin CRUD 4（list/create/update/delete，落 operator_audit） |
-| users_routes | 7 | /api/users/*（admin only） |
 | shisi/api/character_routes | 7 | /api/shisi/characters |
 | **topic_routes (v1.58)** | **3** | **GET/POST /api/topic-state/config**（热读 / partial merge 热写 `scheduler_config.json` 的 `topic_state` 块，越界 400/Pydantic 422；admin 门槛）+ **GET /api/topic-state/{session_key}**（只读快照 active/parked/closed/next_plan；`/config` 注册序先于 `/{session_key}` 为硬约束） |
 | tools_routes | 6 | /api/system/tools*, /api/plugins/* |
 | shisi/api/memory_routes | 6 | /api/shisi/memory（含 favorites；09-28 路由遮蔽修复后 `GET /favorites` 静态路由可达） |
 | voice_routes | 6 | /api/character/voice/* |
 | mimo_voice_routes | 6 | /api/mimo/* |
-| storyline_routes | 6 | /api/storyline/* |
+| storyline_routes | 4 | /api/storyline/*（GET/PUT/DELETE config + detect；progress/reset 已随 2026-11-22 淘汰批删除） |
 | llm_providers_routes | 6 | /api/llm-providers/*（admin；批7 NEW-20 高危启停前端二次确认，端点不变） |
 | agent_plane_routes | 5 | /api/agent-plane/*（replay/profile/events/curate/probes，admin 门槛） |
-| shisi/api/sticker_routes | 5 | /api/shisi/stickers |
-| memory_routes (api) | 5 | /api/characters/{id}/favorites*（收藏增删查 + 转发回执） |
+| shisi/api/sticker_routes | 3 | /api/shisi/stickers：import/bind/restore 类 admin 面（GET 列表与 /recommend 已随 2026-11-22 淘汰批删除，服务层经 sticker_adapter 在役） |
+| memory_routes (api) | 4 | /api/characters/{id}/favorites*（收藏增/查 + 转发回执 + forwards 读；DELETE favorites/{memory_id} 已随 2026-11-22 淘汰批删除） |
 | shisi/api/affinity_routes | 4 | /api/shisi/affinity |
 | invite_routes | 4 | /api/auth/register-invite（独立路由+独立 TokenResponse）+ /api/admin/invites* |
 | health_routes | 3 | /api/health, /api/ready（无认证探活）+ /api/metrics（W10 多 worker 聚合） |

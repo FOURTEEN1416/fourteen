@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-11-22/23 — 淘汰清理批 + 前端体验修复批（v1.76）
+
+- **背景**：11-21 一致性审计（dwfrun-8ff3816a，后端 250 操作/208 路径 vs 前端 175 调用点，仅前端断裂 0/行为不一致 0）产出淘汰 20 + 存疑 5 + 体验 28；用户授权「需要裁决的直接提出，完成研讨之后直接执行」→ 未答选择，按决策人话条款推荐方案执行（存疑 3删2留 / 淘汰全清 / UX 四组全修）。
+- **淘汰清理（20 端点全删 + 前端死封装连带；内省实测 250→**227** 操作、208→**188** 唯一路径）**：users_routes 整文件 7 端点（装配连带）、GET /api/sessions、GET /api/meta（e2e 契约钉同步改指 X-Error-Code 链）、GET /api/logs/stream、wechat connections 块 4 端点（含存储函数与孤儿导入）、GET /api/wechat/channel/list、DELETE favorites/{memory_id}、stickers GET+recommend（服务层经 sticker_adapter 在役保留）、shisi memory 占位、training clean+test（连带孤儿 _style_preview_sync）、storyline progress+reset；前端 wechat.ts 与 StorylineIndicator.tsx 整文件、characters/client/training/system/useQueries/types 六文件死封装收口。删除前全文读 + 两轮 grep 复验（审计独立复核 + 执行前终验）零消费；DELETION_LOG 全清单留痕。
+- **UX 修复（13 处实施 + 3 处核实已被前批修掉）**：① 扫码页——connect **双发防重**（flowStartedRef 弹窗生命周期一次 + connectInFlightRef 并发闸，StrictMode dev remount 双发 POST connect 烧限流额度实证）+ connect 失败**弹窗立即置错误态**（不再展示扫不上的无效二维码）；② 反馈一致性——StorylineEditor 删除确认 window.confirm→ConfirmDialog（与数据页同形态）、enrich 失败错误**中文化**（超时/断网/服务端三态+重试建议，修英文 timeout 直出）、配置预览复制加「已复制」反馈、collect-config 预取加 **isAdmin 守卫**（普通用户进数据页不再必发一发 403）；③ 文案对齐——intro 指南卡邀请码残留、Breadcrumb 补 /help+/intro 映射（修「未知页面」）、帮助卡安全/日志两条对齐实况、内置卡标题带出「十四 · 默认人设（内置）」、工具仪表盘补 5 条中文描述字典（manage_reminder 等直出英文键）、同名卡加 ID 前 8 位尾缀区分；④ **新抓真 bug**：CreateRole `cancelledRef` StrictMode remount 不重置=自己拦截自己的请求、预设 loading 永挂（effect 开头重置修复）。核实已修（审计系旧版）：SettingsLLM 保存回执（v1.60 W11-D5）、剧情线保存按钮态、intro 注册区文案（10-29 NEW-3）；WeChatPage 429 误导提示已被 v1.74 M9 消除。
+- **测试连带（🔴 两轮 grep 盲区教训）**：八块全量暴露 9 失败——5 个 `test_api_routes.py` 挂载矩阵（参数化描述串不含路径字面量，grep 不可见：misc 17→15/chat 11→10/users 行删/training 19→17/总贡献 93→**81** 模块 9→8）；1 个 `test_attribution_context_contract` **函数级**调用 `list_sessions`（改挂 SessionManager 层保归属隔离语义）；2 个 `test_p1_batch5` **函数级**调用 `test_clone`（随被测对象退役）；1 个 curator 用例系 C 盘满环境失败（复跑转绿，非回归）。教训：**删除端点的连带检查必须同时覆盖 HTTP 路径 grep + 函数名 grep + 挂载矩阵参数串**。
+- **门禁（全部新鲜实跑）**：ruff 全仓 0；定向 7 文件 **138** + 修复后 3 文件 **75** 全绿；后端 NR%8 八块串行 **577+546+841+690(+2跳)+632+670+748+640 = 5344 通过 + 2 跳过 / 0 失败**（收集 **5346** 精确吻合，-2=退役 test_clone 两用例；chunk0/4/6 修复后重跑全绿）；前端 vitest **42 文件 287 例**全绿（新增 connect 失败立即错误态用例、WeChatPage 3 个旧用例显式设定 wechatConnect mock——旧用例依赖 mockRejectedValue 实现跨用例泄漏，clearAllMocks 不重置实现）+ tsc 0。**C 盘 100% 满（0 可用）致 chunk4/6 首跑零星环境失败**，清 Temp 安全项回收 1.8G 后复跑定性。
+- **并行纪律事故认领**：本会话未登记 BOARD 在主检出施工，v1.75 窗口两次提交被共享暂存区夹带本窗在制品（047f6bb/cc8de41）致 main 两度 import 断裂（漂移告警在案）→ 已 BOARD 登记认领 + 记忆沉淀（git rm 自动进共享 index 同级危险 / 先施工后登记是根因 / 删除状态被 stash pop 恢复须 ls-files 复核）；本批提交全部**路径限定**。
+- **文档**：CODEMAPS/BACKEND.md 六行端点计数与说明同步、READING_REPORT_api.md SSE 清单加时效注记、DELETION_LOG 本批全清单+测试连带全记录。
+- **未部署**（推送/部署随用户裁决）；存疑 5 条中 diary/seed 与 vault/features 保留（用途声明明确），留 owner 后续裁决。
+
+---
+
 ## 2026-11-22 — 对抗验收 28 条全面修复批（v1.75）
 
 - **背景**：v1.74 上线后对抗验收，**28 条发现全数确认**（4 high + 13 medium + 11 low，无误报）→ 用户裁决全面修复。七域并行实施，复核 **7/7 域一次通过、未修复残留：无**（无返工轮）。

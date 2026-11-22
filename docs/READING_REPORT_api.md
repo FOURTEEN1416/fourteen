@@ -84,7 +84,7 @@
 - SafetyLogManager/RingBufferHandler按user_id过滤
 
 ### 4. SSE流式全家桶
-- /api/chat/stream、/api/demo/chat/stream、/api/logs/stream、/api/channels/wechat/status-stream 四处SSE
+- /api/chat/stream、/api/demo/chat/stream、/api/logs/stream、/api/channels/wechat/status-stream 四处SSE（时效注记 2026-11-22：/api/logs/stream 已随淘汰批删除；/api/demo/chat/stream 需另行核对）
 
 ---
 
