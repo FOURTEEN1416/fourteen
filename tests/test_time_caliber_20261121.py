@@ -1021,6 +1021,9 @@ class TestAppFactoryGate:
         import api.app_factory as af
         from utils import time_caliber as tc
 
+        # conftest autouse 对测试面屏蔽了闸（防既有 data 泄漏触发误伤）——
+        # 本用例测的就是真闸接线，显式绑回真函数。
+        monkeypatch.setattr(af, "ensure_time_caliber_migrated", tc.ensure_time_caliber_migrated)
         monkeypatch.setenv("AI_GF_ENV", "prod")
         # 把闸的默认库路径重定向到 tmp：库文件存在但无标记 → 未迁移
         monkeypatch.setattr(
@@ -1036,6 +1039,8 @@ class TestAppFactoryGate:
         import api.app_factory as af
         from utils import time_caliber as tc
 
+        # 同上：conftest autouse 屏蔽了闸，本用例测真闸的开发分支，绑回真函数。
+        monkeypatch.setattr(af, "ensure_time_caliber_migrated", tc.ensure_time_caliber_migrated)
         for env in ("AI_GF_ENV", "APP_ENV", "ENV"):
             monkeypatch.delenv(env, raising=False)
         monkeypatch.setattr(

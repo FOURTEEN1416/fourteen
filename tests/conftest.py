@@ -67,6 +67,27 @@ def reset_config_each():
 
 
 @pytest.fixture(autouse=True)
+def neutralize_time_caliber_gate(monkeypatch):
+    """测试环境屏蔽 ``create_api_app`` 的时间口径版本闸（M10 连带，2026-11-22）。
+
+    CI 实证（run 45033983152）：单进程套件跑到 38% 时真实 ``data/sqlite.db``
+    已被既有泄漏路径造出（UXV-1 类隔离缺口，未修补）且无迁移标记——随后
+    ``test_ops_lifecycle::test_prod_env_warning_for_default_cors`` 以生产环境
+    构造 app，闸 fail-closed RuntimeError，测试未及测到它要测的 CORS 告警。
+    本地全绿纯属宿主库恰好带标记，属环境差假绿。
+
+    闸的**生产语义不变**（真实部署仍由 deploy 脚本先迁移再启动拒启兜底）；
+    这里只对测试面解除：app 构造不再触发闸。需要真闸行为的专项用例
+    （``test_time_caliber_20261121`` 的 ``TestAppFactoryGate``）在自身内显式
+    ``monkeypatch.setattr(af, "ensure_time_caliber_migrated", 真函数)`` 绑回。
+    """
+    import api.app_factory as _af
+
+    monkeypatch.setattr(_af, "ensure_time_caliber_migrated", lambda: True, raising=True)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def reset_auth_state_each():
     """每个测试前复位进程级认证开关（api.auth._auth_config 是全局单例）。
 
