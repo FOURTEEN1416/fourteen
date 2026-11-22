@@ -110,6 +110,58 @@ def _merge_attachments(
 # 见 tests/test_provider_description_consistency.py）。
 DEFAULT_FALLBACK_CHAIN = ["agnes", "nex", "zhipu", "xunfei", "baidu"]
 
+# ── 熔断冷却总上界（2026-11-22 H1）──
+# 无论 Retry-After 提示多大、随机抖动多少，单次开闸的冷却时长不得超过 10 分钟
+# ——保证半开重探必然可达：主动决策线（immediate=True）一次 429 即开闸的场景
+# 下，若冷却无上界（实测形态：999999999s 提示 → 数年冷却），供应商会被打成
+# 「只能重启恢复」的准永久熔断。hint 自身在 parse 层已钳 300s
+# （openai_compatible_provider.RETRY_AFTER_HINT_MAX_SECONDS），此处对
+# 「base + 抖动」整体再钳一层，双保险。
+BREAKER_COOLDOWN_MAX_SECONDS = 600.0
+
+# ── local overlay 允许注入的连接字段（2026-11-22 M1）──
+# nex 等新供应商可能只存在于 config/llm_providers.local.json（tracked json 无
+# 元数据或 api_base 留空）。overlay 若只拷 api_key，base/model 会被静默丢弃 →
+# 网关 fail-soft 跳过 → 供应商永远不入链。base_url 是社区惯用别名（本仓 local
+# 文件实际写的键名），读取时归一为网关统一键名 api_base。
+_LOCAL_OVERLAY_FIELDS = ("api_key", "api_base", "model")
+
+
+def _apply_local_overlay(
+    file_providers: dict[str, Any], local_providers: dict[str, Any]
+) -> None:
+    """把 local 密钥文件的 provider 配置合并进 tracked 配置（就地修改）。
+
+    规则（2026-11-22 M1）：
+    - ``api_key`` / ``api_base`` / ``model`` 仅在 local 值非空时写入
+      （空串不覆盖 tracked 值）；
+    - ``base_url`` 作为 ``api_base`` 的别名接受（显式 ``api_base`` 优先），
+      归一后不保留 ``base_url`` 键；
+    - tracked 里没有该 provider 时，注入含上述非空字段的完整条目
+      （``enabled`` 等字段缺省，网关侧视为启用）。
+    """
+    for key, secret_cfg in (local_providers or {}).items():
+        if not isinstance(secret_cfg, dict):
+            continue
+        incoming = {
+            "api_key": secret_cfg.get("api_key", ""),
+            # base_url 别名归一：api_base 显式值优先，缺省回落 base_url
+            "api_base": secret_cfg.get("api_base") or secret_cfg.get("base_url", ""),
+            "model": secret_cfg.get("model", ""),
+        }
+        incoming = {field: value for field, value in incoming.items() if value}
+        if not incoming:
+            continue
+        target = file_providers.get(key)
+        if not isinstance(target, dict):
+            # tracked 无该 provider（或条目被写坏成非 dict）：以 local 条目重建
+            target = {}
+            file_providers[key] = target
+        for field in _LOCAL_OVERLAY_FIELDS:
+            value = incoming.get(field)
+            if value and not target.get(field):
+                target[field] = value
+
 # ── Provider 失败哨兵 ──
 # 各 provider 的 _handle_error()/_mock_reply() 统一返回**全角括号包裹**的固定文案。
 # 2026-09-17 修复：旧实现用 `result.startswith("（")` 判定失败，会误伤正常回复——
@@ -215,21 +267,18 @@ def _load_providers_config() -> dict[str, Any]:
             logger.warning("Failed to load llm_providers.json: %s", e)
             return {}
 
-    # overlay：local 密钥文件（admin 控制台写入的真实 key 不进 git）
+    # overlay：local 密钥文件（admin 控制台写入的真实 key 不进 git）。
+    # 2026-11-22 M1：除 api_key 外同步拷贝 api_base/model，并接受 base_url
+    # 别名（归一为 api_base）——否则只配 local.json 的供应商（如 nex）会因
+    # base 丢失被网关 fail-soft 跳过，文档承诺的注入路径失效。
     local_path = config_path.with_name(config_path.stem + ".local.json")
     if local_path.exists():
         try:
             with open(local_path, encoding="utf-8-sig") as f:
                 local = json.load(f)
-            local_providers = (local or {}).get("providers", {})
-            file_providers = data.setdefault("providers", {})
-            for key, secret_cfg in local_providers.items():
-                secret_val = (secret_cfg or {}).get("api_key", "") if isinstance(secret_cfg, dict) else ""
-                if secret_val and key in file_providers and isinstance(file_providers[key], dict):
-                    file_providers[key]["api_key"] = secret_val
-                elif secret_val and key not in file_providers:
-                    # local 中有密钥但 tracked 无该 provider 元数据时，仅注入 key
-                    file_providers[key] = {"api_key": secret_val}
+            _apply_local_overlay(
+                data.setdefault("providers", {}), (local or {}).get("providers", {})
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to load %s: %s", local_path, e)
 
@@ -377,9 +426,10 @@ class MultiProviderGateway:
 
             # fail-soft（2026-11-21）：有 key 但确实解析不出 api_base 的供应商
             # 无法发请求，与其入链后每轮白打一发必失败请求再降级，不如构造期
-            # 直接跳过（nex 的 base_url 只来自环境变量，缺失时在此静默让路，
-            # 不阻塞现有链）。已知供应商缺省 base 回落 DEFAULT_PROVIDER_CONFIG
-            # ——hermetic 测试/旧调用方只传 api_key 的行为保持兼容。
+            # 直接跳过（nex 的 base_url 来自环境变量或 local overlay，均缺失时
+            # 在此静默让路，不阻塞现有链）。已知供应商缺省 base 回落
+            # DEFAULT_PROVIDER_CONFIG——hermetic 测试/旧调用方只传 api_key 的
+            # 行为保持兼容。
             api_base = cfg.get("api_base") or DEFAULT_PROVIDER_CONFIG.get(key, {}).get(
                 "api_base", ""
             )
@@ -446,7 +496,7 @@ class MultiProviderGateway:
         return True
 
     def _breaker_cooldown_for(self, key: str) -> float:
-        """本次开闸的冷却时长：``max(默认冷却, Retry-After + 缓冲) + 随机抖动``。
+        """本次开闸的冷却时长：``min(max(默认冷却, Retry-After + 缓冲) + 抖动, 上界)``。
 
         2026-11-21 429 尊重 Retry-After 批：
         - 上游 429 时会通过 ``Retry-After`` 头告知最早可重试时刻（生产对账实锤
@@ -454,7 +504,10 @@ class MultiProviderGateway:
           冷却取 ``max(默认 120s, 提示 + 缓冲)``——既不早于解限撞墙，也不无谓
           降温过久；
         - 叠加 ``[0, _BREAKER_JITTER_MAX]`` 的随机抖动：多 worker 同时撞 429 时
-          各自的熔断到期时刻被错开，避免冷却一到大批请求同时惊醒再挤爆上游。
+          各自的熔断到期时刻被错开，避免冷却一到大批请求同时惊醒再挤爆上游；
+        - 2026-11-22 H1：总冷却（含抖动）钳到 ``BREAKER_COOLDOWN_MAX_SECONDS``
+          （600s）——hint 在 parse 层已钳 300s，此处对整体再钳一层，保证半开
+          重探必然可达，一次 429 不至于打成准永久熔断。
         """
         base = float(self._BREAKER_COOLDOWN)
         provider = self._providers.get(key)
@@ -463,7 +516,8 @@ class MultiProviderGateway:
             hint = consume()
             if hint and hint > 0:
                 base = max(base, float(hint) + self._RETRY_AFTER_BUFFER)
-        return base + random.uniform(0.0, self._BREAKER_JITTER_MAX)
+        cooldown = base + random.uniform(0.0, self._BREAKER_JITTER_MAX)
+        return min(cooldown, BREAKER_COOLDOWN_MAX_SECONDS)
 
     def _mark_provider_result(self, key: str, ok: bool, *, immediate: bool = False) -> None:
         """记账 provider 成败。

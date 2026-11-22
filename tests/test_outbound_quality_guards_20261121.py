@@ -506,3 +506,257 @@ def test_proactive_and_reminder_guards_are_wired_with_history():
     )
     assert n_deliver >= 1
     assert n_reminder >= 2, "提醒线正文与兜底两条路径都要接历史闸"
+
+
+# ═══════════════════════════════════════════════════════════
+# 2026-11-22 修复批（对抗验收 H3 / M6 / M7 / M8 / L3）
+# ═══════════════════════════════════════════════════════════
+
+
+def _reminder_task(rows: list[dict]):
+    """构造走**确定性兜底文案**的提醒投递任务（llm=None → 逐字稳定模板）。
+
+    返回 ``(task, record)``；``record`` 模拟 ``_deliver`` 投递成功后经
+    ``record_outbound_message`` 落 assistant 历史的行为（H3 的前提）。
+    """
+    from proactive import reminder_delivery as rd_mod
+
+    def _record(message="", session_id="", character_id="", channel=""):
+        rows.append(
+            {"role": "assistant", "content": str(message or ""), "channel": channel}
+        )
+
+    def _get_chat_context(**kw):
+        return list(rows), ""
+
+    task = rd_mod.ReminderDeliveryTask(
+        structured_memory=None,
+        llm=None,
+        memory=SimpleNamespace(
+            record_outbound_message=_record, get_chat_context=_get_chat_context,
+        ),
+        character_id_resolver=lambda sk: "",
+    )
+    return task, _record
+
+
+def test_reminder_same_text_two_days_both_delivered(monkeypatch):
+    """H3：每日重复提醒不得被历史重复/模板两道闸确定性吞掉。
+
+    第一天兜底文案投递并落 assistant 历史；次日同文到期时，历史重复闸
+    （同文 jaccard=1.0 ≥ 0.72）会把它剥空 → 提醒静默失联。修复后提醒线
+    出站（guard_category=reminder）连续两日（含第三日）均拿到非空文案。
+    """
+    from proactive import reminder_delivery as rd_mod
+
+    monkeypatch.setattr(
+        rd_mod, "read_reply_mode", lambda *a, **k: "immersive", raising=False,
+    )
+    rows: list[dict] = []
+    task, record = _reminder_task(rows)
+    reminder = {"content": "记得吃饭", "session_key": "9:web:abc12345"}
+
+    day1 = asyncio.run(task._compose_text(dict(reminder), character_id=""))
+    assert day1 and "记得吃饭" in day1, day1
+    record(message=day1, session_id=reminder["session_key"], channel="reminder")
+
+    day2 = asyncio.run(task._compose_text(dict(reminder), character_id=""))
+    assert day2 == day1, f"次日同文提醒被历史重复闸吞掉（H3 回归）: {day2!r}"
+    record(message=day2, session_id=reminder["session_key"], channel="reminder")
+
+    day3 = asyncio.run(task._compose_text(dict(reminder), character_id=""))
+    assert day3 == day1, f"第三日同文提醒仍须送达: {day3!r}"
+
+
+def test_reminder_llm_template_phrase_survives_next_day(monkeypatch):
+    """H3 模板撞表：提醒常用语（早点休息）次日同文不降级、不吞。
+
+    旧行为：LLM 文案「早点休息哦」次日被模板/重复闸剥空 → 退化成兜底模板；
+    修复后提醒类别豁免两道历史闸，LLM 文案连续两日原样可用。
+    """
+    from proactive import reminder_delivery as rd_mod
+
+    monkeypatch.setattr(
+        rd_mod, "read_reply_mode", lambda *a, **k: "immersive", raising=False,
+    )
+
+    class _LLM:
+        async def chat(self, **kwargs):  # noqa: ANN003
+            return "早点休息哦"
+
+    rows: list[dict] = []
+    task, record = _reminder_task(rows)
+    task._llm = _LLM()  # noqa: SLF001 - 覆盖兜底，走 LLM 文案路径
+    reminder = {"content": "睡觉", "session_key": "9:web:abc12345"}
+
+    day1 = asyncio.run(task._compose_text(dict(reminder), character_id=""))
+    assert day1 == "早点休息哦", day1
+    record(message=day1, session_id=reminder["session_key"], channel="reminder")
+
+    day2 = asyncio.run(task._compose_text(dict(reminder), character_id=""))
+    assert day2 == "早点休息哦", f"次日 LLM 提醒文案被吞/降级: {day2!r}"
+
+
+def test_chat_history_gates_unchanged_without_reminder_category():
+    """H3 豁免范围收窄：普通聊天（缺省/其它类别）两道历史闸照常生效。"""
+    assert terminal_reply_guard(
+        _PROD_5717, user_msg="今天怎么样", recent_assistant_messages=[_PROD_5641],
+    ) == ""
+    assert terminal_reply_guard(
+        _PROD_5717, user_msg="今天怎么样",
+        recent_assistant_messages=[_PROD_5641], guard_category="chat",
+    ) == ""
+    template = "把手机放下，早点休息。"
+    assert terminal_reply_guard(
+        template, user_msg="我睡不着", recent_assistant_messages=[template, template],
+    ) == ""
+    assert terminal_reply_guard(
+        template, user_msg="我睡不着",
+        recent_assistant_messages=[template, template], guard_category="chat",
+    ) == ""
+
+
+def test_reminder_category_only_exempts_history_gates():
+    """H3 豁免仅限重复/模板两道闸：标记剥除/错误哨兵/退化回复照常生效。"""
+    out = terminal_reply_guard(
+        "[定时提醒] 该吃药了", user_msg="",
+        recent_assistant_messages=["该吃药了"], guard_category="reminder",
+    )
+    assert out == "该吃药了", "豁免类别不得连系统标记剥除一起跳过"
+    assert terminal_reply_guard(
+        "（所有 LLM 提供商均不可用）", guard_category="reminder",
+    ) == ""
+    assert terminal_reply_guard(
+        "十四", character_name="十四", guard_category="reminder",
+    ) == ""
+
+
+def test_reminder_guard_calls_pass_reminder_category():
+    """源码级：提醒线每处 terminal_reply_guard 调用都必须带提醒类别豁免。
+
+    删掉任一调用点的 ``guard_category=GUARD_CATEGORY_REMINDER`` 本测试即红，
+    防止豁免接线再次漏掉正文线/兜底线其中一条。
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from proactive import reminder_delivery
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(reminder_delivery)))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "terminal_reply_guard"
+    ]
+    assert len(calls) >= 2, "提醒线正文与兜底两条路径都要过守卫"
+    for node in calls:
+        kw = {k.arg for k in node.keywords}
+        assert "guard_category" in kw, f"行 {node.lineno} 未传 guard_category"
+        assert "recent_assistant_messages" in kw, f"行 {node.lineno} 未透传历史"
+
+
+def test_stream_trailing_newline_echo_line_matches_batch():
+    """M6：首行以裸换行收尾时，回声闸不得在行状态推进时被提前关闭。
+
+    旧实现 ``_advance_line_state`` 见换行即置 ``_first_line_open=False``、
+    先于回声剥离执行——「想你了\\n我也想你…」在真流式（chat.stream_mode:
+    true）下原样放行给用户，而批式能正确剥除。修复后流式与批式同判。
+    """
+    user = "想你了"
+    batch = terminal_reply_guard("想你了\n我也想你，刚刚在忙。", user_msg=user)
+    assert batch == "我也想你，刚刚在忙。"
+
+    guard = IncrementalReplyGuard(user_msg=user, reply_mode="immersive")
+    released: list[str] = []
+    for chunk in ("想", "你了", "\n", "我也想你", "，刚刚在忙。"):
+        released.extend(guard.feed(chunk))
+    assert "想你了" not in "".join(released), f"回声行被流式放行: {released!r}"
+    assert "".join(released) + guard.finish() == batch
+
+
+def test_stream_trailing_newline_echo_whole_chunk():
+    """M6：整段一次到达（首行自带换行）同样剥除，不因换行提前关闸。"""
+    guard = IncrementalReplyGuard(user_msg="想你了", reply_mode="immersive")
+    text = "".join(guard.feed("想你了\n我也想你，刚刚在忙。")) + guard.finish()
+    assert text == "我也想你，刚刚在忙。"
+    assert guard.emitted_text == "我也想你，刚刚在忙。"
+
+
+def test_stream_echo_only_reply_emits_nothing():
+    """M6：整条=回声（首行换行收尾、无后续内容）→ 零已发前缀，交终裁兜底。"""
+    guard = IncrementalReplyGuard(user_msg="想你了", reply_mode="immersive")
+    out = guard.feed("想你了\n")
+    text = "".join(out) + guard.finish()
+    assert out == []
+    assert text == "" and guard.emitted_text == ""
+
+
+def test_emoji_attached_echo_is_blocked():
+    """M7：emoji 附加回声（「到站了吗🚄」「🚄到站了吗」）不得原样放行。"""
+    assert _strip_verbatim_echo("到站了吗🚄", "到站了吗🚄") == ""
+    assert _strip_verbatim_echo("🚄到站了吗", "到站了吗🚄") == ""
+    assert _strip_verbatim_echo("到站了吗🚄！", "到站了吗🚄") == ""
+    assert terminal_reply_guard("到站了吗🚄", user_msg="到站了吗🚄") == ""
+
+
+def test_emoji_in_body_is_not_harmed():
+    """M7：正文中的 emoji 不误伤——回声剥除只带走回声单元及其边界。"""
+    assert _strip_verbatim_echo("到站了吗，我也刚上🚄", "到站了吗") == "我也刚上🚄"
+    assert (
+        _strip_verbatim_echo("今天🚄上看到一只猫，想到你了", "想你了")
+        == "今天🚄上看到一只猫，想到你了"
+    )
+    assert _strip_verbatim_echo("想你了🥺我也想你", "想你了") == "我也想你"
+
+
+def test_time_word_rewrite_does_not_break_echo_detection():
+    """M8：>45min 的时间词改写不得破坏与用户原话的逐字等值判定。
+
+    旧顺序（先改写后剥回声）把「我刚刚到公司」改成「我之前到公司」，
+    与 user_msg 不再相等 → 换词形态漏网；修复后回声剥离先执行。
+    """
+    assert terminal_reply_guard(
+        "我刚刚到公司", user_msg="我刚刚到公司", last_turn_age_seconds=3600.0,
+    ) == ""
+    # 无间隔语境（None）同样拦：回声判定本就不依赖时间词
+    assert terminal_reply_guard("我刚刚到公司", user_msg="我刚刚到公司") == ""
+
+
+def test_time_word_rewrite_still_applies_after_echo_strip():
+    """M8：回声剥离先执行之后，幸存正文里的时间词照常确定性降级。"""
+    out = terminal_reply_guard(
+        "你刚刚说的那家店我也想去", user_msg="那家店不错",
+        last_turn_age_seconds=3600.0,
+    )
+    assert out == "你之前说的那家店我也想去"
+
+
+def test_corner_quote_wrapped_echo_is_blocked():
+    """L3：直角引号包裹的整条回声（零附加信息）→ 归一化等价 → 拦截。"""
+    assert _strip_verbatim_echo("「想你了」", "想你了") == ""
+    assert _strip_verbatim_echo("『想你了』", "想你了") == ""
+    assert _strip_verbatim_echo("「想你了」。", "想你了") == ""
+    assert _strip_verbatim_echo("「想你了」「想你了」", "想你了") == ""
+    assert terminal_reply_guard("「想你了」", user_msg="想你了") == ""
+
+
+def test_quoted_user_words_in_sentence_are_kept():
+    """L3：句中引用用户原话（引号内正常话语）不得被当回声剥成残句。"""
+    kept1 = "我最怕你说「想你了」。"
+    assert _strip_verbatim_echo(kept1, "想你了") == kept1
+    kept2 = "你说「想你了」的时候我真的开心"
+    assert _strip_verbatim_echo(kept2, "想你了") == kept2
+    kept3 = "她说「想你了」就挂了。"
+    assert terminal_reply_guard(kept3, user_msg="想你了") == kept3
+
+
+def test_echo_unit_repeat_is_blocked():
+    """L3：叠词形态（回声单元原样重复）双向边界均不干净 → 整条判回声拦截。"""
+    assert _strip_verbatim_echo("想你了想你了", "想你了") == ""
+    assert _strip_verbatim_echo("想你了想你了想你了", "想你了") == ""
+    assert terminal_reply_guard("想你了想你了", user_msg="想你了") == ""
+    # 对照：白名单语料的重复仍是自然应答（「哈哈」→「哈哈哈哈」放行）
+    assert _strip_verbatim_echo("哈哈哈哈", "哈哈") == "哈哈哈哈"

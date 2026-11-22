@@ -1,10 +1,21 @@
 #!/usr/bin/env python
-"""e2e / 测试账号跨库清理（2026-11-21 主动线治理批）。
+"""e2e / 测试账号跨库清理（2026-11-21 主动线治理批；2026-11-22 对抗验收修复批）。
 
 **背景**：生产/本地长期累积的 e2e、wbtest、TEST 账号没有命名空间约束，
 历史 ASE 索引键会让调度器每 5 分钟为死会话烧决策 LLM；``api/lifecycle.py``
 的删号链路在历史上也漏了 runtime_plane / 用户×角色快照 / 阶段 / 生理表。
 本脚本是这些测试账号的**一次性清理入口**，不替代正常账号注销 API。
+
+数据面覆盖（与 ``api/lifecycle.py`` 权威删号链同 owner 口径）：
+- 4 个 SQLite 库（users / sqlite / agent_plane / runtime_plane）；
+- ``user_persona`` / ``user_persona_snapshots``：真实 schema 是 TEXT scope 键
+  （``{character_id}:{session_id}``），按 scope 判属清除（H2 修复：旧版按
+  整型 user_id 删/验，删不到任何真实 scope 行且验证同盲）；
+- chroma 向量库（``data/chroma_db``）与 ``data/affinity_state.json``（M3 修复）；
+- sqlite 会话键族含 v1.28 前一段式裸 peer 键（``wxid@im.wechat``）与
+  reminders/pending_intents 的数字 user_id 直列兜底（M4 修复）；
+- 话题状态机四表（含 v1.72 已退役的遗留表 ``topic_plan``，L2 修复）；
+- ASE 状态/索引、微信通道目录、``scheduler_config.json`` 节流账本。
 
 用法（默认 dry-run，只列清单零删除）::
 
@@ -21,15 +32,22 @@
   凭证把已删账号的通道复活；
 - ``--apply`` 前先对 4 个库做 SQLite online backup 到 ``data/archive/``，
   逐库 ``PRAGMA integrity_check``；同时备份会被改写的
-  ``scheduler_config.json``（throttle 账本回滚依据）；
+  ``scheduler_config.json``、``affinity_state.json`` 与 chroma 向量库目录；
+- **作业账**（``data/purge_e2e_jobs.json``）：``--apply`` 删除前记录目标
+  uid + 会话键快照，删除后零残留验证通过才标 ``done``。半途失败后
+  **不带 ``--user-id`` 重跑**时，users 行已删 → 目标集合为空，旧版会在此
+  假成功退出 0；现改为按作业账对未完结 uid 做**全数据面残留扫描**，
+  发现残留即响亮告警并退出非零，提示用显式 ``--user-id`` 重跑（M5 修复）；
+  apply 成功收尾时对作业账中**不属于本次目标集**的未完结作业一并补扫
+  （命名空间仍有其他测试账号时，残留不再等到下一次空跑才暴露）；
 - 每个库单事务删除；任何异常回滚并把错误抛给调用方；
 - 删除后重新扫描全部表，残留 >0 或**任何计数读失败**（-1）都以退出码 1
   报错（fail-closed：读不出残留 ≠ 零残留）；
-- 幂等：二次执行目标集合为空，退出码 0；
+- 幂等：二次执行目标集合为空且作业账无未完结项，退出码 0；
 - 产出 ``DELETION_LOG_ENTRY.md``（不含聊天正文/密钥）；
-- ``--apply`` 的节流清除复用 ``api.lifecycle._purge_throttle_file``，
-  需与服务一致的运行环境（``JWT_SECRET`` / 显式 ``AI_GF_ENV=dev``）；
-  ``--dry-run`` 无此依赖。
+- ``--apply`` 的节流清除复用与 ``api.lifecycle._purge_throttle_file`` 同语义
+  的自含实现，需与服务一致的运行环境（``JWT_SECRET`` / 显式
+  ``AI_GF_ENV=dev``）；``--dry-run`` 无此依赖。
 """
 
 from __future__ import annotations
@@ -74,7 +92,9 @@ USERS_TABLES: tuple[tuple[str, str], ...] = (
 #: 角色成就的 character_id 可能是裸卡 id 或 ``uid:card`` 形态。
 USERS_PREFIX_COLUMNS: frozenset[str] = frozenset({"character_achievements"})
 
-#: sqlite.db：会话键列（按 ``N:%`` 前缀）
+#: sqlite.db：会话键列（按 ``N:%`` 前缀 + 显式键，含裸 peer 遗留键）。
+#: ``topic_plan`` 是 v1.72 已迁移退役的遗留表：已迁移库无此表时经
+#: ``_table_exists`` 守卫天然 no-op（L2：与 lifecycle 侧同款缺陷勿再引入）。
 SQLITE_SESSION_TABLES: tuple[tuple[str, str], ...] = (
     ("chat_history", "session_id"),
     ("reflections", "session_id"),
@@ -91,7 +111,14 @@ SQLITE_SESSION_TABLES: tuple[tuple[str, str], ...] = (
     ("topic_state", "session_key"),
     ("thread_plan", "session_key"),
     ("topic_meta", "session_key"),
+    ("topic_plan", "session_key"),
     ("user_character_settings", "user_key"),
+)
+
+#: reminders / pending_intents 另带数字 ``user_id`` 直列（v1.28 前旧行只落
+#: uid、session_key 未必带 owner 前缀），删除与验证都要加 uid 兜底（M4）。
+INTENT_UID_FALLBACK_TABLES: frozenset[str] = frozenset(
+    {"reminders", "pending_intents"}
 )
 
 #: sqlite.db：隔离键列（``N:%``；含 ``N:session::character`` 形态）
@@ -103,11 +130,17 @@ SQLITE_ISOLATION_TABLES: tuple[tuple[str, str], ...] = (
     ("affinity_unlocks", "character_id"),
 )
 
-#: sqlite.db：数字 user_id 直列
+#: sqlite.db：真整型 user_id 直列。
+#: ⚠️ ``user_persona`` / ``user_persona_snapshots`` **不属于这里**：真实 schema
+#: 是 TEXT scope 主键（``{character_id}:{session_id}``，见
+#: ``persona_extractor/persona_bank.py`` 建表 DDL），按整型删/验会整面失效。
 SQLITE_UID_TABLES: tuple[tuple[str, str], ...] = (
     ("user_character_overrides", "user_id"),
-    ("user_persona", "user_id"),
-    ("user_persona_snapshots", "user_id"),
+)
+
+#: sqlite.db：persona 画像两表——TEXT scope 键，按 scope 判属清除（H2）。
+PERSONA_SCOPE_TABLES: tuple[str, ...] = (
+    "user_persona", "user_persona_snapshots",
 )
 
 #: sqlite.db：agent_core 影子账本（user_key + owner_user_id 双路）
@@ -144,6 +177,96 @@ def _count_where(
         f"SELECT COUNT(*) FROM {table} WHERE {where}", tuple(params)
     ).fetchone()
     return int(row[0] or 0) if row else 0
+
+
+# ── 归属谓词（删除与计数同源，防止口径分叉）─────────────────────────────
+
+
+def _owned_keys(
+    uid: int, keys: list[str], peers: list[str], character_ids: list[str] = (),
+) -> list[str]:
+    """显式归属键全集：会话键 ∪ 裸 peer（v1.28 前一段式遗留键）∪ 私有卡 id ∪ 裸 uid。
+
+    与 ``api/lifecycle.py::_user_state_tables_purge`` 的 explicit 集合同构。
+    """
+    return sorted({
+        str(k).strip()
+        for k in [*keys, *peers, *character_ids, str(uid)]
+        if str(k).strip()
+    })
+
+
+def _key_family_where(
+    column: str, uid: int, owned: list[str],
+) -> tuple[str, list[Any]]:
+    """会话键族统一谓词：``{uid}:%`` 前缀 ∪ 显式键 IN。删除与验证共用。"""
+    clauses = [f"{column} LIKE ?"]
+    params: list[Any] = [f"{uid}:%"]
+    if owned:
+        clauses.append(f"{column} IN ({', '.join('?' for _ in owned)})")
+        params.extend(owned)
+    return f"({' OR '.join(clauses)})", params
+
+
+def _intent_where(uid: int, owned: list[str]) -> tuple[str, list[Any]]:
+    """reminders/pending_intents：会话键族谓词 + 数字 user_id 直列兜底（M4）。"""
+    base, params = _key_family_where("session_key", uid, owned)
+    return f"({base} OR user_id=?)", [*params, uid]
+
+
+# ── persona scope 判属（H2）─────────────────────────────────────────────
+
+
+def _persona_scope_owner(scope: str, uid: int) -> bool:
+    """persona scope 判属：自含 ``persona_bank.scope_owner_uid`` 同口径。
+
+    scope 构造点（orchestrator.process_message）= ``{character_id}:{session_id}``；
+    剥掉 character 前缀后 ``owner_of(session_id) == uid`` 才算归属。无 character
+    前缀的裸键（历史 default 桶）与 owner 段非数字的键判无归属。脚本禁 import
+    api 包、且 ``persona_extractor/__init__`` 会拉起整个 fusion 链，故不直接
+    实例化 ``UserPersonaBank``；口径变更以
+    ``persona_extractor/persona_bank.py::scope_owner_uid`` 为准。
+    """
+    from utils.session_key import owner_of
+
+    _char, sep, session = str(scope or "").partition(":")
+    if not sep:
+        return False
+    return owner_of(session) == uid
+
+
+def _persona_scope_victims(
+    conn: sqlite3.Connection, uid: int,
+) -> dict[str, list[str]]:
+    """两表中归属 uid 的 scope 键（逐表 distinct 后按 owner 判定筛选）。"""
+    out: dict[str, list[str]] = {}
+    for table in PERSONA_SCOPE_TABLES:
+        if not _table_exists(conn, table):
+            out[table] = []
+            continue
+        out[table] = [
+            str(r[0]) for r in conn.execute(f"SELECT DISTINCT user_id FROM {table}")  # noqa: S608
+            if _persona_scope_owner(r[0], uid)
+        ]
+    return out
+
+
+def _delete_persona_scopes(conn: sqlite3.Connection, uid: int) -> dict[str, int]:
+    """删除归属 uid 的全部 persona 画像与快照（逐 scope 删，回执按表计行数）。
+
+    与 ``persona_bank.purge_owner_scopes`` 同构：他人 scope 与无主 scope
+    一律保留；幂等（重跑对已清空库返回全 0）。
+    """
+    counts: dict[str, int] = {}
+    for table, victims in _persona_scope_victims(conn, uid).items():
+        removed = 0
+        for scope in victims:
+            cur = conn.execute(
+                f"DELETE FROM {table} WHERE user_id = ?", (scope,)  # noqa: S608
+            )
+            removed += max(int(cur.rowcount or 0), 0)
+        counts[table] = removed
+    return counts
 
 
 # ── 目标发现 ────────────────────────────────────────────────────────────
@@ -283,12 +406,14 @@ def collect_peers(target: dict[str, Any], users_db: Path) -> list[str]:
 
 def _target_counts(
     conn: sqlite3.Connection | None, target: dict[str, Any], keys: list[str],
+    peers: list[str], character_ids: list[str] = (),
 ) -> dict[str, int]:
-    """单库受影响表计数（不含聊天正文）。"""
+    """单库受影响表计数（不含聊天正文）。谓词与删除链同源（M4）。"""
     if conn is None:
         return {}
     uid = int(target["id"])
     prefix = f"{uid}:%"
+    owned = _owned_keys(uid, keys, peers, character_ids)
     out: dict[str, int] = {}
 
     for table, column in USERS_TABLES:
@@ -300,14 +425,35 @@ def _target_counts(
             out[table] = _count_where(conn, table, f"{column}=?", (uid,))
 
     for table, column in SQLITE_SESSION_TABLES:
-        out[table] = _count_where(conn, table, f"{column} LIKE ?", (prefix,))
+        if table in INTENT_UID_FALLBACK_TABLES:
+            where, params = _intent_where(uid, owned)
+        else:
+            where, params = _key_family_where(column, uid, owned)
+        out[table] = _count_where(conn, table, where, params)
     for table, column in SQLITE_ISOLATION_TABLES:
-        out[table] = _count_where(conn, table, f"{column} LIKE ?", (prefix,))
+        where, params = _key_family_where(column, uid, owned)
+        out[table] = _count_where(conn, table, where, params)
     for table, column in SQLITE_UID_TABLES:
         out[table] = _count_where(conn, table, f"{column}=?", (uid,))
+    # persona 画像：TEXT scope 键按 owner 判属计数（H2：整型谓词是盲的）。
+    for table, victims in _persona_scope_victims(conn, uid).items():
+        if not victims:
+            out[table] = 0
+            continue
+        ph = ",".join("?" for _ in victims)
+        out[table] = _count_where(conn, table, f"user_id IN ({ph})", victims)
 
-    if keys:
-        ph = ",".join("?" for _ in keys)
+    for table in AGENT_CORE_TABLES:
+        if _table_exists(conn, table):
+            cols = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})")}
+            clauses = ["user_key LIKE ?"]
+            params: list[Any] = [prefix]
+            if "owner_user_id" in cols:
+                clauses.append("owner_user_id=?")
+                params.append(uid)
+            out[table] = _count_where(conn, table, " OR ".join(clauses), params)
+    if owned:
+        ph = ",".join("?" for _ in owned)
         for table, column in (
             ("user_character_settings", "user_key"),
             ("emotion_stage_state", "character_id"),
@@ -316,38 +462,29 @@ def _target_counts(
             if _table_exists(conn, table):
                 out[table] = max(
                     out.get(table, 0),
-                    _count_where(conn, table, f"{column} IN ({ph})", keys),
-                )
-        for table in AGENT_CORE_TABLES:
-            if _table_exists(conn, table):
-                cols = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})")}
-                clauses = [f"user_key LIKE ?"]
-                params: list[Any] = [prefix]
-                if "owner_user_id" in cols:
-                    clauses.append("owner_user_id=?")
-                    params.append(uid)
-                out[table] = _count_where(
-                    conn, table, " OR ".join(clauses), params
+                    _count_where(conn, table, f"{column} IN ({ph})", owned),
                 )
         if _table_exists(conn, "daily_summaries"):
-            clauses = " OR ".join("date LIKE ?" for _ in keys)
+            clauses = " OR ".join("date LIKE ?" for _ in owned)
             out["daily_summaries"] = _count_where(
                 conn, "daily_summaries", clauses,
-                [f"{key}|%" for key in keys],
+                [f"{key}|%" for key in owned],
             )
         if _table_exists(conn, "memory_recycle_bin"):
-            clauses = " OR ".join("character_id LIKE ?" for _ in keys)
+            clauses = " OR ".join("character_id LIKE ?" for _ in owned)
             out["memory_recycle_bin"] = _count_where(
                 conn, "memory_recycle_bin", clauses,
-                [f"user_fact:{key}%" for key in keys],
+                [f"user_fact:{key}%" for key in owned],
             )
     return out
 
 
 def inventory(
-    target: dict[str, Any], keys: list[str],
+    target: dict[str, Any], keys: list[str], peers: list[str],
     users_db: Path, sqlite_db: Path, agent_db: Path, runtime_db: Path,
     characters_dir: Path | None = None, knowledge_dir: Path | None = None,
+    chroma_dir: Path | None = None, affinity_path: Path | None = None,
+    character_ids: list[str] | None = None,
 ) -> dict[str, dict[str, int]]:
     """返回 {库: {该库实际存在的受影响表: 行数}}（0 行也保留，便于审计）。
 
@@ -356,6 +493,7 @@ def inventory(
     """
     result: dict[str, dict[str, int]] = {}
     uid = int(target["id"])
+    cids = list(character_ids or [])
 
     users_tables = {table for table, _ in USERS_TABLES}
     conn = _connect(users_db)
@@ -364,7 +502,7 @@ def inventory(
             result["users.db"] = {"_read_error": -1}
     else:
         try:
-            all_counts = _target_counts(conn, target, keys)
+            all_counts = _target_counts(conn, target, keys, peers, cids)
             result["users.db"] = {
                 table: all_counts.get(table, 0)
                 for table in users_tables if _table_exists(conn, table)
@@ -385,14 +523,16 @@ def inventory(
         table for table, _ in SQLITE_ISOLATION_TABLES
     } | {
         table for table, _ in SQLITE_UID_TABLES
-    } | set(AGENT_CORE_TABLES) | {"daily_summaries", "memory_recycle_bin"}
+    } | set(PERSONA_SCOPE_TABLES) | set(AGENT_CORE_TABLES) | {
+        "daily_summaries", "memory_recycle_bin",
+    }
     conn = _connect(sqlite_db)
     if conn is None:
         if sqlite_db.exists():
             result["sqlite.db"] = {"_read_error": -1}
     else:
         try:
-            all_counts = _target_counts(conn, target, keys)
+            all_counts = _target_counts(conn, target, keys, peers, cids)
             result["sqlite.db"] = {
                 table: all_counts.get(table, 0)
                 for table in sqlite_tables if _table_exists(conn, table)
@@ -442,6 +582,17 @@ def inventory(
         knowledge_dir or project_path("data", "knowledge"),
         users_db,
     )
+    # chroma 向量库与 affinity 点存（M3：与 lifecycle 权威链同 owner 口径）
+    result["chroma_db"] = _vector_inventory(
+        keys, peers, cids,
+        chroma_dir or project_path("data", "chroma_db"),
+    )
+    result["affinity_state.json"] = {
+        "points": _affinity_count(
+            uid, keys, peers,
+            affinity_path or project_path("data", "affinity_state.json"),
+        )
+    }
     return result
 
 
@@ -493,9 +644,11 @@ def _wechat_inventory(uid: int) -> dict[str, int]:
     }
 
 
-def _throttle_count(scheduler_config: Path, uid: int, keys: list[str]) -> int:
+def _throttle_count(
+    scheduler_config: Path, uid: int, keys: list[str], peers: list[str] = (),
+) -> int:
     """节流账本残留计数（与生命周期 verify 同口径）。"""
-    explicit = {str(k) for k in keys} | {str(uid)}
+    explicit = {str(k) for k in [*keys, *peers, str(uid)]}
 
     def _owned(key: str) -> bool:
         if key in explicit:
@@ -532,6 +685,105 @@ def _throttle_count(scheduler_config: Path, uid: int, keys: list[str]) -> int:
     return n
 
 
+# ── chroma 向量库 / affinity 点存（M3）──────────────────────────────────
+
+
+def _vector_owner_keys(keys: list[str], peers: list[str]) -> list[str]:
+    """向量元数据归属键：会话键 ∪ 裸 peer（与 lifecycle `_memory_vectors_*` 同）。"""
+    return sorted({str(k).strip() for k in [*keys, *peers] if str(k).strip()})
+
+
+def _vector_inventory(
+    keys: list[str], peers: list[str], character_ids: list[str], chroma_dir: Path,
+) -> dict[str, int]:
+    """chroma 向量库残留计数（lifecycle `_memory_vectors_verify` 同 owner）。"""
+    owner_keys = _vector_owner_keys(keys, peers)
+    if not character_ids and not owner_keys:
+        return {}
+    if not Path(chroma_dir).exists():
+        return {}  # 向量库不存在 = 无残留；不因探针创建目录
+    try:
+        from shisi.memory.legacy.vector_memory import VectorMemory
+
+        vm = VectorMemory(str(chroma_dir))
+        counts = vm.count_owner_data(
+            user_keys=owner_keys, session_ids=owner_keys,
+            character_ids=list(character_ids),
+        )
+        return {name: int(n) for name, n in counts.items()}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("chroma 残留计数失败: %s", e)
+        return {"chroma_db": -1}
+
+
+def _purge_vectors(
+    keys: list[str], peers: list[str], character_ids: list[str], chroma_dir: Path,
+) -> dict[str, int]:
+    """清除 chroma 向量库中归属该账号的派生向量（lifecycle `_memory_vectors_purge` 同 owner）。"""
+    owner_keys = _vector_owner_keys(keys, peers)
+    if not character_ids and not owner_keys:
+        return {}
+    if not Path(chroma_dir).exists():
+        return {}
+    try:
+        from shisi.memory.legacy.vector_memory import VectorMemory
+
+        vm = VectorMemory(str(chroma_dir))
+        receipt = vm.purge_owner_data(
+            user_keys=owner_keys, session_ids=owner_keys,
+            character_ids=list(character_ids),
+        )
+        return {name: int(n) for name, n in receipt.items()}
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"chroma 向量库清除失败: {e}") from e
+
+
+def _affinity_owner_keys(uid: int, keys: list[str], peers: list[str]) -> list[str]:
+    """affinity 点存归属键：会话键 ∪ 裸 peer ∪ 裸 uid（lifecycle `_affinity_*` 同）。"""
+    return sorted({str(k).strip() for k in [*keys, *peers, str(uid)] if str(k).strip()})
+
+
+def _affinity_count(
+    uid: int, keys: list[str], peers: list[str], affinity_path: Path,
+) -> int:
+    """affinity_state.json 点存残留计数（lifecycle `_affinity_verify` 同 owner）。"""
+    if not Path(affinity_path).exists():
+        return 0
+    from utils import affinity_state
+
+    original = affinity_state._PATH
+    affinity_state._PATH = Path(affinity_path)
+    try:
+        return int(affinity_state.count_owner(
+            _affinity_owner_keys(uid, keys, peers), owner_uid=uid,
+        ))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("affinity_state 残留计数失败: %s", e)
+        return -1
+    finally:
+        affinity_state._PATH = original
+
+
+def _purge_affinity(
+    uid: int, keys: list[str], peers: list[str], affinity_path: Path,
+) -> int:
+    """清除 affinity_state.json 中归属该账号的点存键（lifecycle `_affinity_purge` 同 owner）。"""
+    if not Path(affinity_path).exists():
+        return 0
+    from utils import affinity_state
+
+    original = affinity_state._PATH
+    affinity_state._PATH = Path(affinity_path)
+    try:
+        return int(affinity_state.purge_owner(
+            _affinity_owner_keys(uid, keys, peers), owner_uid=uid,
+        ))
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"affinity_state 清除失败: {e}") from e
+    finally:
+        affinity_state._PATH = original
+
+
 # ── 备份 ────────────────────────────────────────────────────────────────
 
 
@@ -560,12 +812,27 @@ def backup_databases(paths: list[Path], archive_dir: Path) -> dict[str, str]:
 
 
 def backup_json_config(config_path: Path, archive_dir: Path) -> str | None:
-    """备份会被 `_purge_throttle` 改写的 JSON 配置文件（回滚完整性所需）。"""
+    """备份会被 `_purge_throttle` / affinity 清除改写的 JSON 配置文件。"""
     if not config_path.exists():
         return None
     archive_dir.mkdir(parents=True, exist_ok=True)
     dest = archive_dir / config_path.name
     shutil.copy2(config_path, dest)
+    return str(dest)
+
+
+def backup_directory(src: Path, archive_dir: Path) -> str | None:
+    """整目录备份（chroma 向量库等非 SQLite 数据面）。
+
+    ``dirs_exist_ok=True``：同秒重跑等场景下归档目录可能已含上一次的快照，
+    备份语义按覆盖处理（与 ``backup_json_config`` 的 ``copy2` 一致），不因
+    目录已存在而中断清理。
+    """
+    if not src.exists():
+        return None
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    dest = archive_dir / src.name
+    shutil.copytree(src, dest, dirs_exist_ok=True)
     return str(dest)
 
 
@@ -609,27 +876,41 @@ def _delete_users_db(
 
 def _delete_sqlite_db(
     conn: sqlite3.Connection, target: dict[str, Any], keys: list[str],
+    peers: list[str] = (), character_ids: list[str] = (),
 ) -> dict[str, int]:
+    """sqlite.db 归属数据删除（与 lifecycle `purge_owner_data` 同 owner 口径）。
+
+    - 会话键族：``{uid}:%`` 前缀 ∪ 显式键（含裸 peer 一段式遗留键）IN；
+    - reminders/pending_intents 另按数字 ``user_id`` 直列兜底（M4）；
+    - persona 两表按 TEXT scope 判属清除（H2）。
+    """
     uid = int(target["id"])
     prefix = f"{uid}:%"
+    owned = _owned_keys(uid, keys, peers, character_ids)
     counts: dict[str, int] = {}
     conn.execute("BEGIN IMMEDIATE")
     try:
         for table, column in SQLITE_SESSION_TABLES:
             if not _table_exists(conn, table):
                 continue
-            cur = conn.execute(f"DELETE FROM {table} WHERE {column} LIKE ?", (prefix,))
+            if table in INTENT_UID_FALLBACK_TABLES:
+                where, params = _intent_where(uid, owned)
+            else:
+                where, params = _key_family_where(column, uid, owned)
+            cur = conn.execute(f"DELETE FROM {table} WHERE {where}", tuple(params))
             counts[table] = int(cur.rowcount or 0)
         for table, column in SQLITE_ISOLATION_TABLES:
             if not _table_exists(conn, table):
                 continue
-            cur = conn.execute(f"DELETE FROM {table} WHERE {column} LIKE ?", (prefix,))
+            where, params = _key_family_where(column, uid, owned)
+            cur = conn.execute(f"DELETE FROM {table} WHERE {where}", tuple(params))
             counts[table] = int(cur.rowcount or 0)
         for table, column in SQLITE_UID_TABLES:
             if not _table_exists(conn, table):
                 continue
             cur = conn.execute(f"DELETE FROM {table} WHERE {column}=?", (uid,))
             counts[table] = int(cur.rowcount or 0)
+        counts.update(_delete_persona_scopes(conn, uid))
         for table in AGENT_CORE_TABLES:
             if not _table_exists(conn, table):
                 continue
@@ -643,8 +924,8 @@ def _delete_sqlite_db(
                 f"DELETE FROM {table} WHERE {' OR '.join(clauses)}", tuple(params)
             )
             counts[table] = int(cur.rowcount or 0)
-        if keys:
-            ph = ",".join("?" for _ in keys)
+        if owned:
+            ph = ",".join("?" for _ in owned)
             for table, column in (
                 ("user_character_settings", "user_key"),
                 ("emotion_stage_state", "character_id"),
@@ -652,19 +933,19 @@ def _delete_sqlite_db(
             ):
                 if _table_exists(conn, table):
                     conn.execute(
-                        f"DELETE FROM {table} WHERE {column} IN ({ph})", tuple(keys)
+                        f"DELETE FROM {table} WHERE {column} IN ({ph})", tuple(owned)
                     )
             if _table_exists(conn, "daily_summaries"):
-                clauses = " OR ".join("date LIKE ?" for _ in keys)
+                clauses = " OR ".join("date LIKE ?" for _ in owned)
                 conn.execute(
                     f"DELETE FROM daily_summaries WHERE {clauses}",
-                    tuple(f"{key}|%" for key in keys),
+                    tuple(f"{key}|%" for key in owned),
                 )
             if _table_exists(conn, "memory_recycle_bin"):
-                clauses = " OR ".join("character_id LIKE ?" for _ in keys)
+                clauses = " OR ".join("character_id LIKE ?" for _ in owned)
                 conn.execute(
                     f"DELETE FROM memory_recycle_bin WHERE {clauses}",
-                    tuple(f"user_fact:{key}%" for key in keys),
+                    tuple(f"user_fact:{key}%" for key in owned),
                 )
         conn.commit()
     except Exception:
@@ -920,6 +1201,191 @@ def _purge_throttle(
         ProactiveScheduler._CONFIG_PATH = original
 
 
+# ── 作业账（job journal，M5）────────────────────────────────────────────
+
+
+def _load_journal(path: Path) -> list[dict[str, Any]]:
+    """读作业账；损坏/缺失按空账处理（账目丢失不阻塞新的清理作业）。"""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    jobs = data.get("jobs") if isinstance(data, dict) else None
+    if not isinstance(jobs, list):
+        return []
+    return [j for j in jobs if isinstance(j, dict)]
+
+
+def _save_journal(path: Path, jobs: list[dict[str, Any]]) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"jobs": jobs}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _journal_record(
+    path: Path, target: dict[str, Any], keys: list[str], peers: list[str],
+) -> None:
+    """删除前落作业账：记录 uid + 会话键/裸 peer 快照，status=running。
+
+    与 lifecycle 的 job journal 同思路——半途失败（进程被杀/异常退出）后，
+    users 行可能已删而数据面未清，重跑时据此对未完结 uid 做残留扫描。
+    """
+    uid = int(target["id"])
+    jobs = [j for j in _load_journal(path) if int(j.get("user_id", -1)) != uid]
+    now = datetime.now(tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+    jobs.append({
+        "user_id": uid,
+        "username": str(target.get("username") or ""),
+        "keys": [str(k) for k in keys],
+        "peers": [str(p) for p in peers],
+        "started_at": now,
+        "status": "running",
+    })
+    _save_journal(path, jobs)
+
+
+def _journal_mark_done(path: Path, uid: int) -> None:
+    jobs = _load_journal(path)
+    now = datetime.now(tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+    for job in jobs:
+        if int(job.get("user_id", -1)) == uid:
+            job["status"] = "done"
+            job["finished_at"] = now
+    _save_journal(path, jobs)
+
+
+# ── 残留扫描（删除后验证与作业账重跑扫描共用，防口径分叉）───────────────
+
+
+def owner_residual(
+    target: dict[str, Any], keys: list[str], peers: list[str], *,
+    users_db: Path, sqlite_db: Path, agent_db: Path, runtime_db: Path,
+    characters_dir: Path, knowledge_dir: Path, chroma_dir: Path,
+    affinity_path: Path, scheduler_config: Path,
+    character_ids: list[str] | None = None,
+) -> dict[str, dict[str, int]]:
+    """单账号全数据面残留扫描（含 chroma / affinity / ASE / 通道 / 节流账本）。"""
+    uid = int(target["id"])
+    inv = inventory(
+        target, keys, peers, users_db, sqlite_db, agent_db, runtime_db,
+        characters_dir, knowledge_dir, chroma_dir, affinity_path,
+        character_ids=character_ids,
+    )
+    inv["ase_states"] = _ase_inventory(uid, keys, peers)
+    inv["wechat_channels"] = _wechat_inventory(uid)
+    inv["scheduler_config.json"] = {
+        "throttle_entries": _throttle_count(scheduler_config, uid, keys, peers)
+    }
+    return inv
+
+
+def _residual_total(inv: dict[str, dict[str, int]]) -> int:
+    """残留总量（-1 读失败按 1 计，fail-closed）。"""
+    return sum(
+        abs(int(v)) if int(v) else 0
+        for tables in inv.values() for v in tables.values()
+    ) + sum(1 for tables in inv.values() for v in tables.values() if int(v) < 0)
+
+
+def _job_uid(job: dict[str, Any]) -> int:
+    """作业账条目的 uid（损坏条目按 -1 处理，调用方跳过）。"""
+    try:
+        return int(job.get("user_id", -1))
+    except (TypeError, ValueError):
+        return -1
+
+
+def _scan_pending_jobs(
+    paths: dict[str, Path], scheduler_config: Path,
+    exclude_uids: set[int] | None = None, *, from_apply_finish: bool = False,
+) -> int:
+    """作业账未完结项的全数据面残留扫描（M5）。
+
+    users 行先删、数据面后删的顺序下，半途失败重跑会因「无目标」跳过验证；
+    且若测试命名空间仍有其他账号，正常清理会照常退出 0，更早失败留下的
+    残留要等到下一次「目标集合为空」的运行才被发现。因此两个触发位都补扫：
+    - 目标集合为空（不带 ``--user-id`` 重跑且已无剩余目标）；
+    - apply 成功收尾（``from_apply_finish=True``，排除本次已清理的目标 uid）。
+    按作业账里未完结（status != done）的 uid 逐一做全数据面残留扫描；
+    发现残留即响亮告警并退出非零，提示用显式 ``--user-id`` 重跑。
+    """
+    journal = paths["journal"]
+    skip = {int(u) for u in (exclude_uids or set())}
+    pending = [
+        j for j in _load_journal(journal)
+        if j.get("status") != "done" and _job_uid(j) not in skip
+    ]
+    if not pending:
+        if from_apply_finish:
+            # 收尾补扫：没有本次目标之外的未完结作业，静默通过（不打扰正常退出）。
+            return 0
+        print("[purge-e2e] 未发现 e2e/测试命名空间账号（目标集合为空）。")
+        return 0
+    if from_apply_finish:
+        print(
+            f"[purge-e2e] 本次目标已清理完毕；作业账仍有 {len(pending)} 个更早的"
+            "未完结作业，执行全数据面残留扫描…"
+        )
+    else:
+        print(
+            f"[purge-e2e] 目标集合为空；作业账仍有 {len(pending)} 个未完结清理作业，"
+            "执行全数据面残留扫描…"
+        )
+    total = 0
+    for job in pending:
+        uid = _job_uid(job)
+        if uid < 0:
+            continue
+        target = {
+            "id": uid, "username": str(job.get("username") or ""),
+            "email": "", "explicit": False,
+        }
+        # 作业账里的键是删除开始时的快照；再并入库内现枚举，防快照后新增漏扫。
+        keys = sorted({
+            *(str(k) for k in (job.get("keys") or [])),
+            *collect_session_keys(target, paths["users"], paths["memory"], paths["runtime"]),
+        })
+        peers = sorted({
+            *(str(p) for p in (job.get("peers") or [])),
+            *collect_peers(target, paths["users"]),
+        })
+        cids = [cid for cid, _p in _iter_owned_cards(uid, paths["characters"])]
+        inv = owner_residual(
+            target, keys, peers,
+            users_db=paths["users"], sqlite_db=paths["memory"],
+            agent_db=paths["agent"], runtime_db=paths["runtime"],
+            characters_dir=paths["characters"], knowledge_dir=paths["knowledge"],
+            chroma_dir=paths["chroma"], affinity_path=paths["affinity"],
+            scheduler_config=scheduler_config, character_ids=cids,
+        )
+        n = _residual_total(inv)
+        if n:
+            total += n
+            print(f"[purge-e2e][FAIL] user_id={uid} 仍有 {n} 行/项残留：", file=sys.stderr)
+            for db_label, tables in inv.items():
+                for table, count in sorted(tables.items()):
+                    if int(count):
+                        print(f"    {db_label}.{table}: {count}", file=sys.stderr)
+    if total:
+        hint = ", ".join(str(j.get("user_id")) for j in pending)
+        print(
+            f"[purge-e2e][FAIL] 共 {total} 项残留（未完结作业 uid: {hint}）。"
+            "请用显式 --user-id 重跑，例如：--apply --user-id "
+            f"{pending[0].get('user_id')}。",
+            file=sys.stderr,
+        )
+        return 1
+    for job in pending:
+        uid = _job_uid(job)
+        if uid >= 0:
+            _journal_mark_done(journal, uid)
+    print("[purge-e2e] 历史作业复核零残留，已全部标记完结。")
+    return 0
+
+
 # ── DELETION_LOG 文本 ───────────────────────────────────────────────────
 
 
@@ -943,7 +1409,7 @@ def deletion_log_entry(
         lines.append(
             f"- user_id={t['id']}，username=`{t.get('username') or '(显式指定)'}`"
         )
-    lines += ["", "### 删除范围（4 库 + 控制面/通道/ASE/私有角色实例逐表计数）"]
+    lines += ["", "### 删除范围（4 库 + chroma/affinity + 控制面/通道/ASE/私有角色实例逐表计数）"]
     for db_label, tables in inventory_data.items():
         lines.append(f"- **{db_label}**")
         for table, count in sorted(tables.items()):
@@ -994,9 +1460,19 @@ def _default_paths(args: argparse.Namespace) -> dict[str, Path]:
     knowledge = Path(args.knowledge_dir) if args.knowledge_dir else project_path(
         "data", "knowledge"
     )
+    chroma = Path(args.chroma_dir) if args.chroma_dir else project_path(
+        "data", "chroma_db"
+    )
+    affinity = Path(args.affinity_file) if args.affinity_file else project_path(
+        "data", "affinity_state.json"
+    )
+    journal = Path(args.journal_path) if args.journal_path else project_path(
+        "data", "purge_e2e_jobs.json"
+    )
     return {
         "users": users, "memory": memory, "agent": agent, "runtime": runtime,
-        "characters": characters, "knowledge": knowledge,
+        "characters": characters, "knowledge": knowledge, "chroma": chroma,
+        "affinity": affinity, "journal": journal,
     }
 
 
@@ -1018,6 +1494,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--archive-dir")
     parser.add_argument("--characters-dir", help="角色卡目录（默认 config/characters）")
     parser.add_argument("--knowledge-dir", help="知识目录（默认 data/knowledge）")
+    parser.add_argument("--chroma-dir", help="chroma 向量库目录（默认 data/chroma_db）")
+    parser.add_argument("--affinity-file", help="affinity 点存文件（默认 data/affinity_state.json）")
+    parser.add_argument("--journal-path", help="作业账文件（默认 data/purge_e2e_jobs.json）")
     args = parser.parse_args(argv)
 
     paths = _default_paths(args)
@@ -1030,154 +1509,190 @@ def main(argv: list[str] | None = None) -> int:
         "data", "archive"
     )
 
-    try:
-        targets = discover_targets(paths["users"], args.user_id)
-    except RuntimeError as e:
-        print(f"[purge-e2e][FAIL] {e}", file=sys.stderr)
-        return 2
-    if not targets:
-        print("[purge-e2e] 未发现 e2e/测试命名空间账号（目标集合为空）。")
-        return 0
-
     # 控制面 DB 路径必须指向本次清理的目标文件（runtime_plane 是全局单例）
     from proactive import runtime_plane
 
     runtime_plane.set_db_path(paths["runtime"])
-
-    plans: list[dict[str, Any]] = []
-    for target in targets:
-        keys = collect_session_keys(
-            target, paths["users"], paths["memory"], paths["runtime"], args.session_key,
-        )
-        peers = collect_peers(target, paths["users"])
-        plans.append({"target": target, "keys": keys, "peers": peers})
-
-    # 冷停闸门：带连接器运行时删除 = 删完即被 restore_on_boot 复活，拒绝执行。
-    if args.apply:
-        blocker = _assert_cold_shutdown(plans)
-        if blocker:
-            print(f"[purge-e2e][FAIL] {blocker}", file=sys.stderr)
-            runtime_plane.set_db_path(None)
+    try:
+        try:
+            targets = discover_targets(paths["users"], args.user_id)
+        except RuntimeError as e:
+            print(f"[purge-e2e][FAIL] {e}", file=sys.stderr)
             return 2
+        if not targets:
+            # M5：目标集合为空 ≠ 无事发生。半途失败的作业（users 行已删）会
+            # 落到这里，必须做全数据面残留扫描，不得假成功退出 0。
+            return _scan_pending_jobs(paths, scheduler_config)
 
-    print(f"[purge-e2e] 目标 {len(plans)} 个；模式={'apply' if args.apply else 'dry-run'}")
-    total_inventory: dict[str, dict[str, int]] = {}
-    for plan in plans:
-        target, keys, peers = plan["target"], plan["keys"], plan["peers"]
-        print(f"\n[target] user_id={target['id']} username={target.get('username') or '-'}")
-        print(f"  session_keys={keys}")
-        print(f"  peers={peers}")
-        inv = inventory(
-            target, keys, paths["users"], paths["memory"], paths["agent"],
-            paths["runtime"], paths["characters"], paths["knowledge"],
+        plans: list[dict[str, Any]] = []
+        for target in targets:
+            keys = collect_session_keys(
+                target, paths["users"], paths["memory"], paths["runtime"], args.session_key,
+            )
+            peers = collect_peers(target, paths["users"])
+            cids = [
+                cid for cid, _p in _iter_owned_cards(int(target["id"]), paths["characters"])
+            ]
+            plans.append(
+                {"target": target, "keys": keys, "peers": peers, "cids": cids}
+            )
+
+        # 冷停闸门：带连接器运行时删除 = 删完即被 restore_on_boot 复活，拒绝执行。
+        if args.apply:
+            blocker = _assert_cold_shutdown(plans)
+            if blocker:
+                print(f"[purge-e2e][FAIL] {blocker}", file=sys.stderr)
+                return 2
+
+        print(f"[purge-e2e] 目标 {len(plans)} 个；模式={'apply' if args.apply else 'dry-run'}")
+        total_inventory: dict[str, dict[str, int]] = {}
+        for plan in plans:
+            target, keys, peers, cids = (
+                plan["target"], plan["keys"], plan["peers"], plan["cids"],
+            )
+            print(f"\n[target] user_id={target['id']} username={target.get('username') or '-'}")
+            print(f"  session_keys={keys}")
+            print(f"  peers={peers}")
+            print(f"  character_ids={cids}")
+            inv = owner_residual(
+                target, keys, peers,
+                users_db=paths["users"], sqlite_db=paths["memory"],
+                agent_db=paths["agent"], runtime_db=paths["runtime"],
+                characters_dir=paths["characters"], knowledge_dir=paths["knowledge"],
+                chroma_dir=paths["chroma"], affinity_path=paths["affinity"],
+                scheduler_config=scheduler_config, character_ids=cids,
+            )
+            plan["inventory"] = inv
+            for db_label, tables in inv.items():
+                print(f"  {db_label}:")
+                for table, count in sorted(tables.items()):
+                    print(f"    {table}: {count}")
+            for db_label, tables in inv.items():
+                bucket = total_inventory.setdefault(db_label, {})
+                for table, count in tables.items():
+                    bucket[table] = bucket.get(table, 0) + int(count)
+
+        if not args.apply:
+            print(
+                "\n[purge-e2e] dry-run：零删除、零备份。"
+                "确认清单后加 --apply 执行（先备份到 data/archive/）。"
+            )
+            entry = deletion_log_entry(
+                [p["target"] for p in plans], total_inventory, {}, archive_root, -1,
+            )
+            print("\n----- DELETION_LOG 预览 -----\n" + entry)
+            return 0
+
+        # 1) 备份（4 库 + scheduler_config.json + affinity_state.json + chroma 目录）
+        # 同秒重跑（如半途失败后立即重试）会撞时间戳目录名：追加序号保证
+        # 每次作业有独立归档目录，避免覆盖上一次的备份快照。
+        archive_dir = archive_root / f"purge_e2e_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        _suffix = 2
+        while archive_dir.exists():
+            archive_dir = (
+                archive_root
+                / f"purge_e2e_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{_suffix}"
+            )
+            _suffix += 1
+        backups = backup_databases(
+            [paths["users"], paths["memory"], paths["agent"], paths["runtime"]],
+            archive_dir,
         )
-        inv["ase_states"] = _ase_inventory(int(target["id"]), keys, peers)
-        inv["wechat_channels"] = _wechat_inventory(int(target["id"]))
-        inv["scheduler_config.json"] = {
-            "throttle_entries": _throttle_count(scheduler_config, target["id"], keys)
-        }
-        plan["inventory"] = inv
-        for db_label, tables in inv.items():
-            print(f"  {db_label}:")
-            for table, count in sorted(tables.items()):
-                print(f"    {table}: {count}")
-        for db_label, tables in inv.items():
-            bucket = total_inventory.setdefault(db_label, {})
-            for table, count in tables.items():
-                bucket[table] = bucket.get(table, 0) + int(count)
-
-    if not args.apply:
+        config_backup = backup_json_config(scheduler_config, archive_dir)
+        affinity_backup = backup_json_config(paths["affinity"], archive_dir)
+        if affinity_backup:
+            backups[str(paths["affinity"])] = affinity_backup
+        chroma_backup = backup_directory(paths["chroma"], archive_dir)
+        if chroma_backup:
+            backups[str(paths["chroma"])] = chroma_backup
         print(
-            "\n[purge-e2e] dry-run：零删除、零备份。"
-            "确认清单后加 --apply 执行（先备份到 data/archive/）。"
+            f"\n[purge-e2e] 备份完成 {len(backups)} 项"
+            f"{' + scheduler_config.json' if config_backup else ''} → {archive_dir}"
         )
+
+        # 2) 落作业账（删除前；半途失败后重跑据此扫描残留）
+        for plan in plans:
+            _journal_record(paths["journal"], plan["target"], plan["keys"], plan["peers"])
+
+        # 3) 分库/分数据面删除
+        for plan in plans:
+            target, keys, peers, cids = (
+                plan["target"], plan["keys"], plan["peers"], plan["cids"],
+            )
+            uid = int(target["id"])
+            # 先停连接器再删磁盘通道目录，防止进程内对象按旧路径重建凭证。
+            _remove_wechat_channels(uid)
+            # 私有角色实例：卡文件 + 知识文件 + 精确 cid 成就行（lifecycle 同 owner）。
+            _purge_character_instances(
+                uid, paths["characters"], paths["knowledge"], paths["users"]
+            )
+            _purge_ase_states(uid, keys, peers)
+            _purge_vectors(keys, peers, cids, paths["chroma"])
+            _purge_affinity(uid, keys, peers, paths["affinity"])
+            conn = _connect(paths["users"], write=True)
+            if conn is not None:
+                try:
+                    _delete_users_db(conn, target, keys)
+                finally:
+                    conn.close()
+            conn = _connect(paths["memory"], write=True)
+            if conn is not None:
+                try:
+                    _delete_sqlite_db(conn, target, keys, peers, cids)
+                finally:
+                    conn.close()
+            if paths["agent"].exists():
+                _delete_agent_ledger(paths["agent"], target, keys)
+            runtime_plane.purge_owner(uid, keys)
+            _purge_throttle(scheduler_config, target, keys, peers)
+            print(f"[purge-e2e] 已删除 user_id={target['id']}")
+
+        # 4) 零残留验证（与删除同谓词、全数据面）
+        residual = 0
+        for plan in plans:
+            inv = owner_residual(
+                plan["target"], plan["keys"], plan["peers"],
+                users_db=paths["users"], sqlite_db=paths["memory"],
+                agent_db=paths["agent"], runtime_db=paths["runtime"],
+                characters_dir=paths["characters"], knowledge_dir=paths["knowledge"],
+                chroma_dir=paths["chroma"], affinity_path=paths["affinity"],
+                scheduler_config=scheduler_config, character_ids=plan["cids"],
+            )
+            for tables in inv.values():
+                # -1 = 读数失败：必须按残留处理，不能被 `> 0` 过滤成假通过。
+                for value in tables.values():
+                    ivalue = int(value)
+                    if ivalue:
+                        residual += abs(ivalue)
+        if residual:
+            print(f"[purge-e2e][FAIL] 删除后仍有 {residual} 行残留，见上清单。", file=sys.stderr)
+            return 1
+
+        # 5) 作业账完结 + DELETION_LOG 文本
+        for plan in plans:
+            _journal_mark_done(paths["journal"], int(plan["target"]["id"]))
         entry = deletion_log_entry(
-            [p["target"] for p in plans], total_inventory, {}, archive_root, -1,
+            [p["target"] for p in plans], total_inventory, backups, archive_dir, residual,
+            config_backup=config_backup,
         )
-        print("\n----- DELETION_LOG 预览 -----\n" + entry)
+        # 稳定入口（archive 根）+ 本次备份目录各留一份：root 供人与 DELETION_LOG
+        # 引用，时间戳目录随备份一起可追溯。
+        (archive_root / "DELETION_LOG_ENTRY.md").write_text(entry, encoding="utf-8")
+        (archive_dir / "DELETION_LOG_ENTRY.md").write_text(entry, encoding="utf-8")
+        print(
+            f"\n[purge-e2e] 零残留验证通过；DELETION_LOG 条目："
+            f"{archive_root / 'DELETION_LOG_ENTRY.md'}"
+        )
+        # 6) M5 纵深：作业账中不属于本次目标集的未完结作业（更早半途失败遗留）
+        # 一并补扫——命名空间仍有其他测试账号时，残留不得等到下一次
+        # 「目标集合为空」的运行才暴露。发现残留即退出非零。
+        return _scan_pending_jobs(
+            paths, scheduler_config,
+            exclude_uids={int(p["target"]["id"]) for p in plans},
+            from_apply_finish=True,
+        )
+    finally:
         runtime_plane.set_db_path(None)
-        return 0
-
-    # 1) 备份（4 库 + 会被改写的 scheduler_config.json）
-    archive_dir = archive_root / f"purge_e2e_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    backups = backup_databases(
-        [paths["users"], paths["memory"], paths["agent"], paths["runtime"]],
-        archive_dir,
-    )
-    config_backup = backup_json_config(scheduler_config, archive_dir)
-    print(
-        f"\n[purge-e2e] 备份完成 {len(backups)} 个库"
-        f"{' + scheduler_config.json' if config_backup else ''} → {archive_dir}"
-    )
-
-    # 2) 分库事务删除
-    for plan in plans:
-        target, keys, peers = plan["target"], plan["keys"], plan["peers"]
-        uid = int(target["id"])
-        # 先停连接器再删磁盘通道目录，防止进程内对象按旧路径重建凭证。
-        _remove_wechat_channels(uid)
-        # 私有角色实例：卡文件 + 知识文件 + 精确 cid 成就行（lifecycle 同 owner）。
-        _purge_character_instances(
-            uid, paths["characters"], paths["knowledge"], paths["users"]
-        )
-        _purge_ase_states(uid, keys, peers)
-        conn = _connect(paths["users"], write=True)
-        if conn is not None:
-            try:
-                _delete_users_db(conn, target, keys)
-            finally:
-                conn.close()
-        conn = _connect(paths["memory"], write=True)
-        if conn is not None:
-            try:
-                _delete_sqlite_db(conn, target, keys)
-            finally:
-                conn.close()
-        if paths["agent"].exists():
-            _delete_agent_ledger(paths["agent"], target, keys)
-        runtime_plane.purge_owner(uid, keys)
-        _purge_throttle(scheduler_config, target, keys, peers)
-        print(f"[purge-e2e] 已删除 user_id={target['id']}")
-
-    # 3) 零残留验证
-    residual = 0
-    for plan in plans:
-        target, keys, peers = plan["target"], plan["keys"], plan["peers"]
-        inv = inventory(
-            target, keys, paths["users"], paths["memory"], paths["agent"],
-            paths["runtime"], paths["characters"], paths["knowledge"],
-        )
-        inv["ase_states"] = _ase_inventory(int(target["id"]), keys, peers)
-        inv["wechat_channels"] = _wechat_inventory(int(target["id"]))
-        inv["scheduler_config.json"] = {
-            "throttle_entries": _throttle_count(scheduler_config, target["id"], keys)
-        }
-        for tables in inv.values():
-            # -1 = 读数失败：必须按残留处理，不能被 `> 0` 过滤成假通过。
-            for value in tables.values():
-                ivalue = int(value)
-                if ivalue:
-                    residual += abs(ivalue)
-    if residual:
-        print(f"[purge-e2e][FAIL] 删除后仍有 {residual} 行残留，见上清单。", file=sys.stderr)
-        runtime_plane.set_db_path(None)
-        return 1
-
-    # 4) DELETION_LOG 文本
-    entry = deletion_log_entry(
-        [p["target"] for p in plans], total_inventory, backups, archive_dir, residual,
-        config_backup=config_backup,
-    )
-    # 稳定入口（archive 根）+ 本次备份目录各留一份：root 供人与 DELETION_LOG
-    # 引用，时间戳目录随备份一起可追溯。
-    (archive_root / "DELETION_LOG_ENTRY.md").write_text(entry, encoding="utf-8")
-    (archive_dir / "DELETION_LOG_ENTRY.md").write_text(entry, encoding="utf-8")
-    print(
-        f"\n[purge-e2e] 零残留验证通过；DELETION_LOG 条目："
-        f"{archive_root / 'DELETION_LOG_ENTRY.md'}"
-    )
-    runtime_plane.set_db_path(None)
-    return 0
 
 
 if __name__ == "__main__":

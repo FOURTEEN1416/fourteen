@@ -237,3 +237,102 @@ def test_first_followup_still_reaches_decision(topic_env, monkeypatch):
     sched, hub, calls, _ledger = _make_sched(monkeypatch)
     sched._llm_proactive_one_user(hub, KEY)
     assert len(calls) == 1, "第一次追问必须放行到决策（只限第二次）"
+
+
+# ═══════════════════════════════════════════════════════════
+# 3. 无计划路径（2026-11-22 M11）：追问限不依赖到期计划
+# ═══════════════════════════════════════════════════════════
+
+
+def test_planless_second_followup_on_same_topic_is_blocked(topic_env, monkeypatch):
+    """M11：决策不写 next_topic 计划（_plan_topic 为空）时，同话题第 2 次
+    追问同样要在投递前被拦并记账——键取本轮正文锚点（文本重叠命中同一
+    话题行），不再依赖到期计划。"""
+    import proactive.llm_proactive as lp
+    import utils.prompt_sanitize as ps
+
+    title = _create_topic()
+    sched, hub, calls, ledger = _make_sched(monkeypatch)
+    monkeypatch.setattr(
+        "proactive.scheduler.read_reply_mode", lambda *a, **k: "immersive"
+    )
+    # 专注追问限本身：守卫/模式读数用替身，消息原样放行
+    monkeypatch.setattr(ps, "terminal_reply_guard", lambda msg, **kw: msg)
+
+    decisions = iter(
+        [
+            {
+                "should_contact": True,
+                "message": f"{title}，后来怎么样了？",
+                "reason": "接住面试话题",
+                "wait_minutes": 0,
+                "next_topic": "",  # 不写计划 → 无计划路径
+                "next_intent": "",
+            },
+            {
+                "should_contact": True,
+                "message": f"{title}，结果到底出来没有？",
+                "reason": "再问一次",
+                "wait_minutes": 0,
+                "next_topic": "",
+                "next_intent": "",
+            },
+        ]
+    )
+
+    def _decide(llm, ctx):
+        # 覆写 _make_sched 的默认决策替身时必须保留记账——否则 calls 恒空，
+        # 「无计划路径的判定在决策之后」这一断言失去观测点。
+        calls.append({"ctx": ctx})
+        return dict(next(decisions))
+
+    monkeypatch.setattr(lp, "decide_proactive", _decide)
+
+    deliveries: list[str] = []
+
+    def _deliver_ok(message, session_key=None, character_id=None, **kw):
+        deliveries.append(message)
+        return True
+
+    sched._deliver = _deliver_ok
+
+    # 第 1 拍：无计划首问 → 放行投递并记账（followup_count 0→1）
+    sched._llm_proactive_one_user(hub, KEY)
+    assert len(deliveries) == 1, "无计划路径首问必须正常投递"
+    assert int(_raw_topic()["followup_count"]) == 1, "首问投递成功必须记账"
+
+    # 第 2 拍：同话题第 2 次追问（换说法）→ 投递前拦截 + skip 账本
+    sched._llm_proactive_one_user(hub, KEY)
+    assert len(calls) == 2, "无计划路径的判定在决策之后（键来自决策输出/正文锚点）"
+    assert len(deliveries) == 1, "同话题第 2 次追问不得投递"
+    assert "topic_followup_limit" in [e.get("reason") for e in ledger]
+    assert int(_raw_topic()["followup_count"]) == 1, "被拦的追问不记账"
+
+
+def test_planless_followup_on_new_topic_is_allowed(topic_env, monkeypatch):
+    """M11 反向边界：被拦后模型改聊**另一个**话题 → 不得误杀。"""
+    import proactive.llm_proactive as lp
+    import utils.prompt_sanitize as ps
+
+    title = _create_topic()
+    ts.note_topic_followup(KEY, CHAR, title, now=BASE_UTC)  # 该话题已问过 1 次
+    sched, hub, calls, _ledger = _make_sched(monkeypatch)
+    monkeypatch.setattr(
+        "proactive.scheduler.read_reply_mode", lambda *a, **k: "immersive"
+    )
+    monkeypatch.setattr(ps, "terminal_reply_guard", lambda msg, **kw: msg)
+    def _decide(llm, ctx):
+        # 覆写默认决策替身时保留记账（同 test_planless_second_followup）。
+        calls.append({"ctx": ctx})
+        return {
+            "should_contact": True,
+            "message": "对了，你上次说的那家火锅店叫什么来着？",
+            "reason": "换话题",
+            "wait_minutes": 0,
+            "next_topic": "",
+            "next_intent": "",
+        }
+
+    monkeypatch.setattr(lp, "decide_proactive", _decide)
+    sched._llm_proactive_one_user(hub, KEY)
+    assert len(calls) == 1, "不同话题的主动消息不被同话题追问限误杀"

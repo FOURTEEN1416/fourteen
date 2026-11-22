@@ -18,7 +18,16 @@
 
     python scripts/migrate_time_columns_to_utc.py --dry-run
     python scripts/migrate_time_columns_to_utc.py --apply
+    python scripts/migrate_time_columns_to_utc.py --allow-non-beijing-host --apply
     python scripts/migrate_time_columns_to_utc.py --rollback data/backups/time_caliber_xxx
+
+宿主时区前提（2026-11-22 L9 修复）：逐列 ``-8h`` 的前提是**旧值=北京墙钟
+（UTC+8）**。旧写侧是宿主 ``datetime.now()``（无时区保证）——若产生这些
+存量行的宿主不在 UTC+8，``-8h`` 会系统性多减，且幂等标记会阻止事后纠正。
+故 ``--apply`` 前校验宿主 UTC 偏移：非 ``+08:00`` 默认**拒绝执行**；确认
+存量值确为北京墙钟（例如库从 +8 宿主整体迁移而来）时，显式加
+``--allow-non-beijing-host`` 覆盖。``--dry-run`` 报告会写明该假设与当前
+宿主偏移。
 
 安全保证（两阶段：先全部备份，后逐库 apply，失败按备份恢复）：
 - ``--dry-run`` 默认模式，不写库、不建备份；
@@ -55,7 +64,42 @@ MIGRATION_NAME = "time_caliber_utc_v1"
 _UTC8_SHIFT = timedelta(hours=8)
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
 
-#: ``data/sqlite.db`` 中按北京墙钟写入的列（逐表 -8h）。
+#: 北京墙钟的 UTC 偏移（分钟）。逐列 -8h 的前提是旧值=北京墙钟，
+#: 见 :func:`ensure_beijing_wall_clock_host`。
+_BEIJING_OFFSET_MINUTES = 8 * 60
+
+
+def host_utc_offset_minutes() -> int:
+    """宿主当前 UTC 偏移（分钟，含夏令时）。
+
+    用 ``datetime.now().astimezone()`` 取本地 aware 时间的偏移——Windows 无
+    ``time.tzset``，该写法跨平台一致且随 DST 自动正确。
+    """
+    return int(datetime.now().astimezone().utcoffset().total_seconds() // 60)
+
+
+def ensure_beijing_wall_clock_host(
+    offset_minutes: int, *, allow_override: bool = False
+) -> None:
+    """``--apply`` 前置校验：宿主非 UTC+8 时拒绝执行（2026-11-22 L9）。
+
+    旧写侧 ``datetime.now()`` 落的是**宿主墙钟**（无时区保证）；本脚本按
+    北京墙钟解释并统一 -8h。宿主不在 UTC+8 时该假设不成立——再减 8h 会
+    系统性多减，且幂等标记会阻止事后纠正。确认存量值确为北京墙钟（如库
+    从 +8 宿主整体迁来）时，显式 ``allow_override=True``（CLI 对应
+    ``--allow-non-beijing-host``）放行。
+    """
+    if offset_minutes == _BEIJING_OFFSET_MINUTES or allow_override:
+        return
+    raise RuntimeError(
+        f"宿主时区非 UTC+8（当前 UTC 偏移 {offset_minutes} 分钟），"
+        "逐列 -8h 的「旧值=北京墙钟」假设可能不成立；如确认存量值确为"
+        "北京墙钟，请显式加 --allow-non-beijing-host 重试"
+    )
+
+
+#: ``data/sqlite.db`` 中按北京墙钟写入的列（逐表 -8h；前提=宿主 UTC+8，
+#: 非 +8 宿主必须先过 :func:`ensure_beijing_wall_clock_host`）。
 SQLITE_TABLE_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("topic_state", ("last_recalled_at", "last_active_at", "created_at", "updated_at", "expires_at")),
     # 遗留表：v1.72 迁移前的 topic_plan（部分存量库仍可能保留，存在才迁移）。
@@ -146,6 +190,7 @@ def ensure_applied(
     sqlite_db: Path | None = None,
     agent_plane_db: Path | None = None,
     backup_root: Path | None = None,
+    allow_non_beijing_host: bool = False,
 ) -> dict[str, Any]:
     """启动期接线：未迁移则加锁执行一次；已迁移/空库直接返回。"""
     sqlite_db = Path(sqlite_db) if sqlite_db else Path(project_path("data", "sqlite.db"))
@@ -164,7 +209,12 @@ def ensure_applied(
     with _migration_lock():
         if _markers_present(sqlite_db) and _markers_present(agent_plane_db):
             return {"status": "already_applied"}
-        result = apply_with_backup(sqlite_db, agent_plane_db, backup_root)
+        result = apply_with_backup(
+            sqlite_db,
+            agent_plane_db,
+            backup_root,
+            allow_non_beijing_host=allow_non_beijing_host,
+        )
         return {"status": "applied", **result}
 
 
@@ -547,8 +597,17 @@ def apply_with_backup(
     sqlite_db: Path,
     agent_plane_db: Path,
     backup_root: Path,
+    *,
+    allow_non_beijing_host: bool = False,
 ) -> dict[str, Any]:
-    """备份两库 → 迁移两库 → 写 manifest/rollback.py。"""
+    """备份两库 → 迁移两库 → 写 manifest/rollback.py。
+
+    非 UTC+8 宿主默认拒绝（L9）：校验在任何备份/写库动作**之前**，拒绝时
+    不留备份目录、不改库。
+    """
+    ensure_beijing_wall_clock_host(
+        host_utc_offset_minutes(), allow_override=allow_non_beijing_host
+    )
     stamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
     backup_dir = backup_root / f"time_caliber_{stamp}"
     backup_dir.mkdir(parents=True, exist_ok=False)
@@ -609,6 +668,12 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--dry-run", action="store_true", help="只预览，不写库（默认）")
     mode.add_argument("--apply", action="store_true", help="备份后执行迁移")
     mode.add_argument("--rollback", metavar="BACKUP_DIR", help="从备份目录恢复")
+    parser.add_argument(
+        "--allow-non-beijing-host",
+        action="store_true",
+        help="宿主时区非 UTC+8 时仍强制执行（仅当确认存量旧值确为北京墙钟，"
+        "例如库从 +8 宿主整体迁移而来）",
+    )
     args = parser.parse_args(argv)
 
     sqlite_db = Path(project_path("data", "sqlite.db"))
@@ -624,16 +689,33 @@ def main(argv: list[str] | None = None) -> int:
     if dry_run:
         sqlite_result = migrate_sqlite_db(sqlite_db, dry_run=True)
         plane_result = migrate_agent_plane_db(agent_plane_db, dry_run=True)
+        # L9：dry-run 报告必须写明 -8h 的「旧值=北京墙钟」假设与宿主当前偏移，
+        # 让执行者在 --apply 前能发现宿主时区不符的情形。
         print(
             json.dumps(
-                {"status": "dry_run", "sqlite": sqlite_result, "agent_plane": plane_result},
+                {
+                    "status": "dry_run",
+                    "assumption": (
+                        "存量 naive 值按北京墙钟（UTC+8）解释、逐列 -8h；"
+                        "旧写侧为宿主 datetime.now()，宿主非 UTC+8 时该假设"
+                        "不成立，--apply 会被拒绝（可 --allow-non-beijing-host 显式覆盖）"
+                    ),
+                    "host_utc_offset_minutes": host_utc_offset_minutes(),
+                    "sqlite": sqlite_result,
+                    "agent_plane": plane_result,
+                },
                 ensure_ascii=False,
                 indent=2,
             )
         )
         return 0
 
-    result = ensure_applied(sqlite_db, agent_plane_db, backup_root)
+    result = ensure_applied(
+        sqlite_db,
+        agent_plane_db,
+        backup_root,
+        allow_non_beijing_host=args.allow_non_beijing_host,
+    )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

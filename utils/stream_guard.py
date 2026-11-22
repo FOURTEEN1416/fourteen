@@ -376,7 +376,16 @@ class IncrementalReplyGuard:
         if not fragment:
             return []
         at_line_start = self._at_line_start
-        self._advance_line_state(fragment)
+        # 2026-11-22 M6：先取「本片段是否属于首逻辑行」，再推进行状态。
+        # 首行以裸换行收尾时（如「想你了\n」整行成段），换行是首行的**结尾**，
+        # 不是「已进入第二行」——若见换行即关首行闸（旧行状态推进先于回声闸），
+        # 首行回声闸对本片段被跳过，批式能剥的回声行在真流式下原样放行给用户
+        # （生产 config chat.stream_mode: true）。先捕获再翻转，本片段仍按
+        # 首行判回声；后续片段才关闭。
+        is_first_line = self._first_line_open
+        self._at_line_start = bool(fragment.endswith("\n"))
+        if "\n" in fragment:
+            self._first_line_open = False
         # 各 ``_strip_*`` 真源都在整串上工作并 ``.strip()``；增量下片段被单独
         # 处理，**行尾换行是结构性信息**（行首规则与落库文本都依赖它），必须
         # 原样补回，否则「我吃过了\n你也记得吃饭」会被粘成一行。
@@ -430,16 +439,17 @@ class IncrementalReplyGuard:
         _guard_log("format_noise", before, s)
         if not s.strip():
             return []
-        # ④ 相对时间词（带左邻上下文，兼容「好/巧/强/毅」负向断言）
-        if self._time_gate:
-            s = self._recalibrate_with_left_context(s)
-        # ⑤ 首行逐字复述
-        if self._first_line_open:
+        # ④ 首行逐字复述（M8 同序：先于时间词改写——>45min「刚刚→之前」
+        # 会破坏与 user_msg 的逐字等值判定，含时间词的复述会换词漏网）
+        if is_first_line:
             before = s
             s = _strip_verbatim_echo(s, self.user_msg)
             _guard_log("verbatim_echo", before, s)
             if not s.strip():
                 return []
+        # ⑤ 相对时间词（带左邻上下文，兼容「好/巧/强/毅」负向断言）
+        if self._time_gate:
+            s = self._recalibrate_with_left_context(s)
         # ⑥ 元记忆解释 / 零信息问卷（句级删）
         before = s
         s = _strip_meta_memory_talk(s)
@@ -520,12 +530,6 @@ class IncrementalReplyGuard:
         return [s]
 
     # ── 内部辅助 ──
-    def _advance_line_state(self, text: str) -> None:
-        if text:
-            self._at_line_start = text.endswith("\n")
-            if "\n" in text:
-                self._first_line_open = False
-
     def _recalibrate_with_left_context(self, text: str) -> str:
         """时间词降级带左邻上下文：``_recalibrate_time_words`` 幂等，故用
         「已发文本 + 本片段」整体改写后取尾段，保证 ``(?<![好巧强毅])刚`` 的

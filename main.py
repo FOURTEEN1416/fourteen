@@ -176,15 +176,73 @@ def load_fusion_config(config_dir: str) -> dict[str, Any]:
     return {}
 
 
+def _resolve_console_wechat_owner() -> int | None:
+    """解析控制台微信模式的通道归属人（D16：谁扫码谁聊，必须绑定合法 owner）。
+
+    优先级：环境变量 ``WECHAT_CONSOLE_OWNER_ID`` > users 表首个用户（按 id 升序）。
+    找不到任何合法 owner 时返回 None，由调用方给出明确引导后退出。
+    """
+    env_val = (os.environ.get("WECHAT_CONSOLE_OWNER_ID") or "").strip()
+    if env_val:
+        try:
+            return int(env_val)
+        except ValueError:
+            logger.warning(
+                "WECHAT_CONSOLE_OWNER_ID=%r 不是合法整数，回落为查询 users 表首个用户",
+                env_val,
+            )
+
+    from api.database import User
+
+    async def _first_user_id() -> int | None:
+        async with _async_session() as session:
+            result = await session.execute(select(User.id).order_by(User.id).limit(1))
+            return result.scalar_one_or_none()
+
+    try:
+        return asyncio.run(_first_user_id())
+    except Exception as e:  # noqa: BLE001
+        logger.warning("查询 users 表首个用户失败: %s", e)
+        return None
+
+
 def run_wechat_mode(user_manager, wechat_connector_holder: dict | None = None) -> None:
-    from wechat_direct import WeChatConnector
+    from wechat_direct import WeChatConnector, channel_paths
 
     print("\n📱 微信模式启动中（多用户版）...")
     print("   请用微信扫码登录，多个好友可与同一 bot 聊天")
     print("   每个用户有独立情感/记忆/角色")
     print("   或按 Ctrl+C 退出\n")
 
-    connector = WeChatConnector(user_manager)
+    # 🔴 H4（2026-11-22 修复）：D16 fail-closed 后 ``WeChatConnector(None)``
+    # 构造即抛 ValueError，控制台微信模式登录链断裂。这里以合法 owner
+    # （env 指定 > users 表首个用户）+ per-user 通道路径构造连接器；
+    # 无任何 owner 时给出明确引导后退出，绝不静默崩溃。
+    owner_user_id = _resolve_console_wechat_owner()
+    if owner_user_id is None:
+        print("❌ 控制台微信模式需要至少一个注册用户作为通道归属人（D16：谁扫码谁聊）。")
+        print("   请先在网页端注册账号，或设置环境变量 WECHAT_CONSOLE_OWNER_ID=<用户ID> 后重试。")
+        logger.error("控制台微信模式启动失败：无可绑定用户（owner 未解析）")
+        return
+
+    slot = 0
+    channel_paths.ensure_session_dir(owner_user_id, slot)
+    connector = WeChatConnector(
+        user_manager,
+        owner_user_id=owner_user_id,
+        slot=slot,
+        session_dir=channel_paths.session_dir(owner_user_id, slot),
+        credentials_path=str(channel_paths.credentials_path(owner_user_id, slot)),
+        state_path=str(channel_paths.state_path(owner_user_id, slot)),
+        qrcode_path=str(channel_paths.qrcode_path(owner_user_id, slot)),
+        context_tokens_path=str(channel_paths.context_tokens_path(owner_user_id, slot)),
+    )
+    # 控制台本就是交互式终端：显式允许扫码出码。网页侧唯一交互入口是
+    # start_login()；这里是命令行等价入口——不置 True 的话无凭证时
+    # login(interactive=False) 直接失败并进入 needs_reauth 终态，二维码
+    # 永远不会出现（H4 的第二处断裂）。
+    connector.allow_interactive_login = True
+    print(f"   通道归属用户：{owner_user_id}（可用环境变量 WECHAT_CONSOLE_OWNER_ID 指定）")
 
     # 注入 connector 到 holder，供主动消息调度器使用
     # 必须在 connector.run() 之前注入，这样调度器的健康检查能在登录后自动拾取

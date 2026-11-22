@@ -10,6 +10,12 @@ prompt 只有碎片 user_facts + 空的 user_persona(default)，模型只能编�
 用户裁决「逐行进行修正」：自述名保留、对 AI 的称呼迁入 user_calls_ai、
 无法判别保守保留并记待复核日志；迁移前全表备份，见 `_ensure_schema` 的
 幂等迁移 `_migrate_nickname_semantics`。
+
+2026-11-22 对抗验收修正（M13/L4）：裸亲属/爱称（老公/姐姐/宝贝等）两条
+历史写入路径（旧「叫我X」与「叫你X」）都可能产生，方向逐行不可判，裸词
+命中一律按 ambiguous 保守保留 + 待复核，只有显式「叫你X/喊你X」语境才判
+ai_address 迁移；判别前套用与写侧一致的 _NAME_STOP/动作补语过滤，动作
+整句（叫你吃饭等）不再误判方向。
 """
 
 from __future__ import annotations
@@ -42,9 +48,11 @@ _NAME_PATTERNS = [
 _USER_CALLS_AI_PATTERNS = [
     re.compile(r"(?:以后|今后|就)?\s*(?:叫你|喊你)\s*([一-龥A-Za-z]{1,4})\s*[吧啊呀呢~～!！。]*$"),
 ]
-# 「用户对 AI 的称呼」词表（2026-11-21 逐行迁移判别用）：历史 nickname 中
-# 出现这些词，实为用户对 AI 的称呼（生产实证老公/姐姐/哥哥等），迁移时搬入
-# user_calls_ai 并清空 nickname。保守小集合，可按待复核日志扩删。
+# 「用户对 AI 的称呼」候选词表（2026-11-21 逐行迁移判别用）。2026-11-22
+# 修正（M13）：这些**裸词**本身方向不可判——旧「叫我X」写入路径同样会产生
+# 该存储值（如「叫我姐姐」→ nickname=姐姐，是用户自述称呼），裸词命中一律
+# 按 ambiguous 保守保留 + 待复核；只有显式「叫你X/喊你X」语境才判 ai_address
+# 迁移。保守小集合，可按待复核日志扩删。
 _AI_ADDRESS_TERMS = frozenset({
     "老公", "老婆", "姐姐", "哥哥", "弟弟", "妹妹",
     "宝贝", "亲爱的", "老板", "大人", "小哥哥", "小姐姐",
@@ -59,28 +67,98 @@ _NAME_STOP = {
 }
 
 
+def _clean_address_name(name: str) -> bool:
+    """干净称呼名过滤（2026-11-22 L4：与写侧 ``apply_user_utterance`` 同源）。
+
+    动作补语（吃饭/起床/睡觉等）、代词（你/您/我）、「的」字尾、否定/疑问
+    词一律不作称呼名。判别侧在写侧精确匹配之上按**子串**复查（捕获名如
+    「你宝贝」「写作业」「过来一下」同样拒绝）——判别侧宁可多拒落入
+    ambiguous 保守保留，不可把动作句当成称呼。
+    """
+    token = str(name or "").strip()
+    if not token or token in _NAME_STOP:
+        return False
+    if "的" in token or "我" in token:
+        return False
+    if any(x in token for x in _NAME_STOP):
+        return False
+    return 1 <= len(token) <= 4
+
+
+def _first_clean_name(nick: str, patterns) -> bool:
+    """句式命中**且**捕获名通过写侧同款过滤才返回 True。"""
+    for pat in patterns:
+        m = pat.search(nick)
+        if m and _clean_address_name(m.group(1)):
+            return True
+    return False
+
+
+def _extract_clean_address(nick: str) -> str:
+    """从「叫你X/喊你X」存量短语中取干净称呼名（「叫你老公」→「老公」）。
+
+    迁移搬移时用：避免「叫你」动词残留在 user_calls_ai 槽里。取不出返回空串。
+    """
+    for pat in _USER_CALLS_AI_PATTERNS:
+        m = pat.search(str(nick or ""))
+        if m and _clean_address_name(m.group(1)):
+            return m.group(1).strip()
+    return ""
+
+
+def _resolve_denied_names(user_key: str) -> list[str]:
+    """store 渲染路径的否认名取数（2026-11-22 L5 接线）。
+
+    唯一真源 = ``shisi.agent_plane.runtime.denied_names_for``（双源：窗口
+    检测 + ledger 持久否决），与主链 ``get_profile_prompt_block`` 同源；
+    懒加载避免 import 环，异常一律降级为空表（渲染不因账本故障被阻断，
+    与 ``utils.address_terms._denied_names`` 同一容错口径）。
+    """
+    try:
+        from shisi.agent_plane.runtime import denied_names_for
+
+        return [
+            str(x).strip()
+            for x in denied_names_for(str(user_key or ""))
+            if str(x or "").strip()
+        ]
+    except Exception as e:  # noqa: BLE001
+        logger.debug("store 渲染路径否认名解析失败（按无否认处理）: %s", e)
+        return []
+
+
 def classify_legacy_nickname(nickname: str) -> str:
     """存量 nickname 逐行判别（2026-11-21 用户裁决「逐行进行修正」）。
 
     返回：
-    - ``"self"``：匹配自述模式（我叫X/我是X/叫我X/名字叫X 等）→ 用户自述
-      名，保留在 nickname（不清空、不搬移）；
-    - ``"ai_address"``：对 AI 的称呼（叫你X/喊你X，或老公/姐姐/哥哥等词表）
-      → 迁入 user_calls_ai 并清空 nickname；
-    - ``"ambiguous"``：无法判别（裸名等，历史写入两条路径都可能产生）→
-      保守保留原状，记入待复核日志。
+    - ``"self"``：匹配自述模式（我叫X/我是X/叫我X/名字叫X 等）且捕获名干净
+      → 用户自述名，保留在 nickname（不清空、不搬移）；
+    - ``"ai_address"``：显式「叫你X/喊你X」语境且称呼名干净 → 迁入
+      user_calls_ai 并清空 nickname；
+    - ``"ambiguous"``：无法判别 → 保守保留原状，记入待复核日志。命中情形：
+      裸名；**裸亲属/爱称词表词**（2026-11-22 M13：旧「叫我X」写入路径同样
+      会产生该存储值，方向逐行不可判）；「叫你 + 动作补语」整句（2026-11-22
+      L4：与写侧过滤对齐）；「我叫你X」双信号冲突句。
     """
     nick = str(nickname or "").strip()
     if not nick:
         return "ambiguous"
-    for pat in _NAME_PATTERNS:
-        if pat.search(nick):
-            return "self"
-    for pat in _USER_CALLS_AI_PATTERNS:
-        if pat.search(nick):
-            return "ai_address"
+    self_hit = any(pat.search(nick) for pat in _NAME_PATTERNS)
+    ai_hit = any(pat.search(nick) for pat in _USER_CALLS_AI_PATTERNS)
+    if self_hit and ai_hit:
+        # 「我叫你宝贝」类：同时命中自述与称呼两条句式，方向信号冲突
+        return "ambiguous"
+    if self_hit:
+        return "self" if _first_clean_name(nick, _NAME_PATTERNS) else "ambiguous"
+    if ai_hit:
+        return (
+            "ai_address"
+            if _first_clean_name(nick, _USER_CALLS_AI_PATTERNS)
+            else "ambiguous"
+        )
     if nick in _AI_ADDRESS_TERMS:
-        return "ai_address"
+        # 裸亲属/爱称：两条历史写入路径都可能产生，方向不可判（M13）
+        return "ambiguous"
     return "ambiguous"
 
 
@@ -209,11 +287,14 @@ class UserProfileStore:
                 if str(user_calls_ai or "").strip():
                     review.append(f"{user_key}:{nick}(user_calls_ai 已有值)")
                     continue
+                # 迁移值为「叫你X」短语时取干净称呼名（「叫你老公」→「老公」），
+                # 避免「叫你」动词残留在称呼槽里（2026-11-22 M13 连带修正）。
+                addr = _extract_clean_address(nick) or nick
                 if not dry_run:
                     conn.execute(
                         "UPDATE user_profile SET user_calls_ai = ?, nickname = '' "
                         "WHERE user_key = ?",
-                        (nick, user_key),
+                        (addr, user_key),
                     )
                 migrated.append(f"{user_key}:{nick}")
                 continue
@@ -446,21 +527,50 @@ class UserProfileStore:
             return self.get(uk)
         return self.upsert(uk, **updates)
 
-    def to_prompt_block(self, user_key: str) -> str:
-        """渲染「# 用户画像」注入段；无内容返回空串。"""
+    def to_prompt_block(
+        self,
+        user_key: str,
+        denied_names: list[str] | set[str] | frozenset[str] | None = None,
+    ) -> str:
+        """渲染「# 用户画像」注入段；无内容返回空串。
+
+        denied_names（2026-11-22 L5，对齐 ``format_profile_prompt_block``
+        的读侧纵深）：被用户否认过的称呼即使仍留在库里，也不得渲染成
+        「用户希望被称呼」进入提示词；同时做语义版本筛查——semantics < 2
+        且已有 user_calls_ai 时 nickname 视为历史污染值不展示。
+
+        缺省（None）**自动**经 ``runtime.denied_names_for`` 取双源否认名
+        （窗口检测 + ledger 持久否决），与主链 ``get_profile_prompt_block``
+        同源——生产 store 渲染路径（ase_engine 主动生成 / persona_service
+        legacy 回退）不依赖调用方记得传参，杜绝「否认称呼经 store 路径重回
+        提示词」。显式传 ``[]`` 表示调用方确认无否认、跳过筛查；取数失败
+        按空集降级，不阻塞渲染。
+        """
         p = self.get(user_key)
         if not p:
             return ""
+        if denied_names is None:
+            denied_names = _resolve_denied_names(user_key)
+        denied = {str(x).strip() for x in (denied_names or ()) if str(x or "").strip()}
+        nick = str(p.get("nickname") or "").strip()
+        ai_name = str(p.get("user_calls_ai") or "").strip()
+        try:
+            semantics = int(p.get("_address_semantics") or p.get("address_semantics") or 0)
+        except (TypeError, ValueError):
+            semantics = 0
+        # 与 runtime.format_profile_prompt_block 同判据：否认名 / 旧语义污染
+        # nickname 一律不作为「用户希望被称呼」展示（L5 双渲染器行为一致）。
+        nick_visible = bool(
+            nick and nick not in denied and not (semantics < 2 and ai_name)
+        )
         lines: list[str] = ["# 用户画像（稳定事实，以本段为准；段外信息禁止编造）"]
         # 2026-11-07 P8：用户自述优先于模型推测字段
         if p.get("self_intro"):
             lines.append(f"- 用户自述（本人填写，优先采信）：{p['self_intro']}")
-        if p.get("user_calls_ai"):
-            lines.append(f"- 用户对 AI 的称呼：{p['user_calls_ai']}")
-        # 只有语义升级后的 nickname 才能作为「用户希望被称呼」展示；旧库
-        # 未升级行已在 _ensure_schema 迁移为 user_calls_ai + 清空 nickname。
-        if p.get("nickname"):
-            lines.append(f"- 用户希望被称呼：{p['nickname']}")
+        if ai_name:
+            lines.append(f"- 用户对 AI 的称呼：{ai_name}")
+        if nick_visible:
+            lines.append(f"- 用户希望被称呼：{nick}")
         if p.get("birthday"):
             lines.append(f"- 生日：{p['birthday']}")
         if p.get("occupation"):

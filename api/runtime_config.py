@@ -9,12 +9,20 @@
   AI_GF_ENV  >  APP_ENV  >  ENV
 
 生产标记值：prod / production
+
+2026-11-22 L8 修复：环境判定逻辑**下沉**到 :mod:`utils.runtime_env`
+（只依赖标准库，供 time_caliber 等底层工具免拉起 api 重链复用）；
+本模块 re-export 保持对外 API 与语义不变。
 """
 
 from __future__ import annotations
 
 import os
 import re
+
+# 环境判定唯一实现见 utils.runtime_env；此处 re-export（is_production /
+# is_explicit_dev 的语义文档亦随迁）。
+from utils.runtime_env import is_explicit_dev, is_production
 
 __all__ = [
     "is_production",
@@ -52,12 +60,6 @@ def resolve_api_key_enabled() -> bool:
     return is_production()
 
 
-# ── 生产环境标记值 ──────────────────────────────────────
-
-_PROD_MARKERS = frozenset({"prod", "production"})
-# 显式开发环境标记（仅这些值允许不安全默认值）
-_DEV_MARKERS = frozenset({"dev", "development"})
-
 # 公开模板/弱默认 API Key —— 生产或启用认证的非 dev 路径必须拒绝
 # （.env.example 历史占位 + 现行占位 + 常见弱值）
 PLACEHOLDER_API_KEY = "CHANGE_ME_TO_STRONG_RANDOM_KEY_32_CHARS_MIN"
@@ -74,38 +76,6 @@ UNSAFE_API_KEYS = frozenset({
     PLACEHOLDER_API_KEY,
     "REPLACE_ME_WITH_RANDOM_32_PLUS_CHAR_SECRET",
 })
-
-
-def is_production() -> bool:
-    """判断当前运行环境是否为生产环境。
-
-    检测顺序（任一命中即返回 True）：
-    1. AI_GF_ENV  — 项目专用环境变量（最高优先级）
-    2. APP_ENV    — 通用应用环境变量
-    3. ENV        — 兼容旧版 / 通用 ENV 变量
-    """
-    for var in ("AI_GF_ENV", "APP_ENV", "ENV"):
-        val = os.environ.get(var, "").strip().lower()
-        if val in _PROD_MARKERS:
-            return True
-    return False
-
-
-def is_explicit_dev() -> bool:
-    """仅当 AI_GF_ENV/APP_ENV/ENV **显式** 为 dev/development 时返回 True。
-
-    - 生产标记优先：任一变量为 prod/production → False（即使另一变量写 dev）
-    - 变量缺失 / test / staging / 任意未知值 → False（fail-closed，不落入 dev 兜底）
-
-    用途：JWT DEV 密钥、占位 API_KEY 等不安全默认值只允许出现在显式 dev。
-    """
-    if is_production():
-        return False
-    for var in ("AI_GF_ENV", "APP_ENV", "ENV"):
-        val = os.environ.get(var, "").strip().lower()
-        if val in _DEV_MARKERS:
-            return True
-    return False
 
 
 # ── 数据库 URL 解析 ──────────────────────────────────────

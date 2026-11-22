@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -45,6 +46,51 @@ def test_memory_curator_cron_env_override(raw, expect, monkeypatch):
 
     monkeypatch.setenv("AI_GF_MEMORY_CURATOR_AT", raw)
     assert _memory_curator_cron() == expect
+
+
+# ═══════════════════════════════════════════════════════════
+# 1b. 夜间 cron 同分钟撞车检测（2026-11-22 L10）
+# ═══════════════════════════════════════════════════════════
+
+
+def test_curator_colliding_minute_auto_staggers_with_warning(monkeypatch, caplog):
+    """L10：配置与 daily_maintenance(00:05) 同分钟 → 自动错峰 + WARNING。"""
+    from proactive.scheduler import _FIXED_NIGHT_CRONS, _resolve_memory_curator_cron
+
+    monkeypatch.setenv("AI_GF_MEMORY_CURATOR_AT", "00:05")
+    with caplog.at_level(logging.WARNING, logger="scheduler"):
+        hour, minute = _resolve_memory_curator_cron()
+    assert (hour, minute) != (0, 5), "不得与 daily_maintenance 同分钟触发"
+    assert (hour, minute) not in set(_FIXED_NIGHT_CRONS.values()), (
+        "错峰后也不得撞上任何已登记夜间 cron"
+    )
+    assert any("同分钟" in r.message for r in caplog.records), (
+        "显式配置被改写必须 WARNING 留痕"
+    )
+
+
+def test_curator_non_colliding_minute_untouched(monkeypatch):
+    """无撞车时配置时刻原样生效（不引入无谓改写）。"""
+    from proactive.scheduler import _resolve_memory_curator_cron
+
+    monkeypatch.setenv("AI_GF_MEMORY_CURATOR_AT", "03:40")
+    assert _resolve_memory_curator_cron() == (3, 40)
+    monkeypatch.setenv("AI_GF_MEMORY_CURATOR_AT", "05:30")
+    assert _resolve_memory_curator_cron() == (5, 30)
+
+
+def test_curator_stagger_wraps_and_avoids_second_collision(monkeypatch):
+    """错峰跨日 wrap + 连续避让：23:58 撞注入的夜间任务 → +7 到 00:05
+    再撞 daily_maintenance → 再 +7 到 00:12（覆盖模 1440 回绕分支）。"""
+    from proactive import scheduler as sched_mod
+
+    monkeypatch.setattr(
+        sched_mod,
+        "_FIXED_NIGHT_CRONS",
+        {"daily_maintenance": (0, 5), "nightly_injected": (23, 58)},
+    )
+    monkeypatch.setenv("AI_GF_MEMORY_CURATOR_AT", "23:58")
+    assert sched_mod._resolve_memory_curator_cron() == (0, 12)
 
 
 # ═══════════════════════════════════════════════════════════

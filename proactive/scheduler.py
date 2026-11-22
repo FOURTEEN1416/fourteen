@@ -118,6 +118,13 @@ _DELIVER_CIRCUIT_MAX_MINUTES = 360
 _CIRCUIT_DISABLED = {"0", "false", "off", "no"}
 _TARGET_GATE_DISABLED = {"0", "false", "off", "no"}
 
+# ── 主动线治理批（2026-11-22 L11）─────────────────────────
+#: ``_deliver`` 的内容质量拦截类 outcome（per-session 镜像值）。这些是
+#: 「草稿被守卫/judge 拒绝」，通道本身可能是好的——**不计入**投递熔断
+#: 阶梯（连续 5 次守卫拦截就开 30 分钟熔断会把好线路误判成死线路），
+#: 由调用方单独记账（reason 直接用 outcome 值，如 ``guard_intercepted``）。
+_CONTENT_REJECT_OUTCOMES = frozenset({"guard_intercepted", "judge_rejected"})
+
 
 def _deliver_circuit_enabled() -> bool:
     """熔断开关（env ``PROACTIVE_DELIVER_CIRCUIT=0`` 一行回滚）。"""
@@ -154,6 +161,46 @@ def _memory_curator_cron() -> tuple[int, int]:
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         return 3, 40
     return hour, minute
+
+
+#: 固定时刻的夜间 cron（北京墙钟）。🔴 新增固定夜间任务时必须登记到这里，
+#: 供 memory_curator 的同分钟撞车检测使用（L10，2026-11-22）。
+_FIXED_NIGHT_CRONS: dict[str, tuple[int, int]] = {
+    "daily_maintenance": (0, 5),   # 每日维护
+    "daily_reset": (0, 0),         # 每日重置
+}
+
+#: 撞车自动错峰步长（分钟）：足以错开同分钟并发起点，又不把任务挪出夜间低谷。
+_NIGHT_CRON_STAGGER_STEP_MINUTES = 7
+
+
+def _resolve_memory_curator_cron() -> tuple[int, int]:
+    """memory_curator 的**最终**执行时刻：与既有夜间 cron 同分钟时自动错开
+    并 WARNING 留痕（L10，2026-11-22）。
+
+    取舍：不选「仅告警不挪」——同分钟叠加正是本批要治的「夜间 LLM 叠加
+    → 429」病灶，告警不改行为等于没修；也不静默挪——WARNING 写明
+    「配置值 → 实际值」，运维能在日志里看到显式配置被改写。按 7 分钟步长
+    循环避让，直到不与任何已登记夜间 cron 同分钟。
+    """
+    hour, minute = _memory_curator_cron()
+    occupied = dict(_FIXED_NIGHT_CRONS)
+    final = (hour, minute)
+    for _ in range(60):  # 步长 7 分钟，60 步覆盖全天；上限防意外死循环
+        if final not in occupied.values():
+            break
+        total = (
+            final[0] * 60 + final[1] + _NIGHT_CRON_STAGGER_STEP_MINUTES
+        ) % 1440
+        final = (total // 60, total % 60)
+    if final != (hour, minute):
+        hit = [name for name, hm in occupied.items() if hm == (hour, minute)]
+        logger.warning(
+            "memory_curator 配置时刻 %02d:%02d 与夜间任务(%s)同分钟，"
+            "自动错开到 %02d:%02d（夜间 LLM 叠加防护）",
+            hour, minute, ",".join(hit) or "unknown", final[0], final[1],
+        )
+    return final
 
 # 成就兜底重算的角色库目录。锚定项目根而非 CWD（从非仓库根启动时
 # CWD 相对路径会扫到空目录，导致成就兜底静默失效）；
@@ -296,6 +343,13 @@ class ProactiveScheduler:
         # 跨线程共享标量，今天就在竞争）。镜像不进 persist 快照（内存瞬态，
         # GIL 原子写足够），读侧 pop 即消费、miss 回落旧标量（旧替身契约）。
         self._last_deliver_errors: dict[str, str] = {}
+        # L11（2026-11-22）：_deliver 的结果标注 per-session 镜像（键 =
+        # str(session_key or "")）。值为 _CONTENT_REJECT_OUTCOMES 之一时，
+        # 决策线失败分支不计熔断阶梯、单独记账；"judge_unavailable"（judge
+        # 供应商故障）不在豁免面内，按投递失败计入退避/熔断阶梯。与
+        # _last_deliver_errors 同 A3 纪律：内存瞬态不落盘、_deliver 入口先清、
+        # 读侧 pop 即消费。
+        self._last_deliver_outcomes: dict[str, str] = {}
         # A4：`_deliver_fail_counts` 的盖章 sidecar（键集与 fail_counts 对应，
         # 计数自增时盖章）。本体**不做目标外驱逐**——P1-22 契约要求不可达
         # 用户的退避阶梯跨重启保留（test_p1_batch4_proactive_hub）；驱逐仅按
@@ -822,7 +876,10 @@ class ProactiveScheduler:
             # AX P2：夜间记忆 curator（默认 03:40，env 可覆盖；2026-11-21
             # 免费限流优化批——原 02:17 的批量 LLM 调用曾连续触发供应商
             # 429+120s 熔断，挪到流量更低的时段并降低与其他任务的叠加概率）
-            _curator_hour, _curator_minute = _memory_curator_cron()
+            # L10（2026-11-22）：注册前做同分钟撞车检测——env 把执行时刻配到
+            # 与 daily_maintenance(00:05) 等夜间 cron 同分钟时自动错峰 + WARNING，
+            # 防「夜间 LLM 叠加 → 429」复发。
+            _curator_hour, _curator_minute = _resolve_memory_curator_cron()
             self._scheduler.add_job(
                 self._safe_job_wrapper(self._run_memory_curator, "memory_curator"),
                 CronTrigger(hour=_curator_hour, minute=_curator_minute),
@@ -2953,6 +3010,43 @@ class ProactiveScheduler:
             self._persist_throttle_ledger()
             logger.info("proactive LLM duplicate_suppressed user=%s msg=%s", user_key, message[:40])
             return
+        # 2026-11-22 主动线治理批 M11：topic 级追问限补齐**无计划路径**。
+        # 计划驱动路径已在取计划处前置拦截（_plan_topic 非空时，决策 LLM 之前）；
+        # 决策不写 next_topic 计划时 _plan_topic 为空，旧实现既不判定也不记账，
+        # 同话题 3 连问要等账号级 4 连闸才停。这里用本轮**实际说出**的正文锚点
+        # 做键补同一道闸（topic_state 按标题精确归一/文本重叠匹配，模型换说法
+        # 复提同一话题也命中同一行）；不用 decision.next_topic 做键——那是
+        # 下一拍的计划，拿它记账会把下一拍尚未发出的计划消息误杀。判定在
+        # 投递之前（第 2 次同话题追问不再直达用户），记账在投递成功之后
+        # （用户没看到不消耗额度，与计划路径同口径）。
+        _effective_topic = _plan_topic or message.strip()
+        if not _plan_topic and _effective_topic:
+            _followup_ok = True
+            try:
+                _followup_ok = _thread_plan.followup_allowed(
+                    _effective_topic, now=now_utc
+                )
+            except Exception as _followup_err:  # noqa: BLE001
+                # fail-open：话题状态读失败不能拦主动线
+                logger.debug(
+                    "话题追问限判定失败（放行）user=%s: %s", user_key, _followup_err,
+                )
+                _followup_ok = True
+            if not _followup_ok:
+                try:
+                    self._emit_skip_event_daily(
+                        str(user_key), "topic_followup_limit", character_id=char_id,
+                    )
+                except Exception as _emit_err:  # noqa: BLE001
+                    logger.debug(
+                        "话题追问限 skip 落账失败（忽略）user=%s: %s",
+                        user_key, _emit_err,
+                    )
+                logger.info(
+                    "proactive 同话题未回复追问已达上限（无计划路径），跳过 user=%s",
+                    user_key,
+                )
+                return
         # 2026-10-27 Q3：把本轮决策用的最近对话摘要留给 post-draft judge
         # （投递时弹出；无摘要时 judge 只凭正文 + 时间判定）。
         try:
@@ -2987,9 +3081,13 @@ class ProactiveScheduler:
         # 三参定义 `_deliver`，无脑多传一个 kw 会把整片主动线测试打断。
         if bool(decision.get("voice")):
             _deliver_kwargs["voice"] = True
-        if self._deliver(
+        _delivered = self._deliver(
             message, session_key=user_key, character_id=char_id, **_deliver_kwargs,
-        ):
+        )
+        # L11（2026-11-22）：取走本次投递的结果标注——守卫剥空/judge 拒绝
+        # 属内容质量拦截，与通道故障分流（见下方失败分支）。
+        _deliver_outcome = self._pop_deliver_outcome(str(user_key))
+        if _delivered:
             # 影子账本（B-1，2026-11-11）：决策线投递成功即记；主动线无入站 id
             # → turn_id 恒空。**不挂 `_record_outbound`**：它在 memory 缺位时早退、
             # 且只在写历史成功分支被调，挂那里会静默丢事件。零行为：异常只 debug。
@@ -3065,8 +3163,11 @@ class ProactiveScheduler:
                 )
                 # 2026-11-21：本轮若消费的是一个同话题计划，说明这条主动消息
                 # 是「追问」；投递成功才记账（失败用户没看到，不能消耗额度）。
-                if _plan_topic:
-                    _thread.note_followup(_plan_topic, now=now_utc)
+                # 2026-11-22 M11：无计划路径同样记账——键取本轮正文锚点
+                # （_effective_topic，见上方判定处），同话题换说法复提也命中
+                # 同一行；用户任何一轮发言会在 update_after_turn 里清零。
+                if _effective_topic:
+                    _thread.note_followup(_effective_topic, now=now_utc)
             except Exception as _plan_err:  # noqa: BLE001
                 logger.debug("消费/保存计划失败（忽略）user=%s: %s", user_key, _plan_err)
             # 复提记账（2026-11-07 对抗验收残余缺口②）：本轮决策注入了 parked
@@ -3111,6 +3212,27 @@ class ProactiveScheduler:
                 # 块E：成功送达清零退避/熔断（仅当确实有存量时落盘）
                 self._persist_throttle_ledger()
         else:
+            # L11（2026-11-22）：内容质量拦截（守卫剥空/judge 内容拒绝）不是
+            # 通道故障——不计入熔断阶梯（否则连续 5 次守卫拦截即开 30 分钟起
+            # 翻倍的投递熔断，把好线路误判成死线路），单独记账让运维能分辨
+            # 「线路死」与「内容被拦」。计划不消费（与投递失败同口径，
+            # 保留到 TTL），也不动退避/熔断账本。
+            # 复核新发现（2026-11-22）：judge_unavailable（judge 供应商故障）
+            # 刻意**不**进本豁免面——它属通道侧不可用，落入下方 P1-22 退避
+            # 阶梯（否则 judge 挂掉期间零投递且无熔断兜底，白烧决策 LLM）。
+            if _deliver_outcome in _CONTENT_REJECT_OUTCOMES:
+                append_proactive_event(
+                    session_key=user_key,
+                    sent=False,
+                    reason=_deliver_outcome,
+                    message=message[:80],
+                    character_id=char_id,
+                )
+                logger.info(
+                    "proactive 内容拦截（不计熔断）user=%s outcome=%s",
+                    user_key, _deliver_outcome,
+                )
+                return
             # P1-22：投递失败指数退避（5m→15m→45m→2h 封顶），成功送达即清零。
             # 旧实现失败侧无任何 backoff：不可达用户每 5 分钟「生成→失败→再生成」，
             # 一天 288 次 LLM 零投递（v1.13 把记账移到投递后是对的，但没补退避）。
@@ -3270,6 +3392,18 @@ class ProactiveScheduler:
             )
             return None
 
+    def _pop_deliver_outcome(self, session_key: str | None) -> str:
+        """取走该会话最近一次 ``_deliver`` 的结果标注（L11，2026-11-22）。
+
+        A3 镜像纪律：pop 即消费；缺省/未标注返回空串（调用方按真实投递
+        失败处理）。``_CONTENT_REJECT_OUTCOMES`` 内的值走内容拦截豁免面，
+        ``judge_unavailable`` 按投递失败计入退避阶梯。
+        """
+        outcomes = getattr(self, "_last_deliver_outcomes", None)
+        if not isinstance(outcomes, dict):
+            return ""
+        return str(outcomes.pop(str(session_key or ""), "") or "")
+
     def _deliver(
         self, message: str, session_key: str | None = None, character_id: str | None = None,
         quiet_hours: tuple[int, int] | None = None, *, voice: bool = False,
@@ -3299,6 +3433,13 @@ class ProactiveScheduler:
         """
         from utils.prompt_sanitize import terminal_reply_guard
 
+        # L11（2026-11-22）：每次投递先清该会话的结果标注——只有本次调用
+        # 设置的标注才允许被调用方读到（防手动/祝福线的旧标注串进决策线）。
+        _outcomes = getattr(self, "_last_deliver_outcomes", None)
+        if not isinstance(_outcomes, dict):
+            _outcomes = self._last_deliver_outcomes = {}
+        _outcomes.pop(str(session_key or ""), None)
+
         # 2026-10-15 称呼根治批：守卫扩面第三类（非法称呼呼语剥除）需会话上下文
         # ——decision/手动/祝福三条主动线全经本入口，此处统一传参即全覆盖
         # （session_key/character_id 均可能为 None，按守卫契约归一为空串）。
@@ -3323,6 +3464,8 @@ class ProactiveScheduler:
         )
         if not guarded:
             logger.warning("[主动消息] 终审守卫拦截（哨兵/退化回复），不投递")
+            # L11：标注「内容质量拦截」，调用方不计投递熔断阶梯、单独记账。
+            _outcomes[str(session_key or "")] = "guard_intercepted"
             return False
         message = guarded
         # 2026-10-27 Q3：post-draft judge（只判发/不发，fail-closed）。
@@ -3387,9 +3530,22 @@ class ProactiveScheduler:
                     "[主动消息] post-draft judge 拒绝投递 session=%s reason=%s",
                     session_key, verdict.reason,
                 )
+                if verdict.reason == "judge_unavailable":
+                    # 复核新发现（2026-11-22）：judge 供应商故障/超时属通道侧
+                    # 不可用，不是内容质量拦截——若并入豁免面，judge 挂掉期间
+                    # 每 5 分钟照烧决策 LLM、零投递且无熔断兜底（P1-22 病型
+                    # 以新形态复发）。标注为 judge_unavailable（不在
+                    # _CONTENT_REJECT_OUTCOMES 内）→ 决策线按投递失败计入
+                    # 退避/熔断阶梯。
+                    _outcomes[str(session_key or "")] = "judge_unavailable"
+                    return False
+                # L11：judge 内容拒绝同属内容质量拦截（非通道故障），不计熔断。
+                _outcomes[str(session_key or "")] = "judge_rejected"
                 return False
         except Exception as e:  # noqa: BLE001
             logger.warning("[主动消息] judge 异常（fail-closed 不投递）: %s", e)
+            # L11：judge fail-closed 同样标注为内容拦截（不计熔断阶梯）。
+            _outcomes[str(session_key or "")] = "judge_rejected"
             return False
         if session_key:
             from api.consent import outbound_allowed_for_session_sync

@@ -47,6 +47,7 @@ from api.runtime_config import (
     resolve_api_key_enabled,
 )
 from observability.logging_setup import _user_id
+from utils.time_caliber import ensure_time_caliber_migrated
 
 logger = logging.getLogger("app_factory")
 
@@ -105,6 +106,13 @@ def create_api_app(
     user_manager=None,
     lifespan=None,
 ) -> FastAPI:
+    # ── 时间口径版本闸（M10 修复，2026-11-22）：唯一收口在应用工厂 ──
+    # uvicorn api.run_api:app 与 python main.py（控制台/微信模式）最终都经
+    # create_api_app 创建应用，闸在这里触发才能同时覆盖两个入口（旧实现只挂在
+    # run_api 模块导入时，main.py 直启完全不经过）。只读、幂等、不写库：
+    # 生产未迁移 fail-closed 拒启；开发/测试 CRITICAL 告警后放行。
+    ensure_time_caliber_migrated()
+
     _is_prod = is_production()
 
     # ── Sentry 错误监控（生产环境自动启用） ──

@@ -202,6 +202,77 @@ class TestTargetEligibility:
 
 
 # ═══════════════════════════════════════════════════════════
+# 1b. 强/弱标记拆分（2026-11-22 M2 + M12）
+# ═══════════════════════════════════════════════════════════
+
+
+class TestStrongWeakTestMarkers:
+    def test_strong_prefix_with_digits_hits(self, gate_env):
+        """M2 病灶：强标记前缀后直接跟数字必须命中（wbtest1027）。"""
+        assert te.is_strong_test_marker("wbtest1027") is True
+        assert te.is_test_namespace("wbtest1027") is True
+        assert _reason("9:web:wbtest1027", gate_env) == "test_namespace"
+        assert te.is_test_namespace("e2etest42") is True
+        assert te.is_test_namespace("smoke123") is True
+
+    def test_real_words_keep_negative_protection(self, gate_env):
+        """负向保护：testimony/testing/quality 等真实词不误杀。"""
+        assert te.is_test_namespace("testimony") is False
+        assert te.is_test_namespace("testing") is False
+        assert te.is_test_namespace("quality") is False
+        # 99 = 夹具中不存在的账号：键面不命中命名空间 → 走 never_logged_in
+        assert _reason("99:web:testimony", gate_env) == "never_logged_in"
+
+    def test_weak_prefix_bound_wechat_account_is_eligible(self, gate_env):
+        """M12：弱前缀用户名（test_）+ 有微信绑定 = 真实账号，放行。"""
+        _make_users_db(
+            gate_env.users_db,
+            [(12, "test_user", "real@example.com", "2026-11-20 10:00:00")],
+        )
+        _bind(gate_env.users_db, 12, "wxid_t@im.wechat")
+        te.clear_cache()
+        assert _reason("12:wxid_t@im.wechat", gate_env) == ""
+
+    def test_weak_prefix_live_web_account_is_eligible(self, gate_env):
+        """M12：弱邮箱子域（test.）+ web 在线租约 = 活跃豁免放行。"""
+        _make_users_db(
+            gate_env.users_db,
+            [(13, "qa_owner", "dev@test.example.com", "2026-11-20 10:00:00")],
+        )
+        from proactive import runtime_plane
+
+        runtime_plane.session_touch("13:web:abc12345")
+        te.clear_cache()
+        assert _reason("13:web:abc12345", gate_env) == ""
+
+    def test_weak_prefix_idle_web_account_is_skipped(self, gate_env):
+        """M12：弱前缀账号不活跃（无租约/入站）仍按测试跳过。"""
+        _make_users_db(
+            gate_env.users_db,
+            [(14, "qa_idle", "idle@example.com", "2026-11-20 10:00:00")],
+        )
+        te.clear_cache()
+        assert _reason("14:web:abc12345", gate_env) == "test_namespace"
+
+    def test_strong_prefix_account_stays_deterministic(self, gate_env):
+        """M12：强标记账号维持确定性命中——有绑定/活跃也不放行。"""
+        _make_users_db(
+            gate_env.users_db,
+            [(15, "wbtest-owner", "x@example.com", "2026-11-20 10:00:00")],
+        )
+        _bind(gate_env.users_db, 15, "wxid_w@im.wechat")
+        te.clear_cache()
+        assert _reason("15:wxid_w@im.wechat", gate_env) == "test_namespace"
+
+    def test_legacy_is_test_account_union_kept_for_purge(self):
+        """purge 脚本沿用旧口径（强 ∪ 弱，宁多清）：行为不得收窄。"""
+        assert te.is_test_account("test_user", "") is True
+        assert te.is_test_account("", "a@test.local") is True
+        assert te.is_test_account("", "someone@test.example.com") is True
+        assert te.is_test_account("nine", "nine@example.com") is False
+
+
+# ═══════════════════════════════════════════════════════════
 # 2. 目标集合接线：历史索引键被过滤，活绑定键保留
 # ═══════════════════════════════════════════════════════════
 
@@ -621,3 +692,189 @@ def test_deliver_passes_session_history_to_terminal_guard(monkeypatch):
         "把手机放下，早点休息。",
         "在等你呀。",
     ]
+
+
+# ═══════════════════════════════════════════════════════════
+# 6. 内容质量拦截与投递失败分流（2026-11-22 L11）
+# ═══════════════════════════════════════════════════════════
+
+
+def test_deliver_guard_intercept_sets_outcome(monkeypatch):
+    """L11：_deliver 内守卫剥空 → False + 结果标注 guard_intercepted。"""
+    import utils.prompt_sanitize as ps
+    from proactive import scheduler as sched_mod
+    from proactive.scheduler import ProactiveScheduler
+
+    sched = ProactiveScheduler.__new__(ProactiveScheduler)
+    sched._resolve_memory = lambda: None
+    monkeypatch.setattr(ps, "terminal_reply_guard", lambda reply, **kw: "")
+    monkeypatch.setattr(sched_mod, "read_reply_mode", lambda *a, **k: "immersive")
+    assert sched._deliver("内容", session_key="9:web:abc12345") is False
+    assert sched._pop_deliver_outcome("9:web:abc12345") == "guard_intercepted"
+    assert sched._pop_deliver_outcome("9:web:abc12345") == "", "pop 即消费"
+
+
+def test_deliver_judge_rejection_sets_outcome(monkeypatch):
+    """L11：judge 拒绝（fail-closed）→ 结果标注 judge_rejected。"""
+    import utils.prompt_sanitize as ps
+    from proactive import scheduler as sched_mod
+    from proactive.scheduler import ProactiveScheduler
+
+    sched = ProactiveScheduler.__new__(ProactiveScheduler)
+    sched._resolve_memory = lambda: None
+    monkeypatch.setattr(ps, "terminal_reply_guard", lambda reply, **kw: reply)
+    monkeypatch.setattr(sched_mod, "read_reply_mode", lambda *a, **k: "immersive")
+    import proactive.post_draft_judge as judge_mod
+
+    monkeypatch.setattr(
+        judge_mod,
+        "judge_proactive_message",
+        lambda message, **kw: SimpleNamespace(allow=False, reason="test_reject"),
+    )
+    assert sched._deliver("内容", session_key="9:web:abc12345") is False
+    assert sched._pop_deliver_outcome("9:web:abc12345") == "judge_rejected"
+
+
+def test_deliver_judge_unavailable_counts_toward_backoff(monkeypatch):
+    """复核新发现（2026-11-22）：judge 供应商故障（judge_unavailable）不是
+    内容质量拦截——必须落入投递失败阶梯（计退避/熔断），不得并入豁免面；
+    否则 judge 挂掉期间每 5 分钟照烧决策 LLM、零投递且无熔断兜底。"""
+    import utils.prompt_sanitize as ps
+    from proactive import scheduler as sched_mod
+    from proactive.scheduler import ProactiveScheduler
+
+    sched = ProactiveScheduler.__new__(ProactiveScheduler)
+    sched._resolve_memory = lambda: None
+    monkeypatch.setattr(ps, "terminal_reply_guard", lambda reply, **kw: reply)
+    monkeypatch.setattr(sched_mod, "read_reply_mode", lambda *a, **k: "immersive")
+    import proactive.post_draft_judge as judge_mod
+
+    monkeypatch.setattr(
+        judge_mod,
+        "judge_proactive_message",
+        lambda message, **kw: SimpleNamespace(allow=False, reason="judge_unavailable"),
+    )
+    assert sched._deliver("内容", session_key="9:web:abc12345") is False
+    assert sched._pop_deliver_outcome("9:web:abc12345") == "judge_unavailable"
+    # 关键断言：judge_unavailable 不在内容拦截豁免面内 → 决策线按投递失败
+    # 记账（_register_deliver_failure 退避阶梯生效）。
+    assert "judge_unavailable" not in sched_mod._CONTENT_REJECT_OUTCOMES
+    assert "judge_rejected" in sched_mod._CONTENT_REJECT_OUTCOMES
+    assert "guard_intercepted" in sched_mod._CONTENT_REJECT_OUTCOMES
+
+
+def _decision_env(monkeypatch, tmp_path):
+    """L11 集成共用环境：决策放行 + 真实调度器（__init__ 账本）+ 账本捕获。"""
+    import utils.topic_state as ts_mod
+
+    monkeypatch.setattr(
+        ts_mod, "_CONFIG_PATH", tmp_path / "sched_cfg.json", raising=False
+    )
+    monkeypatch.setattr(
+        ts_mod, "_DB_PATH", tmp_path / "topic_state.db", raising=False
+    )
+    import proactive.ase_engine as ase
+    import proactive.llm_proactive as lp
+    import proactive.proactive_context as pctx
+    import proactive.proactive_hooks as hooks_mod
+    import shisi.agent_plane.runtime as rt
+    from proactive import scheduler as sched_mod
+    from proactive.scheduler import ProactiveScheduler
+
+    monkeypatch.setattr(ase, "_local_now", lambda: now_utc_naive())
+    monkeypatch.setattr(lp, "read_web_proactive_config", lambda: {"enabled": True})
+    monkeypatch.setattr(lp, "load_proactive_knowledge", lambda cid: "")
+    monkeypatch.setattr(lp, "recent_messages_for_dedup", lambda hub, key, eng: [])
+    monkeypatch.setattr(lp, "is_duplicate_proactive", lambda *a, **k: False)
+    monkeypatch.setattr(pctx, "load_full_persona_hint", lambda cid, uk=None: "")
+    monkeypatch.setattr(
+        hooks_mod,
+        "load_live_hooks",
+        lambda key, memory: type("H", (), {"section": "", "keywords": ()})(),
+    )
+    monkeypatch.setattr(rt, "project_profile_for", lambda uk: {})
+    monkeypatch.setattr(rt, "get_profile_prompt_block", lambda uk: "")
+    ledger: list[dict] = []
+    monkeypatch.setattr(rt, "append_proactive_event", lambda **kw: ledger.append(kw))
+    monkeypatch.setattr(sched_mod, "read_reply_mode", lambda *a, **k: "immersive")
+
+    class _FakeEng:
+        def __init__(self):
+            self._last_delivery_time = None
+            self._unanswered_streak = 0
+            self._last_user_message = ""
+            self._knowledge_character_id = "default"
+            self.urgency = type("U", (), {"total": 2.5})()
+
+        def _hours_since_last_chat(self):
+            return 90.0
+
+        def tick(self, hours, dry_run=False):
+            return None
+
+        def commit_sent(self, result):
+            pass
+
+    eng = _FakeEng()
+    key = "9:web:deadbeef"
+    hub = type("Hub", (), {"get": lambda self, k: eng if k == key else None})()
+
+    sched = ProactiveScheduler(ase_engine=None)
+    sched._vital_tick_for_user = lambda *a, **k: None
+    sched._paused = False
+    sched._is_quiet_hours = lambda: False
+    sched._is_quiet_hours_for = lambda cfg: False
+    sched._primary_model_ok = lambda: True
+    sched.get_quiet_hours = lambda: None
+    sched._resolve_character_id = lambda sk: "default"
+    sched._resolve_proactive_llm = lambda eng=None: object()
+    sched._session_llm_resolver = lambda sk: object()
+    sched._resolve_memory = lambda: None
+    sched._persist_throttle_ledger = lambda: None
+    sched._proactive_window_config = lambda: (False, 0)
+    monkeypatch.setattr(
+        lp,
+        "decide_proactive",
+        lambda llm, ctx: {
+            "should_contact": True,
+            "message": "把手机放下，早点休息。",
+            "reason": "关心一下",
+            "wait_minutes": 0,
+            "next_topic": "",
+            "next_intent": "",
+        },
+    )
+    return sched, hub, ledger, key
+
+
+def test_guard_intercept_delivery_skips_circuit_and_ledgers(monkeypatch, tmp_path):
+    """L11 集成：_deliver 内守卫剥空（内容质量拒绝）→ 不计熔断阶梯，
+    失败账本单独记 guard_intercepted——运维能分辨「线路死」与「内容被拦」。"""
+    import utils.prompt_sanitize as ps
+
+    sched, hub, ledger, key = _decision_env(monkeypatch, tmp_path)
+
+    def _guard_spy(reply, **kw):
+        # 决策线投递前守卫（无 session_key kwarg）放行；_deliver 内带会话
+        # 历史的终审守卫剥空 → 模拟内容质量拦截
+        return "" if "session_key" in kw else reply
+
+    monkeypatch.setattr(ps, "terminal_reply_guard", _guard_spy)
+
+    sched._llm_proactive_one_user(hub, key)
+
+    assert [e.get("reason") for e in ledger] == ["guard_intercepted"]
+    assert not sched._deliver_fail_counts.get(key), "守卫拦截不得计入熔断失败计数"
+    assert key not in sched._deliver_circuit_open, "守卫拦截不得开投递熔断"
+
+
+def test_real_delivery_failure_still_registers_backoff(monkeypatch, tmp_path):
+    """L11 对照：无 outcome 标注的 False 仍走既有退避/熔断计数路径。"""
+    sched, hub, ledger, key = _decision_env(monkeypatch, tmp_path)
+    sched._deliver = lambda message, session_key=None, character_id=None, **kw: False
+
+    sched._llm_proactive_one_user(hub, key)
+
+    assert sched._deliver_fail_counts.get(key) == 1, "真实投递失败必须照旧计数"
+    assert ledger and ledger[0].get("reason", "").startswith("deliver_failed_backoff_")
+    assert key not in sched._deliver_circuit_open, "1 次失败未达熔断阈值"

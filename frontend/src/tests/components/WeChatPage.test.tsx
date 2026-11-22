@@ -239,3 +239,57 @@ describe('WeChatPage needs_reauth 终态（2026-11-21）', () => {
     expect(screen.getByText('扫码连接微信')).toBeDefined()
   })
 })
+
+// ── M9（2026-11-22）：连接触发失败（429 等）必须显式 toast，不许静默吞 ──
+import { useErrorStore } from '../../store/errorStore'
+
+describe('WeChatPage 连接触发失败显式提示（M9）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+    vi.useFakeTimers()
+    useErrorStore.setState({ toasts: [] })
+    mockUseWechatStatus.mockReturnValue({
+      data: defaultStatus,
+      isLoading: false,
+      isError: false,
+    })
+    mockUseUnifiedCharacters.mockReturnValue({
+      data: { characters: [] },
+      isLoading: false,
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    useErrorStore.setState({ toasts: [] })
+  })
+
+  it('429（通道槽位被上次超时残留占用）时 toast 展示后端 detail', async () => {
+    vi.mocked(wechatConnect).mockRejectedValueOnce({
+      response: { status: 429, data: { detail: '用户 3 通道已满（一人最多 1 条）' } },
+    })
+
+    renderPage()
+    fireEvent.click(screen.getByText('立即扫码连接'))
+    await act(async () => { await Promise.resolve() })
+
+    const toasts = useErrorStore.getState().toasts
+    expect(
+      toasts.some((t) => t.type === 'error' && t.message.includes('通道已满')),
+    ).toBe(true)
+  })
+
+  it('无 response 的网络错误也有兜底提示（修复前静默吞掉一切异常）', async () => {
+    vi.mocked(wechatConnect).mockRejectedValueOnce(new Error('connect failed'))
+
+    renderPage()
+    fireEvent.click(screen.getByText('立即扫码连接'))
+    await act(async () => { await Promise.resolve() })
+
+    const toasts = useErrorStore.getState().toasts
+    expect(
+      toasts.some((t) => t.type === 'error' && t.message.includes('发起扫码连接失败')),
+    ).toBe(true)
+  })
+})

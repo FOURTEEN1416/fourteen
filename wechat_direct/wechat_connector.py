@@ -484,6 +484,19 @@ def token_window_state(owner_user_id: int | str, slot: int = 0) -> dict:
         "ttl_hours": _CONTEXT_TOKENS_TTL / 3600.0,
     }
     try:
+        # L6（2026-11-22 死会话治理补洞）：needs_reauth 是已确认的终态（凭证
+        # 已删、等待用户重新扫码）——此刻窗口文件再新鲜也不可能完成任何发送。
+        # 只看 token 文件新鲜度会让死会话在 ≤24h 内持续通过烧前闸，决策 LLM
+        # 仍被白烧。读盘失败不阻断（落回下面的 token 文件判据，宁宽勿误）。
+        st = load_session_state(int(owner_user_id), int(slot))
+        auth = str(st.get("auth_state") or st.get("status") or "")
+        if auth == AUTH_STATE_NEEDS_REAUTH:
+            result["state"] = "dead"
+            result["reason"] = "needs_reauth"
+            return result
+    except Exception:  # noqa: BLE001 —— 状态读不出来就交给 token 文件判据
+        pass
+    try:
         from wechat_direct import channel_paths
 
         path = channel_paths.context_tokens_path(int(owner_user_id), slot)
@@ -2108,6 +2121,23 @@ class WeChatConnector:
             # 用户主动扫码但未完成（超时/过期）：保持可再次发起，不进入终态。
             self._set_auth_state(AUTH_STATE_DEGRADED, error=self.last_error or "login_failed")
             self._merge_session_state({"reconnect_attempts": self._reconnect_attempts})
+            # M9（2026-11-22）：超时/刷尽的降级对象必须同步从注册表摘除——
+            # MAX_CHANNELS_PER_USER=1 下滞留对象（_stop=False 不 retire）会让
+            # 重扫 /connect 恒 429（ChannelSlotError），用户只能 disconnect
+            # 解锁。此刻登录线程已终止，摘除无并发风险；retire 带
+            # connector=self 防止误摘并发新建的替代对象。
+            if self.owner_user_id is not None:
+                try:
+                    from wechat_direct.connector_registry import get_registry
+
+                    get_registry().retire(
+                        int(self.owner_user_id), int(self.slot), connector=self
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "降级回收 registry 失败 owner=%s slot=%s: %s",
+                        self.owner_user_id, self.slot, e,
+                    )
             return
 
         self.started_at = time.time()

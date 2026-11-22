@@ -504,12 +504,19 @@ class ReminderDeliveryTask:
         # （错误哨兵/表情复读/退化回复/系统标记回显/非法称呼全类）——此前提醒
         # 只过 sanitize_message（剥时间前缀/推理残留），是守卫矩阵唯一缺口
         # （独立复核 #5 条：提醒文案抄了 [定时提醒] 行首标记不剥）。
-        from utils.prompt_sanitize import terminal_reply_guard
+        from utils.prompt_sanitize import (
+            GUARD_CATEGORY_REMINDER,
+            terminal_reply_guard,
+        )
 
         # 2026-11-08 D-C：提醒线也按「会话 × 角色」快照解析回复模式
         # （未设置/缺角色 → 全局默认 → 沉浸式）。
         # 2026-11-21 出站质量批扩面：透传该会话最近 assistant 正文，历史
         # 重复闸/模板句去重在提醒线生效（取不到时 None=守卫 fail-open）。
+        # 2026-11-22 H3 根治：提醒是「同文每日重发」的确定性投递——历史
+        # 重复闸/模板句闸会把次日同文提醒剥空（静默失联），故以
+        # guard_category=reminder 豁免**仅这两道闸**；其余守卫照常生效，
+        # 普通聊天去重不受影响。
         guarded = terminal_reply_guard(
             cleaned,
             user_msg="",
@@ -523,6 +530,7 @@ class ReminderDeliveryTask:
             recent_assistant_messages=self._recent_assistant_texts(
                 session_key, str(character_id or ""),
             ),
+            guard_category=GUARD_CATEGORY_REMINDER,
         )
         # 终审剥空时兜底文案同样要过守卫（旧实现 `guarded or fallback` 让
         # fallback 绕过守卫矩阵）。
@@ -546,7 +554,7 @@ class ReminderDeliveryTask:
         绝不按原文返回——异常路径同样不得绕过守卫矩阵。
         """
         try:
-            from utils.prompt_sanitize import terminal_reply_guard
+            from utils.prompt_sanitize import GUARD_CATEGORY_REMINDER, terminal_reply_guard
 
             guarded = terminal_reply_guard(
                 fallback,
@@ -563,6 +571,9 @@ class ReminderDeliveryTask:
                 recent_assistant_messages=self._recent_assistant_texts(
                     str(session_key or ""), str(character_id or ""),
                 ),
+                # 2026-11-22 H3 根治：兜底文案是逐字稳定模板，正是次日最易
+                # 被历史重复闸吞掉的形态；与正文线同类别豁免（仅两道历史闸）。
+                guard_category=GUARD_CATEGORY_REMINDER,
             )
             if not guarded:
                 logger.warning("[reminder] 兜底文案被终审剥空，不发送")

@@ -247,6 +247,8 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   // 看门狗用 ref 读码图（不进 useCallback 依赖，避免轮询被 effect 重启打断）
   const qrImageRef = useRef('')
   const qc = useQueryClient()
+  // M9：连接触发失败（429 等）显式 toast
+  const addToast = useErrorStore(s => s.addToast)
 
   /** 连续失败达阈值：停轮询并置错误态（重试按钮走 handleRefresh 重开全流程） */
   const bailToError = useCallback((what: 'qr' | 'conn') => {
@@ -259,10 +261,21 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   const triggerConnection = useCallback(async () => {
     try {
       await wechatConnect()
-    } catch {
-      // 可能已连接中，忽略
+    } catch (e) {
+      // M9（2026-11-22）：连接触发失败必须显式提示——旧实现静默吞掉一切异常，
+      // 后端 429（通道槽位被上次扫码超时的残留对象占用）时用户只见弹窗无限
+      // 转圈，陷入「刷新→429→再刷新」死循环，只能 disconnect 解锁。
+      const ax = e as { response?: { status?: number; data?: { detail?: string } } }
+      const status = ax?.response?.status
+      const detail = ax?.response?.data?.detail
+      const message =
+        detail ||
+        (status === 429
+          ? '微信通道已被占用或连接过于频繁，请稍后重试'
+          : '发起扫码连接失败，请检查网络后重试')
+      addToast({ type: 'error', message })
     }
-  }, [])
+  }, [addToast])
 
   const startConnectionPolling = useCallback(() => {
     connFailRef.current = 0

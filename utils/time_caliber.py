@@ -3,11 +3,11 @@
 背景：``reminders`` / ``pending_intents`` / ``topic_state`` 等列的读写已统一
 为 UTC 语义（唯一写入口径见 :mod:`utils.local_time`），代码**不再感知**旧
 北京墙钟行。若 ``scripts/migrate_time_columns_to_utc.py --apply`` 未在停机
-窗口执行，存量行会被当 UTC 读取——典型后果是提醒**提前 8 小时**触发、
+窗口执行，存量行会被当 UTC 读取——典型后果是提醒**延后 8 小时**触发、
 话题 TTL 偏移。本模块提供轻量只读版本闸：检查迁移脚本落下的
 ``time_caliber_migrations`` 幂等标记，未迁移时按环境分级处置：
 
-- **生产**（复用 :func:`api.runtime_config.is_production`）：启动即 fail-closed
+- **生产**（复用 :func:`utils.runtime_env.is_production`）：启动即 fail-closed
   拒绝启动（半迁移态不可上线）；
 - **开发**：打印 CRITICAL 警告后放行，不阻塞本地调试。
 
@@ -22,6 +22,12 @@ import sqlite3
 from pathlib import Path
 
 from utils.project_paths import project_path
+
+# L8 修复（2026-11-22）：环境判定走 utils.runtime_env 轻量真源。
+# 旧实现运行时 ``from api.runtime_config import is_production`` 会经
+# ``api/__init__ → app_factory → auth_jwt`` 拉起重链——裸环境（无 JWT_SECRET
+# 且非显式 dev）import 即抛 RuntimeError，本闸的检查根本执行不到。
+from utils.runtime_env import is_production
 
 logger = logging.getLogger("utils.time_caliber")
 
@@ -74,9 +80,6 @@ def ensure_time_caliber_migrated(
         RuntimeError: 生产环境（``AI_GF_ENV/APP_ENV/ENV`` 为 prod/production）
             检测到任一库缺迁移标记 —— fail-closed，拒绝启动。
     """
-    # 局部导入：api 包携带较重依赖，避免 utils → api 的导入环/额外开销。
-    from api.runtime_config import is_production
-
     sqlite_path = (
         Path(sqlite_db) if sqlite_db else Path(project_path("data", "sqlite.db"))
     )
@@ -104,7 +107,7 @@ def ensure_time_caliber_migrated(
         )
     logger.critical(
         "%s —— 开发环境放行继续启动；旧北京墙钟行会被当 UTC 读取"
-        "（提醒可能提前 8 小时），上线前必须完成迁移",
+        "（提醒可能延后 8 小时），上线前必须完成迁移",
         detail,
     )
     return False

@@ -30,8 +30,16 @@ import pytest
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from llm_provider.multi_provider_gateway import DEFAULT_FALLBACK_CHAIN, MultiProviderGateway
-from llm_provider.openai_compatible_provider import OpenAICompatibleProvider, parse_retry_after
+from llm_provider.multi_provider_gateway import (
+    BREAKER_COOLDOWN_MAX_SECONDS,
+    DEFAULT_FALLBACK_CHAIN,
+    MultiProviderGateway,
+)
+from llm_provider.openai_compatible_provider import (
+    RETRY_AFTER_HINT_MAX_SECONDS,
+    OpenAICompatibleProvider,
+    parse_retry_after,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -140,6 +148,36 @@ class TestParseRetryAfter:
         past = datetime.now(timezone.utc) - timedelta(minutes=5)
         value = format_datetime(past, usegmt=True)
         assert parse_retry_after(value) == 0.0
+
+
+# ── parse_retry_after 上界钳制（2026-11-22 H1）──────────────────
+
+
+class TestParseRetryAfterUpperBound:
+    """超大秒数 / 远期 HTTP 日期必须钳到 RETRY_AFTER_HINT_MAX_SECONDS。
+
+    无上界时 999999999s → 999999999s、2099 年日期 → 2275595314s，一次 429
+    就能把熔断冷却抬到数年量级，半开重探永不到来。
+    """
+
+    def test_huge_seconds_clamped_to_bound(self):
+        assert parse_retry_after("999999999") == RETRY_AFTER_HINT_MAX_SECONDS
+
+    def test_far_future_http_date_clamped_to_bound(self):
+        value = format_datetime(datetime(2099, 1, 1, tzinfo=timezone.utc), usegmt=True)
+        assert parse_retry_after(value) == RETRY_AFTER_HINT_MAX_SECONDS
+
+    def test_just_above_bound_clamped(self):
+        assert parse_retry_after("300.5") == RETRY_AFTER_HINT_MAX_SECONDS
+        assert parse_retry_after("301") == RETRY_AFTER_HINT_MAX_SECONDS
+
+    def test_within_bound_unchanged(self):
+        assert parse_retry_after("299.5") == 299.5
+        assert parse_retry_after("120") == 120.0
+
+    def test_bound_constant_is_module_level(self):
+        """上界常数提为模块常量，供网关/测试对齐引用。"""
+        assert RETRY_AFTER_HINT_MAX_SECONDS == 300.0
 
 
 # ── provider 429 提示捕获 ──────────────────────────────────────
@@ -277,8 +315,12 @@ class TestBreakerCooldownRespectsRetryAfter:
         assert abs(delta - gw._BREAKER_COOLDOWN) <= 1.0
 
     def test_retry_after_above_default_extends_cooldown(self):
-        """Retry-After=600 → 熔断 605s（600+缓冲 5），不再早于解限撞墙。"""
-        provider = _HintProvider(600.0)
+        """Retry-After=400（+缓冲 5）高于默认 120s → 冷却取 405s，不早于解限撞墙。
+
+        2026-11-22 H1：400+5=405 低于总冷却上界 600s，语义不变；「提示超过
+        上界时被钳到 600s」由 TestBreakerCooldownUpperBound 单独钉死。
+        """
+        provider = _HintProvider(400.0)
         gw = _make_gw({"a": provider})
         gw._BREAKER_JITTER_MAX = 0.0
         gw._mark_provider_result("a", False)  # 第 1 次失败：未达阈值，不消费提示
@@ -286,7 +328,7 @@ class TestBreakerCooldownRespectsRetryAfter:
         gw._mark_provider_result("a", False)  # 第 2 次失败：开闸，消费提示
         assert provider.consume_calls == 1
         delta = gw._breaker_open_until["a"] - time.time()
-        assert abs(delta - (600.0 + gw._RETRY_AFTER_BUFFER)) <= 1.0
+        assert abs(delta - (400.0 + gw._RETRY_AFTER_BUFFER)) <= 1.0
 
     def test_jitter_spreads_cooldown(self):
         """默认抖动上限内：冷却落在 [120, 120+30] 区间（多 worker 错峰）。"""
@@ -295,6 +337,148 @@ class TestBreakerCooldownRespectsRetryAfter:
         gw._mark_provider_result("a", False)
         delta = gw._breaker_open_until["a"] - time.time()
         assert gw._BREAKER_COOLDOWN - 1.0 <= delta <= gw._BREAKER_COOLDOWN + gw._BREAKER_JITTER_MAX + 1.0
+
+
+# ── 网关熔断冷却上界（2026-11-22 H1）───────────────────────────
+
+
+class TestBreakerCooldownUpperBound:
+    """无论 hint 多大、抖动多少，开闸冷却必须 ≤ BREAKER_COOLDOWN_MAX_SECONDS。
+
+    背景：主动决策线（immediate=True）一次 429 即开闸；旧实现冷却无上界，
+    超大 Retry-After 会把供应商打成「只能重启恢复」的准永久熔断。
+    """
+
+    def test_huge_hint_clamped_to_max_cooldown(self):
+        gw = _make_gw({"a": _HintProvider(999999.0)})
+        gw._BREAKER_JITTER_MAX = 0.0
+        gw._mark_provider_result("a", False)
+        gw._mark_provider_result("a", False)
+        delta = gw._breaker_open_until["a"] - time.time()
+        assert abs(delta - BREAKER_COOLDOWN_MAX_SECONDS) <= 1.0
+
+    def test_immediate_single_429_opens_with_bounded_cooldown(self):
+        """immediate=True：一次失败即开闸，冷却仍被钳在上界内。"""
+        gw = _make_gw({"a": _HintProvider(999999.0)})
+        gw._BREAKER_JITTER_MAX = 0.0
+        gw._mark_provider_result("a", False, immediate=True)
+        delta = gw._breaker_open_until["a"] - time.time()
+        assert 0 < delta <= BREAKER_COOLDOWN_MAX_SECONDS + 1.0
+
+    def test_jitter_included_in_clamp(self):
+        """钳制作用于「base+抖动」整体：即使保留默认抖动也不超过上界。"""
+        gw = _make_gw({"a": _HintProvider(999999.0)})
+        # 不置零抖动，多次采样全部不得越过上界
+        for _ in range(20):
+            gw._breaker_failures["a"] = 0
+            gw._mark_provider_result("a", False, immediate=True)
+            delta = gw._breaker_open_until["a"] - time.time()
+            assert delta <= BREAKER_COOLDOWN_MAX_SECONDS + 1.0
+
+    def test_half_open_reprobe_reachable_after_max_cooldown(self):
+        """冷却到期后 _breaker_open 自动半开（重探可达），不会永久熔断。"""
+        gw = _make_gw({"a": _HintProvider(999999.0)})
+        gw._BREAKER_JITTER_MAX = 0.0
+        gw._mark_provider_result("a", False, immediate=True)
+        assert gw._breaker_open("a") is True
+        # 把开闸时刻拨到上界之前 → 仍开闸；拨到上界之后 → 半开放行并清状态
+        gw._breaker_open_until["a"] = time.time() - BREAKER_COOLDOWN_MAX_SECONDS - 1.0
+        assert gw._breaker_open("a") is False
+        assert "a" not in gw._breaker_open_until
+        assert "a" not in gw._breaker_failures
+
+    def test_max_cooldown_constant_is_module_level(self):
+        assert BREAKER_COOLDOWN_MAX_SECONDS == 600.0
+
+    def test_end_to_end_429_huge_header_keeps_cooldown_bounded(self, monkeypatch):
+        """端到端：429 带超大 Retry-After 头 → parse 层钳 300 → 网关冷却 305s。
+
+        provider 暂存的 hint 已被钳制，网关即使再被注入大 hint 也兜底钳 600。
+        """
+        provider = _make_provider()
+        fake = _RaisingClient(_status_error(429, {"Retry-After": "999999999"}))
+        monkeypatch.setattr(OpenAICompatibleProvider, "_async_client", property(lambda self: fake))
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(provider.chat(query="hi"))
+
+        assert provider._retry_after_hint_seconds == RETRY_AFTER_HINT_MAX_SECONDS
+
+        gw = _make_gw({"agnes": provider})
+        gw._BREAKER_JITTER_MAX = 0.0
+        gw._mark_provider_result("agnes", False, immediate=True)
+        delta = gw._breaker_open_until["agnes"] - time.time()
+        assert abs(delta - (RETRY_AFTER_HINT_MAX_SECONDS + gw._RETRY_AFTER_BUFFER)) <= 1.0
+        assert delta <= BREAKER_COOLDOWN_MAX_SECONDS
+
+
+# ── 陈旧 hint 污染路径（2026-11-22 L1）─────────────────────────
+
+
+class TestRetryAfterHintPollution:
+    """docstring 承诺「非 429 失败清掉旧提示」——实现必须一致。
+
+    旧缺陷：非 HTTPStatusError/非 429 时提前 return 不清，先 429 留下的 hint
+    越过后续 500 存活，抬高 5 分钟内下一次熔断的冷却时长。
+    """
+
+    def test_500_after_429_clears_stale_hint(self, monkeypatch):
+        provider = _make_provider()
+        fake = _RaisingClient(_status_error(429, {"Retry-After": "90"}))
+        monkeypatch.setattr(OpenAICompatibleProvider, "_async_client", property(lambda self: fake))
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(provider.chat(query="hi"))
+        assert provider._retry_after_hint_seconds == 90.0
+
+        # 同一 provider 随后一次 500：陈旧 hint 必须被清掉
+        fake._exc = _status_error(500)
+        with pytest.raises(RuntimeError):
+            asyncio.run(provider.chat(query="hi"))
+
+        assert provider._retry_after_hint_seconds is None
+        assert provider._retry_after_hint_at == 0.0
+        assert provider.consume_retry_after_hint() is None
+
+    def test_non_http_error_after_429_clears_stale_hint(self, monkeypatch):
+        """非 HTTP 状态错误（如连接失败）同样清旧提示。"""
+        provider = _make_provider()
+        fake = _RaisingClient(_status_error(429, {"Retry-After": "90"}))
+        monkeypatch.setattr(OpenAICompatibleProvider, "_async_client", property(lambda self: fake))
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(provider.chat(query="hi"))
+        assert provider._retry_after_hint_seconds == 90.0
+
+        fake._exc = httpx.ConnectError("connection reset")
+        with pytest.raises(RuntimeError):
+            asyncio.run(provider.chat(query="hi"))
+
+        assert provider._retry_after_hint_seconds is None
+        assert provider.consume_retry_after_hint() is None
+
+    def test_stale_hint_no_longer_inflates_next_cooldown(self, monkeypatch):
+        """污染路径闭环：429 留 hint → 500 清 hint → 下次熔断冷却回落默认。"""
+        provider = _make_provider()
+        fake = _RaisingClient(_status_error(429, {"Retry-After": "90"}))
+        monkeypatch.setattr(OpenAICompatibleProvider, "_async_client", property(lambda self: fake))
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(provider.chat(query="hi"))
+
+        fake._exc = _status_error(500)
+        with pytest.raises(RuntimeError):
+            asyncio.run(provider.chat(query="hi"))
+
+        gw = _make_gw({"agnes": provider})
+        gw._BREAKER_JITTER_MAX = 0.0
+        gw._mark_provider_result("agnes", False)
+        gw._mark_provider_result("agnes", False)
+        delta = gw._breaker_open_until["agnes"] - time.time()
+        # hint 已被 500 清掉 → 冷却回落默认 120s，而不是 max(120, 90+5)=120 的
+        # 陈旧组合（若 hint 是 300+ 则差距更明显）；核心断言：consume 为空
+        assert provider.consume_retry_after_hint() is None
+        assert abs(delta - gw._BREAKER_COOLDOWN) <= 1.0
 
 
 # ── nex（nex-n2.6）接入 ────────────────────────────────────────
@@ -353,7 +537,7 @@ class TestNexFailSoftSkip:
         assert "nex" not in gw._providers
 
     def test_nex_skipped_when_base_missing_even_with_key(self, monkeypatch):
-        """有 key 但 base_url 缺失 → 同样 fail-soft 跳过（nex 的 base 只来自 env）。"""
+        """有 key 但 base 缺失（env 与显式 config 均未提供）→ fail-soft 跳过。"""
         monkeypatch.setenv("NEX_API_KEY", "sk-nex-test")
         monkeypatch.delenv("NEX_API_BASE", raising=False)
         gw = MultiProviderGateway(

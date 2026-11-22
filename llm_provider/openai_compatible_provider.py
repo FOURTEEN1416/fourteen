@@ -42,6 +42,12 @@ _OAUTH_RETRY_COOLDOWN = 300.0
 # 视为过期——防止很久以前的 429 反复抬高后续无关失败的熔断时长。
 _RETRY_AFTER_HINT_TTL = 300.0
 
+# Retry-After 提示的钳制上界（秒）（2026-11-22 H1）。上游可能返回超大秒数
+# 或远期 HTTP 日期（实测形态：999999999s、2099 年日期折算 2275595314s），
+# 不设上界时一次 429 就能把熔断冷却抬到数年量级——半开重探永不到来，只能
+# 重启恢复。钳到 5 分钟：足够覆盖常规限流窗口，又保证熔断必然到期可重探。
+RETRY_AFTER_HINT_MAX_SECONDS = 300.0
+
 
 def parse_retry_after(value: str | None) -> float | None:
     """解析 HTTP ``Retry-After`` 头（RFC 7231），返回应等待的秒数。
@@ -52,7 +58,9 @@ def parse_retry_after(value: str | None) -> float | None:
         按「目标时刻 - 当前 UTC 时刻」折算成秒。
 
     缺失/无法解析/非有限数（inf/nan）时返回 ``None``，调用方维持原退避策略。
-    负数（已过期的日期）钳为 0.0。
+    负数（已过期的日期）钳为 0.0；超过 ``RETRY_AFTER_HINT_MAX_SECONDS``（300s）
+    的超大秒数/远期日期钳到该上界（2026-11-22 H1）——防止上游异常大值把
+    熔断冷却抬到不可恢复的量级。
     """
     if not value:
         return None
@@ -67,7 +75,7 @@ def parse_retry_after(value: str | None) -> float | None:
     else:
         if not math.isfinite(seconds):
             return None
-        return max(0.0, seconds)
+        return min(max(0.0, seconds), RETRY_AFTER_HINT_MAX_SECONDS)
     # 形态二：HTTP 日期
     try:
         parsed = parsedate_to_datetime(text)
@@ -78,7 +86,7 @@ def parse_retry_after(value: str | None) -> float | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     delta = (parsed - datetime.now(timezone.utc)).total_seconds()
-    return max(0.0, delta)
+    return min(max(0.0, delta), RETRY_AFTER_HINT_MAX_SECONDS)
 
 # 单次 provider 调用的结构化耗时日志标记（2026-10-21 FIX-5）。
 # 排障时 `grep provider_call` 即可直接取延迟样本，不必再靠外挂探针反推。
@@ -737,10 +745,13 @@ class OpenAICompatibleProvider:
         429 时解析该头并暂存在实例上，供网关熔断时取 ``max(默认, 提示+缓冲)``。
         非 429 失败会清掉旧提示，避免陈旧值污染本次记账。
         """
-        if not isinstance(e, httpx.HTTPStatusError):
-            return
-        resp = getattr(e, "response", None)
+        resp = getattr(e, "response", None) if isinstance(e, httpx.HTTPStatusError) else None
         if resp is None or getattr(resp, "status_code", None) != 429:
+            # 非 429 失败（含非 HTTP 状态错误、5xx 等）：清掉旧提示。
+            # 2026-11-22 L1：旧实现在此提前 return 不清，陈旧 hint 会越过
+            # 非 429 失败存活，抬高 5 分钟内下一次熔断的冷却时长。
+            self._retry_after_hint_seconds = None
+            self._retry_after_hint_at = 0.0
             return
         raw = resp.headers.get("retry-after")
         hint = parse_retry_after(raw)

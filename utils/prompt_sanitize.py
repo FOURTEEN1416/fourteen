@@ -957,18 +957,51 @@ ECHO_INTIMACY_LEXICON = frozenset({
     "哈喽", "你好", "嗨", "hello", "hi",
 })
 
-#: 回声剥除的「干净边界」：行首/行尾镜像回声之后（之前）必须紧跟标点或空白，
-#: 才允许只剥回声、保留余下正文；边界不干净（如「想你了的时候我就看看照片」）
-#: 保守不剥，避免把正常正文切残。
-_ECHO_SEP_RE = re.compile(r"[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]")
-_ECHO_LEADING_SEP_RE = re.compile(r"^[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]+")
-_ECHO_TRAILING_SEP_RE = re.compile(r"[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]+$")
+#: emoji 码位段（2026-11-22 M7）：回声判定的边界字符类与归一化键都必须覆盖
+#: emoji，否则「到站了吗🚄」「🚄到站了吗」这类 emoji 附加回声原样放行。
+#: 全量枚举不现实，收录常见 emoji 区块；emoji 因此视作干净边界分隔符——
+#: 只参与回声剥除的边界/归一判定，正文里正常使用的 emoji 不受影响。
+_EMOJI_CLASS = (
+    "\U0001F000-\U0001F02F"   # 麻将牌
+    "\U0001F0A0-\U0001F0FF"   # 扑克牌
+    "\U0001F100-\U0001F2FF"   # 带圈/方框符号与区域指示（国旗等）
+    "\U0001F300-\U0001F5FF"   # 杂项符号与象形文字（天气/食物/手势…）
+    "\U0001F600-\U0001F64F"   # 表情
+    "\U0001F680-\U0001F6FF"   # 交通与地图（🚄 在此）
+    "\U0001F700-\U0001F7FF"   # 炼金术/几何扩展
+    "\U0001F800-\U0001F8FF"   # 补充箭头-C
+    "\U0001F900-\U0001F9FF"   # 补充符号与象形文字
+    "\U0001FA00-\U0001FAFF"   # 符号与象形文字扩展-A
+    "\U00002600-\U000027BF"   # 杂项符号+杂项图形（☀☁✂✈❤✅…）
+    "\U00002B00-\U00002BFF"   # ⭐⬆ 等
+    "\U0000203C\U00002049"    # ‼ ⁉
+    "\U000020E3"              # 键帽组合符
+    "\U0000FE0F"              # 变体选择符-16（emoji 呈现态）
+    "\U0000200D"              # 零宽连接符（ZWJ 家族 emoji）
+)
+
+#: 回声剥除的「干净边界」字符类（单一真源，四个使用点同源，防各抄一份漂移）：
+#: 空白 + 中英文标点 + emoji（2026-11-22 M7）。
+#: 行首/行尾镜像回声之后（之前）必须紧跟这类字符，才允许只剥回声、保留
+#: 余下正文；边界不干净（如「想你了的时候我就看看照片」）保守不剥，避免
+#: 把正常正文切残。
+_ECHO_SEP_CLASS = (
+    r"\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’" + _EMOJI_CLASS
+)
+#: 直角引号（2026-11-22 L3）：只进**归一化键**、不进**边界类**——
+#: 进键，「想你了」与 想你了 等价，整条=引号包裹的零信息回声照判拦截；
+#: 不进边界类，句中引用（「我最怕你说『想你了』。」）才不会把引用的话语
+#: 连同引号一起当回声剥掉、留下残句。
+_ECHO_KEY_STRIP_CLASS = _ECHO_SEP_CLASS + "「」『』"
+_ECHO_SEP_RE = re.compile("[" + _ECHO_SEP_CLASS + "]")
+_ECHO_LEADING_SEP_RE = re.compile("^[" + _ECHO_SEP_CLASS + "]+")
+_ECHO_TRAILING_SEP_RE = re.compile("[" + _ECHO_SEP_CLASS + "]+$")
 
 
 def _normalize_echo_key(text: Any) -> str:
-    """回声判定键：NFKC 归一（全半角统一）+ casefold + 去标点/空白。"""
+    """回声判定键：NFKC 归一（全半角统一）+ casefold + 去标点/空白/emoji。"""
     s = unicodedata.normalize("NFKC", str(text or "")).casefold()
-    return re.sub(r"[\s，,。.！!？?、；;：:~～…·\-—_（）()\"'“”‘’]+", "", s)
+    return re.sub("[" + _ECHO_KEY_STRIP_CLASS + "]+", "", s)
 
 
 def _split_echo_prefix(line: str, cur: str) -> str | None:
@@ -1011,6 +1044,18 @@ def _split_echo_suffix(line: str, cur: str) -> str | None:
     return None
 
 
+def _is_echo_unit_repeat_key(key: str, cur: str) -> bool:
+    """整行 = 回声单元原样重复 ≥2 次（叠词形态，零附加信息）。
+
+    「想你了想你了」的首尾边界都不干净（前后紧贴的都是回声单元自身），
+    前缀/后缀剥除都会保守放弃 → 整条放行漏网。归一化后整行恰为回声单元的
+    整数倍重复时按回声行处理，交由「整条=回声」分支判拦。
+    """
+    if not cur or len(key) <= len(cur) or len(key) % len(cur):
+        return False
+    return key == cur * (len(key) // len(cur))
+
+
 def _strip_verbatim_echo(text: str, user_msg: Any) -> str:
     """剥除回复中对用户最后一条消息的逐字回声（2026-11-21 重设计）。
 
@@ -1028,6 +1073,10 @@ def _strip_verbatim_echo(text: str, user_msg: Any) -> str:
        正文（生产原句回归实证），整条=招呼回声同样放行。
     4. 5641/5717 的跨轮长文逐字重复由 ``terminal_reply_guard`` 的
        ``recent_assistant_messages`` 历史闸负责，本函数不感知历史、不受影响。
+    5. **归一化等价扩展（2026-11-22）**：emoji 与直角引号「」『』参与归一化
+       键（「到站了吗🚄」「🚄到站了吗」与「到站了吗」等价，emoji 另作干净
+       边界分隔符）；整行恰为回声单元的叠词重复（「想你了想你了」）同样判
+       回声。正文中的 emoji 不在剥除路径上，不受影响。
     """
     s = str(text or "")
     cur = _normalize_echo_key(user_msg)
@@ -1043,7 +1092,8 @@ def _strip_verbatim_echo(text: str, user_msg: Any) -> str:
         ln = line.strip()
         if not ln:
             continue
-        if _normalize_echo_key(line) == cur:
+        key = _normalize_echo_key(line)
+        if key == cur or _is_echo_unit_repeat_key(key, cur):
             stripped = True
             first_echo_line = first_echo_line or ln
             continue
@@ -1299,6 +1349,19 @@ def _strip_placeholder_urls(text: str) -> str:
     return "\n".join(kept).strip()
 
 
+# ── 出站类别与历史闸豁免（2026-11-22 H3 根治）────────────────────
+#: 出站类别：提醒线。提醒的本义就是**同文每日重发**——兜底文案逐字稳定、
+#: 提醒常用语（早点休息/记得吃饭）本身就在模板句表里；投递后经
+#: ``record_outbound_message`` 落 assistant 历史，次日同文会被历史重复闸
+#: （jaccard=1.0）与模板句闸确定性剥空 → 每日提醒静默失联。
+GUARD_CATEGORY_REMINDER = "reminder"
+#: 豁免「历史重复/模板句」两道闸的出站类别白名单。**只收确定性重复投递
+#: 通道**，新类别须逐个评估后加入；普通聊天不得传入——聊天侧的跨轮去重
+#: 行为保持不变。豁免范围仅这两道闸，其余守卫（错误哨兵/系统标记/回声/
+#: 时间词/称呼…）对豁免类别照常生效。
+HISTORY_GATE_EXEMPT_CATEGORIES = frozenset({GUARD_CATEGORY_REMINDER})
+
+
 def terminal_reply_guard(
     reply: Any,
     *,
@@ -1309,6 +1372,7 @@ def terminal_reply_guard(
     last_turn_age_seconds: float | None = None,
     reply_mode: str = "",
     recent_assistant_messages: Any = None,
+    guard_category: str = "",
 ) -> str:
     """出站终审守卫（发送与落库之前的最后一道门，2026-10-14 生产事故批）。
 
@@ -1346,6 +1410,17 @@ def terminal_reply_guard(
     相似 → 句级去重/整段拦空（生产 5641/5717 的 288 字逐字重复）；**闸三**
     模板句去重 + 最小信息增量（「把手机放下」类空泛关心连续复读）。缺省
     ``None`` 时行为与旧版完全一致（后台线/单测向后兼容）。
+
+    2026-11-22 H3 根治：新增 ``guard_category``——提醒线等**确定性重复投递**
+    通道传入 ``GUARD_CATEGORY_REMINDER`` 豁免上述两道历史闸（同文每日重发是
+    提醒的功能语义，落历史后次日被剥空 = 提醒静默失联）。豁免范围收窄在
+    ``HISTORY_GATE_EXEMPT_CATEGORIES`` 白名单内，仅此两道闸；其余守卫对豁免
+    类别照常生效，普通聊天（缺省空类别）去重行为不变。
+
+    2026-11-22 M8：**回声剥离先于时间词改写**——>45min 时「刚刚→之前」的
+    改写会破坏回复与 ``user_msg`` 的逐字等值判定，模型逐字复述含时间词的
+    用户原话（「我刚刚到公司」）会以换词形态漏网；先剥回声，再对幸存正文
+    做时间词降级。
     """
     from llm_provider.multi_provider_gateway import _is_error_reply
 
@@ -1367,6 +1442,13 @@ def terminal_reply_guard(
     _guard_log("placeholder_url", _before, s)
     if not s:
         return ""
+    # 2026-10-20 语义终审：逐字复述用户原话 / 元记忆解释 / 无由头反问。
+    # （M8：必须先于下方时间词改写，理由见 docstring。）
+    _before = s
+    s = _strip_verbatim_echo(s, user_msg)
+    _guard_log("verbatim_echo", _before, s)
+    if not s:
+        return ""
     # 2026-10-19 时间感知 3.0：距上一回合 >45min 时相对时间词确定性降级
     # （刚才/刚刚/刚X → 之前）。None（主动链/提醒链无会话间隔语境）不动。
     if (
@@ -1374,12 +1456,6 @@ def terminal_reply_guard(
         and float(last_turn_age_seconds) > _TIME_WORD_AGE_THRESHOLD_SECONDS
     ):
         s = _recalibrate_time_words(s)
-    # 2026-10-20 语义终审：逐字复述用户原话 / 元记忆解释 / 无由头反问。
-    _before = s
-    s = _strip_verbatim_echo(s, user_msg)
-    _guard_log("verbatim_echo", _before, s)
-    if not s:
-        return ""
     _before = s
     s = _strip_meta_memory_talk(s)
     _guard_log("meta_memory_talk", _before, s)
@@ -1396,7 +1472,14 @@ def terminal_reply_guard(
     if not s:
         return ""
     # 2026-11-21 出站质量批：历史相关两道闸（缺省不传历史时不启用）。
-    if recent_assistant_messages:
+    # 2026-11-22 H3 根治：提醒线（guard_category=reminder）豁免这两道闸——
+    # 同文每日重发是提醒的功能语义，落历史后次日同文必被判重吞掉（兜底文案
+    # 逐字稳定 jaccard=1.0；「早点休息/记得吃饭」类提醒常用语还撞模板表）。
+    # 豁免仅限 HISTORY_GATE_EXEMPT_CATEGORIES 白名单类别（仅提醒线传入），
+    # 普通聊天的跨轮去重行为保持不变；其余守卫对豁免类别照常生效。
+    if recent_assistant_messages and (
+        guard_category not in HISTORY_GATE_EXEMPT_CATEGORIES
+    ):
         from utils.outbound_quality import strip_repeated_reply, strip_repeated_templates
 
         _before = s

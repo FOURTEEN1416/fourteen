@@ -6,8 +6,10 @@
 1. `user_profile.nickname` 历史上被 profile 工具写成了「用户对 AI 的称呼」
    （生产 25/28/27/20 与 chat 5851 实证），本次必须做兼容迁移。
    2026-11-21 用户裁决「逐行进行修正」：自述名（我叫X/叫我X 等）保留在
-   nickname；对 AI 的称呼（老公/姐姐/哥哥等）迁入 user_calls_ai 并清空；
-   无法判别保守保留并记待复核日志；迁移前全表备份、幂等、可 dry-run。
+   nickname；对 AI 的称呼（显式「叫你X/喊你X」语境）迁入 user_calls_ai
+   并清空；无法判别保守保留并记待复核日志；迁移前全表备份、幂等、可
+   dry-run。2026-11-22 M13/L4 修正：裸亲属/爱称（老公/姐姐/宝贝等）与
+   动作整句（叫你吃饭等）方向不可判，一律 ambiguous 保守保留 + 待复核。
 2. `address_terms` 的 legal 集合不得再把该字段直接当作用户称呼。
 3. 角色卡 `mes_example` / `creator_notes` 里的「叫你 XX」是角色自称，
    不得直接成为对用户的称呼（拦截 + 白名单校验）。
@@ -70,9 +72,10 @@ def _create_legacy_profile_db(path: Path, nickname: str) -> None:
 
 
 def test_legacy_nickname_migrates_to_user_calls_ai(tmp_path):
-    """对 AI 的称呼（老公）迁到 user_calls_ai，nickname 清空且幂等。"""
+    """显式「叫你X」语境的称呼（叫你老公）迁到 user_calls_ai（取干净名「老公」），
+    nickname 清空且幂等。2026-11-22 M13：裸词不再迁移，迁移只认显式语境。"""
     db = tmp_path / "legacy_profile.db"
-    _create_legacy_profile_db(db, "老公")
+    _create_legacy_profile_db(db, "叫你老公")
 
     store = UserProfileStore(db)
     row = store.get("1001:wx-legacy")
@@ -125,7 +128,7 @@ def test_ambiguous_nickname_is_preserved_and_logged(tmp_path, caplog):
 def test_migration_backs_up_table_and_is_idempotent(tmp_path):
     """迁移前全表备份 JSONL + 每次一行审计；二次构造不重复迁移。"""
     db = tmp_path / "legacy_backup.db"
-    _create_legacy_profile_db(db, "老公")
+    _create_legacy_profile_db(db, "叫你老公")
     with sqlite3.connect(str(db)) as conn:
         conn.execute(
             "INSERT INTO user_profile (user_key, nickname, updated_at) VALUES (?, ?, ?)",
@@ -157,16 +160,219 @@ def test_migration_backs_up_table_and_is_idempotent(tmp_path):
 def test_migration_dry_run_makes_no_changes(tmp_path):
     """dry-run：只判别与写审计，不改库、不打版本标记（后续真实迁移仍可处理）。"""
     db = tmp_path / "legacy_dry.db"
-    _create_legacy_profile_db(db, "老公")
+    _create_legacy_profile_db(db, "叫你老公")
     backup_dir = tmp_path / "backups"
     store = UserProfileStore(
         db, nickname_migration_dry_run=True, migration_backup_dir=backup_dir
     )
     row = store.get("1001:wx-legacy")
-    assert row["nickname"] == "老公", "dry-run 不得清空 nickname"
+    assert row["nickname"] == "叫你老公", "dry-run 不得清空 nickname"
     assert row["user_calls_ai"] == "", "dry-run 不得写入 user_calls_ai"
     assert int(row["address_semantics"]) == 0, "dry-run 不得打已处理标记"
     assert (backup_dir / "migration_audit.log").exists(), "dry-run 仍需留审计"
+
+
+# ═══════════════════════════════════════════════════════════
+# 2026-11-22 对抗验收修复：M13 裸词方向 / L4 写侧过滤对齐 / L5 渲染器否认筛查
+# ═══════════════════════════════════════════════════════════
+
+
+def test_classify_bare_kinship_terms_are_ambiguous_20261122():
+    """M13：裸亲属/爱称方向不可判（旧「叫我X」写入路径同样产生），改判 ambiguous。"""
+    from shisi.memory.legacy.user_profile import classify_legacy_nickname as classify
+
+    for term in (
+        "老公", "老婆", "姐姐", "哥哥", "弟弟", "妹妹",
+        "宝贝", "亲爱的", "老板", "小姐姐", "欧巴",
+    ):
+        assert classify(term) == "ambiguous", f"裸词「{term}」不得单方向判 ai_address"
+    # 显式「叫你X/喊你X」语境仍可判 ai_address
+    assert classify("叫你姐姐") == "ai_address"
+    assert classify("喊你宝贝") == "ai_address"
+    assert classify("以后叫你老公") == "ai_address"
+    # 自述名判别不受影响
+    assert classify("叫我小芳") == "self"
+    assert classify("我的名字是默默") == "self"
+    assert classify("我是十七") == "self"
+    # 普通裸名仍为 ambiguous（保守保留）
+    assert classify("阿茹") == "ambiguous"
+
+
+def test_classify_action_sentences_are_ambiguous_20261122():
+    """L4：判别前套用写侧 _NAME_STOP/动作补语过滤，动作整句改判 ambiguous。"""
+    from shisi.memory.legacy.user_profile import classify_legacy_nickname as classify
+
+    for s in ("叫你吃饭", "叫你起床", "喊你睡觉", "叫你写作业", "叫你过来一下"):
+        assert classify(s) == "ambiguous", f"动作句「{s}」不得判 ai_address"
+    # 「我叫你宝贝」同时命中自述与称呼两条句式 → 方向冲突 → ambiguous（不再判 self）
+    assert classify("我叫你宝贝") == "ambiguous"
+    # 对照：干净称呼名仍可判
+    assert classify("叫你宝贝") == "ai_address"
+    assert classify("叫我小芳") == "self"
+
+
+def test_bare_kinship_rows_stay_pending_review_20261122(tmp_path, caplog):
+    """M13 落库行为：裸词行保守保留在 nickname，不迁 user_calls_ai，记待复核。"""
+    import logging
+
+    db = tmp_path / "legacy_bare_terms.db"
+    _create_legacy_profile_db(db, "姐姐")
+    with sqlite3.connect(str(db)) as conn:
+        conn.executemany(
+            "INSERT INTO user_profile (user_key, nickname, updated_at) VALUES (?, ?, ?)",
+            [
+                ("1001:wx-bare2", "老公", "2026-11-01 00:00:00"),
+                ("1001:wx-bare3", "宝贝", "2026-11-01 00:00:00"),
+            ],
+        )
+        conn.commit()
+
+    with caplog.at_level(logging.WARNING, logger="user_profile"):
+        store = UserProfileStore(db)
+
+    for uk, term in (
+        ("1001:wx-legacy", "姐姐"),
+        ("1001:wx-bare2", "老公"),
+        ("1001:wx-bare3", "宝贝"),
+    ):
+        row = store.get(uk)
+        assert row["nickname"] == term, "裸词方向不可判，必须保守保留原状"
+        assert row["user_calls_ai"] == "", "裸词不得迁入 user_calls_ai"
+        assert int(row["address_semantics"]) == 2
+    assert any(
+        "待复核" in r.getMessage() and "老公" in r.getMessage() for r in caplog.records
+    ), "裸词行必须记入待复核日志"
+
+
+def test_action_sentence_rows_stay_pending_review_20261122(tmp_path, caplog):
+    """L4 落库行为：动作整句保留原状 + 待复核，不迁不判方向。"""
+    import logging
+
+    db = tmp_path / "legacy_action_sentence.db"
+    _create_legacy_profile_db(db, "叫你吃饭")
+    with caplog.at_level(logging.WARNING, logger="user_profile"):
+        store = UserProfileStore(db)
+
+    row = store.get("1001:wx-legacy")
+    assert row["nickname"] == "叫你吃饭", "动作整句必须保守保留原状"
+    assert row["user_calls_ai"] == "", "动作整句不得迁入 user_calls_ai"
+    assert any(
+        "待复核" in r.getMessage() and "叫你吃饭" in r.getMessage()
+        for r in caplog.records
+    ), "动作整句行必须记入待复核日志"
+
+
+def test_store_renderer_screens_denied_names_like_runtime_20261122(tmp_path):
+    """L5：同数据下 to_prompt_block 与 format_profile_prompt_block 行为一致——
+    被用户否认过的称呼不得经 store 渲染路径重新进入提示词。"""
+    from shisi.agent_plane.runtime import format_profile_prompt_block
+
+    db = tmp_path / "legacy_denied_screen.db"
+    _create_legacy_profile_db(db, "小鹿")
+    store = UserProfileStore(db)
+    uk = "1001:wx-legacy"
+    store.upsert(uk, birthday="腊月初一")
+    row = store.get(uk)
+
+    # 未否认：两个渲染器都展示
+    assert "用户希望被称呼：小鹿" in store.to_prompt_block(uk)
+    assert "用户希望被称呼：小鹿" in format_profile_prompt_block(row)
+
+    # 否认「小鹿」后：两个渲染器都隐藏，其余字段照常
+    hidden_store = store.to_prompt_block(uk, denied_names=["小鹿"])
+    hidden_runtime = format_profile_prompt_block(row, denied_names=["小鹿"])
+    assert "小鹿" not in hidden_store and "用户希望被称呼" not in hidden_store
+    assert "生日：腊月初一" in hidden_store
+    assert "小鹿" not in hidden_runtime and "用户希望被称呼" not in hidden_runtime
+    assert "生日：腊月初一" in hidden_runtime
+
+    # 显式空集 = 不筛查（向后兼容旧调用）
+    assert "用户希望被称呼：小鹿" in store.to_prompt_block(uk, denied_names=[])
+
+
+def test_store_renderer_semantics_screening_matches_runtime_20261122(tmp_path):
+    """L5：semantics<2 且已有 user_calls_ai 时 nickname 视为历史污染值，
+    双渲染器一致隐藏；语义升级后一致恢复展示。"""
+    from shisi.agent_plane.runtime import format_profile_prompt_block
+
+    db = tmp_path / "legacy_semantics_screen.db"
+    _create_legacy_profile_db(db, "小鹿")
+    store = UserProfileStore(db)
+    uk = "1001:wx-legacy"
+    store.upsert(uk, nickname="小鹿", user_calls_ai="老公", address_semantics=0)
+    row = store.get(uk)
+
+    assert "用户希望被称呼" not in store.to_prompt_block(uk)
+    assert "用户希望被称呼" not in format_profile_prompt_block(row)
+    assert "用户对 AI 的称呼：老公" in store.to_prompt_block(uk)
+
+    store.upsert(uk, address_semantics=2)
+    assert "用户希望被称呼：小鹿" in store.to_prompt_block(uk)
+    assert "用户希望被称呼：小鹿" in format_profile_prompt_block(store.get(uk))
+
+
+def test_store_renderer_default_call_screens_persisted_denial_20261122(
+    tmp_path, monkeypatch
+):
+    """L5 接线（复核返工项）：生产 store 调用点（ase_engine._user_profile_snippet
+    / persona_service legacy 回退）都是**无参** ``to_prompt_block(user_key)``——
+    缺省必须自动取双源否认名筛查，被否认称呼不得经 store 路径重回生成提示词。
+
+    修复前：缺省 None 不做筛查，ledger 里已持久否认的「小鹿」照样渲染（红）；
+    修复后：默认调用即隐藏（绿），其余画像字段不受影响。
+    """
+    from shisi.agent_plane.profile_projection import write_profile_event
+
+    db = tmp_path / "legacy_denied_default.db"
+    _create_legacy_profile_db(db, "小鹿")
+    store = UserProfileStore(db)
+    uk = "1001:wx-legacy"
+    store.upsert(uk, birthday="腊月初一")
+
+    led = EventLedger(tmp_path / "agent_plane.db")
+    monkeypatch.setattr(apruntime, "get_ledger", lambda: led)
+    # 用户明确否认「小鹿」→ 持久否决事件（源②，窗口滑出后仍生效）
+    write_profile_event(
+        led,
+        session_key=uk,
+        payload={"denied_name": "小鹿", "reason": "test: 用户明确否认该称呼"},
+        correct=True,
+        actor="denial_gate",
+    )
+    assert "小鹿" in apruntime.denied_names_for(uk), "前提：否认已入双源合并入口"
+
+    # 与生产调用点同形：无参调用（denied_names 缺省 None）
+    block = store.to_prompt_block(uk)
+    assert "小鹿" not in block, "被否认称呼不得经 store 渲染路径进入提示词"
+    assert "用户希望被称呼" not in block
+    assert "生日：腊月初一" in block, "否认只隐藏称呼，其余画像字段照常"
+
+
+def test_store_renderer_explicit_empty_list_skips_screening_20261122(tmp_path):
+    """显式传 [] = 调用方确认无否认、跳过筛查（只读/工具路径的豁免口仍在）；
+    与缺省 None（自动取否认名）语义分开。"""
+    db = tmp_path / "legacy_denied_explicit_empty.db"
+    _create_legacy_profile_db(db, "小鹿")
+    store = UserProfileStore(db)
+    uk = "1001:wx-legacy"
+    assert "用户希望被称呼：小鹿" in store.to_prompt_block(uk, denied_names=[])
+
+
+def test_store_renderer_denied_resolution_failure_degrades_20261122(
+    tmp_path, monkeypatch
+):
+    """否认名取数失败（账本故障等）必须降级为空集照常渲染，不得阻断画像注入。"""
+    db = tmp_path / "legacy_denied_degrade.db"
+    _create_legacy_profile_db(db, "小鹿")
+    store = UserProfileStore(db)
+    uk = "1001:wx-legacy"
+
+    def _boom(_sk):
+        raise RuntimeError("ledger unavailable")
+
+    monkeypatch.setattr(apruntime, "denied_names_for", _boom)
+    block = store.to_prompt_block(uk)
+    assert "用户希望被称呼：小鹿" in block, "取数失败按无否认降级，渲染不被阻断"
 
 
 def test_self_intro_name_is_valid_fallback():

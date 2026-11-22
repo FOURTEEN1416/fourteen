@@ -62,10 +62,13 @@ logger = logging.getLogger("run_api")
 def _ensure_time_caliber_migrated() -> None:
     """启动期版本闸：UTC 迁移未落标记 → 生产拒绝启动 / 开发 CRITICAL 放行。
 
-    迁移本身必须在停机窗口由 ``scripts/migrate_time_columns_to_utc.py
-    --apply`` 显式执行（备份 + 幂等标记 + 失败按备份整体恢复）；本入口只做
-    **只读**校验，不在启动期隐式写库。未迁移就上线会把旧北京墙钟行当 UTC
-    读取（提醒提前 8 小时、话题 TTL 偏移），属不可上线的半迁移态。
+    闸的唯一实现在 ``utils.time_caliber``；``create_api_app`` 内也会触发
+    （M10 修复：覆盖 python main.py 直启入口），本入口在编排器初始化**之前**
+    先调一次，让 uvicorn 路径尽早点拒。迁移本身必须在停机窗口由
+    ``scripts/migrate_time_columns_to_utc.py --apply`` 显式执行（备份 +
+    幂等标记 + 失败按备份整体恢复）；本入口只做**只读**校验，不在启动期
+    隐式写库。未迁移就上线会把旧北京墙钟行当 UTC 读取（提醒延后 8 小时、
+    话题 TTL 偏移），属不可上线的半迁移态。
     """
     from utils.time_caliber import ensure_time_caliber_migrated
 

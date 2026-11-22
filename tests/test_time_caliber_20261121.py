@@ -1,4 +1,4 @@
-"""时间口径统一批测试（2026-11-21）。
+"""时间口径统一批测试（2026-11-21；2026-11-22 对抗验收修复批扩充）。
 
 覆盖七层契约：
 1. ``utils.local_time`` 的 UTC 写入口径 / 北京读边界函数；
@@ -9,16 +9,27 @@
 6. ``utils.time_caliber`` 版本闸（生产 fail-closed / 开发 CRITICAL 放行）；
 7. ``daily_llm_budget`` 按北京自然日换日。
 
+2026-11-22 对抗验收修复批新增（§9–§12）：
+8. L8 — 环境判定下沉 ``utils.runtime_env``（utils 层禁导入 api、裸环境可直调版本闸）；
+9. L7 — 未迁移后果方向钉死（旧北京墙钟行被当 UTC 读 = 提醒延后 8 小时）；
+10. M10 — 版本闸接入 ``create_api_app``（python main.py 直启入口同样覆盖）；
+11. L9 — 迁移脚本宿主时区校验（非 UTC+8 拒绝 --apply + 显式覆盖旗标 + dry-run 假设说明）。
+
 隔离纪律：全部使用 ``tmp_path`` 与 monkeypatch；绝不触碰真实 ``data/``。
 本文件按用户纪律**未在本阶段执行 pytest**，由后续统一串行测试阶段运行。
 """
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import logging
+import os
 import sqlite3
+import subprocess
+import sys
+import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -477,6 +488,10 @@ def test_apply_with_backup_restores_sqlite_when_agent_plane_fails(tmp_path, monk
     # 复用类内种子（类方法可直接调用）
     TestMigrationScript._seed_sqlite(sqlite_db)  # noqa: SLF001
     TestMigrationScript._seed_ledger(agent_db)  # noqa: SLF001
+    # 本用例验证的是回滚语义，须钉在「北京宿主」前提上：CI（ubuntu-24.04）
+    # 宿主 UTC 偏移为 0，L9 守卫会先于 _boom 抛「宿主时区非 UTC+8」令
+    # match 落空；守卫语义本身由 TestMigrationHostTimezoneGuard 专项覆盖。
+    monkeypatch.setattr(module, "host_utc_offset_minutes", lambda: 480)
 
     def _boom(*args, **kwargs):
         raise RuntimeError("agent plane down")
@@ -800,3 +815,349 @@ class TestTopicBudgetBeijingDay:
             ts.should_run_llm_judge(_KEY, cfg=cfg, now=datetime(2026, 11, 21, 1, 30, 0))
             is False
         )
+
+
+# ── 9. L8：环境判定下沉 + 裸环境可直接调用版本闸（2026-11-22） ───────────
+
+
+class TestRuntimeEnvSink:
+    """L8：环境判定唯一真源在 ``utils.runtime_env``；utils 层禁导入 api。"""
+
+    def test_runtime_config_reexports_utils_runtime_env(self) -> None:
+        import api.runtime_config as rc
+        import utils.runtime_env as renv
+
+        assert rc.is_production is renv.is_production
+        assert rc.is_explicit_dev is renv.is_explicit_dev
+
+    @pytest.mark.parametrize(
+        ("env", "expected"),
+        [
+            ({"AI_GF_ENV": "prod"}, True),
+            ({"APP_ENV": "production"}, True),
+            ({"ENV": "prod"}, True),
+            # 任一变量命中生产即生产（原 api.runtime_config 语义，保持不变）
+            ({"AI_GF_ENV": "dev", "APP_ENV": "prod"}, True),
+            ({}, False),
+            ({"AI_GF_ENV": "test"}, False),
+            ({"AI_GF_ENV": "staging"}, False),
+        ],
+    )
+    def test_is_production_semantics_preserved(
+        self, monkeypatch, env, expected
+    ) -> None:
+        import utils.runtime_env as renv
+
+        for key in ("AI_GF_ENV", "APP_ENV", "ENV"):
+            monkeypatch.delenv(key, raising=False)
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        assert renv.is_production() is expected
+
+    @pytest.mark.parametrize(
+        ("env", "expected"),
+        [
+            ({"AI_GF_ENV": "dev"}, True),
+            ({"ENV": "development"}, True),
+            ({"AI_GF_ENV": "dev", "APP_ENV": "prod"}, False),  # 生产标记优先
+            ({}, False),
+            ({"AI_GF_ENV": "test"}, False),
+        ],
+    )
+    def test_is_explicit_dev_semantics_preserved(
+        self, monkeypatch, env, expected
+    ) -> None:
+        import utils.runtime_env as renv
+
+        for key in ("AI_GF_ENV", "APP_ENV", "ENV"):
+            monkeypatch.delenv(key, raising=False)
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        assert renv.is_explicit_dev() is expected
+
+    @pytest.mark.parametrize(
+        "rel",
+        ["utils/runtime_env.py", "utils/time_caliber.py", "utils/local_time.py"],
+    )
+    def test_utils_layer_does_not_import_api(self, rel) -> None:
+        """契约守卫：utils 底层禁止反向导入 api 包（防拉起重链/裸环境炸 import）。"""
+        root = Path(__file__).resolve().parents[1]
+        tree = ast.parse((root / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                assert all(
+                    alias.name.split(".")[0] != "api" for alias in node.names
+                ), f"{rel} 出现 import api.*"
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                assert (
+                    node.module.split(".")[0] != "api"
+                ), f"{rel} 出现 from api.* import"
+
+
+class TestBareEnvGateCallable:
+    """L8：裸环境（无 JWT_SECRET、非显式 dev）必须能直接调用时间口径闸。
+
+    旧实现 ``from api.runtime_config import is_production`` 经
+    ``api/__init__ → app_factory → auth_jwt`` 拉起重链，裸环境 import 即抛
+    ``RuntimeError: Refusing to start: JWT_SECRET missing``（本批前置探针
+    实证），闸的检查根本执行不到。修复后 time_caliber 只依赖
+    ``utils.runtime_env``（纯标准库），子进程裸调用必须成功返回。
+    """
+
+    def test_gate_runs_without_jwt_secret_in_bare_subprocess(self, tmp_path) -> None:
+        sqlite_db = tmp_path / "sqlite.db"
+        plane_db = tmp_path / "agent_plane.db"
+        TestTimeCaliberVersionGate._stamp_marker(sqlite_db)  # noqa: SLF001
+        TestTimeCaliberVersionGate._stamp_marker(plane_db)  # noqa: SLF001
+        project_root = str(Path(__file__).resolve().parents[1])
+        code = (
+            "import sys\n"
+            f"sys.path.insert(0, {project_root!r})\n"
+            "from utils.time_caliber import ensure_time_caliber_migrated\n"
+            f"print(ensure_time_caliber_migrated({str(sqlite_db)!r}, {str(plane_db)!r}))\n"
+        )
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("JWT_SECRET", "AI_GF_ENV", "APP_ENV", "ENV")
+        }
+        proc = subprocess.run(
+            [sys.executable, "-I", "-c", code],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=tempfile.gettempdir(),  # 远离仓库根，排除 CWD 隐式导入干扰
+        )
+        assert proc.returncode == 0, f"裸环境调用版本闸失败: {proc.stderr[-500:]}"
+        assert proc.stdout.strip().endswith("True")
+
+
+# ── 10. L7：未迁移后果方向 = 延后 8 小时（2026-11-22） ──────────────────
+
+
+class TestUnmigratedWallClockDirection:
+    """方向钉死：旧北京墙钟行被当 UTC 读取时，提醒**延后** 8 小时触发。
+
+    用户约定北京 10:00（= UTC 02:00）提醒；旧写侧把北京墙钟 '10:00:00'
+    直接落库。未迁移就被新 UTC 读侧消费时，要等 UTC 时钟走到 10:00
+    （= 北京 18:00）才到期 —— 比约定**晚** 8 小时，绝不是提前。
+    """
+
+    def test_legacy_wall_clock_reminder_fires_eight_hours_late(self, tmp_path) -> None:
+        from shisi.memory.legacy import structured_memory as smod
+
+        sm = smod.StructuredMemory(str(tmp_path / "legacy.db"))
+        try:
+            # 直接种一条旧写侧北京墙钟行（绕过新 UTC 写入口径，模拟未迁移存量）
+            with sm.get_connection(write=True) as conn:
+                conn.execute(
+                    "INSERT INTO reminders (content, trigger_time, active, triggered, "
+                    "status, session_key) VALUES ('起床', '2026-11-21 10:00:00', "
+                    "1, 0, 'pending', '1:a')"
+                )
+                conn.commit()
+                rid = conn.execute("SELECT id FROM reminders").fetchone()["id"]
+            # 约定时刻（UTC 02:00）及其后 8 小时内都不到期
+            assert sm.get_due_reminders("2026-11-21 01:59:59") == []
+            assert sm.get_due_reminders("2026-11-21 02:00:00") == []
+            assert sm.get_due_reminders("2026-11-21 09:59:59") == []
+            # UTC 10:00（= 北京 18:00）才到期 —— 延后 8 小时
+            assert [
+                r["id"] for r in sm.get_due_reminders("2026-11-21 10:00:00")
+            ] == [rid]
+        finally:
+            sm.close()
+
+    def test_dev_warning_says_delayed_not_early(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        from utils import time_caliber as tc
+
+        for env in ("AI_GF_ENV", "APP_ENV", "ENV"):
+            monkeypatch.delenv(env, raising=False)
+        sqlite_db = tmp_path / "sqlite.db"
+        sqlite3.connect(sqlite_db).close()
+        plane_db = tmp_path / "agent_plane.db"
+        sqlite3.connect(plane_db).close()
+        with caplog.at_level(logging.CRITICAL, logger="utils.time_caliber"):
+            tc.ensure_time_caliber_migrated(sqlite_db, plane_db)
+        msgs = [r.getMessage() for r in caplog.records if "时间口径" in r.getMessage()]
+        assert msgs, "未迁移时必须有一条 CRITICAL 告警"
+        assert any("延后 8 小时" in m for m in msgs)
+        assert not any("提前 8 小时" in m for m in msgs)
+
+
+# ── 11. M10：版本闸接入 create_api_app（两入口覆盖，2026-11-22） ────────
+
+
+class TestAppFactoryGate:
+    """python main.py 直启经 create_api_app，也必须过时间口径版本闸。"""
+
+    def test_create_api_app_invokes_gate(self, monkeypatch) -> None:
+        import api.app_factory as af
+
+        calls: list[bool] = []
+
+        def _spy() -> bool:
+            calls.append(True)
+            return True
+
+        monkeypatch.setattr(af, "ensure_time_caliber_migrated", _spy)
+        af.create_api_app()
+        assert calls == [True]
+
+    @staticmethod
+    def _empty_dbs(tmp_path: Path) -> None:
+        """造「库文件存在但无迁移标记」的未迁移态（缺文件会被视为无需迁移）。"""
+        for name in ("sqlite.db", "agent_plane.db"):
+            path = tmp_path / "data" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            sqlite3.connect(path).close()
+
+    def test_create_api_app_fail_closed_in_prod_when_unmigrated(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import api.app_factory as af
+        from utils import time_caliber as tc
+
+        monkeypatch.setenv("AI_GF_ENV", "prod")
+        # 把闸的默认库路径重定向到 tmp：库文件存在但无标记 → 未迁移
+        monkeypatch.setattr(
+            tc, "project_path", lambda *parts: tmp_path.joinpath(*parts)
+        )
+        self._empty_dbs(tmp_path)
+        with pytest.raises(RuntimeError, match="时间口径"):
+            af.create_api_app()
+
+    def test_create_api_app_warns_but_starts_in_dev_when_unmigrated(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import api.app_factory as af
+        from utils import time_caliber as tc
+
+        for env in ("AI_GF_ENV", "APP_ENV", "ENV"):
+            monkeypatch.delenv(env, raising=False)
+        monkeypatch.setattr(
+            tc, "project_path", lambda *parts: tmp_path.joinpath(*parts)
+        )
+        self._empty_dbs(tmp_path)
+        # 开发/测试环境：只 CRITICAL 告警放行，不得阻断应用创建
+        app = af.create_api_app()
+        assert app is not None
+
+
+# ── 12. L9：迁移脚本宿主时区校验（2026-11-22） ──────────────────────────
+
+
+class TestMigrationHostTimezoneGuard:
+    """逐列 -8h 的前提是旧值=北京墙钟；非 UTC+8 宿主默认拒绝 --apply。"""
+
+    def test_guard_accepts_beijing_and_explicit_override(self) -> None:
+        module = _load_migration_module()
+
+        module.ensure_beijing_wall_clock_host(480)  # 北京宿主放行
+        module.ensure_beijing_wall_clock_host(0, allow_override=True)  # 显式覆盖放行
+        with pytest.raises(RuntimeError, match="--allow-non-beijing-host"):
+            module.ensure_beijing_wall_clock_host(0)  # UTC 宿主
+        with pytest.raises(RuntimeError, match="UTC 偏移 -300"):
+            module.ensure_beijing_wall_clock_host(-300)  # 西五区宿主
+
+    @staticmethod
+    def _seed_both(module, tmp_path: Path) -> tuple[Path, Path]:
+        sqlite_db = tmp_path / "sqlite.db"
+        agent_db = tmp_path / "agent_plane.db"
+        TestMigrationScript._seed_sqlite(sqlite_db)  # noqa: SLF001
+        TestMigrationScript._seed_ledger(agent_db)  # noqa: SLF001
+        return sqlite_db, agent_db
+
+    def test_apply_refuses_before_any_write_on_non_beijing_host(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        module = _load_migration_module()
+        sqlite_db, agent_db = self._seed_both(module, tmp_path)
+        monkeypatch.setattr(module, "host_utc_offset_minutes", lambda: 0)
+
+        with pytest.raises(RuntimeError, match="UTC\\+8"):
+            module.apply_with_backup(sqlite_db, agent_db, tmp_path / "backups")
+
+        # 拒绝发生在任何备份/写库动作之前：无备份库文件、两库原样、无迁移标记
+        # （ensure_applied 链路的跨进程锁文件允许存在，锁不是备份）
+        assert not list((tmp_path / "backups").glob("*.db"))
+        assert sqlite3.connect(sqlite_db).execute(
+            "SELECT last_active_at FROM topic_state"
+        ).fetchone()[0] == "2026-11-21 10:00:00"
+        assert sqlite3.connect(agent_db).execute(
+            "SELECT created_at FROM event_ledger"
+        ).fetchone()[0] == "2026-11-21T10:00:00+08:00"
+
+    def test_apply_override_flag_allows_non_beijing_host(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        module = _load_migration_module()
+        sqlite_db, agent_db = self._seed_both(module, tmp_path)
+        monkeypatch.setattr(module, "host_utc_offset_minutes", lambda: 0)
+
+        result = module.apply_with_backup(
+            sqlite_db, agent_db, tmp_path / "backups", allow_non_beijing_host=True
+        )
+        assert result["sqlite"]["applied"] is True
+        assert sqlite3.connect(sqlite_db).execute(
+            "SELECT last_active_at FROM topic_state"
+        ).fetchone()[0] == "2026-11-21 02:00:00"
+
+    def test_dry_run_report_states_wall_clock_assumption(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        module = _load_migration_module()
+        (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+        sqlite_db, agent_db = self._seed_both(module, tmp_path / "data")
+        monkeypatch.setattr(
+            module, "project_path", lambda *parts: tmp_path.joinpath(*parts)
+        )
+
+        rc = module.main(["--dry-run"])
+        report = json.loads(capsys.readouterr().out)
+        assert rc == 0
+        assert report["status"] == "dry_run"
+        assert "北京墙钟" in report["assumption"]
+        assert isinstance(report["host_utc_offset_minutes"], int)
+        assert report["sqlite"]["db"].endswith("sqlite.db")
+        assert sqlite_db.exists() and agent_db.exists()
+
+    def test_apply_via_cli_refuses_non_beijing_host(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        module = _load_migration_module()
+        (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+        sqlite_db, _agent_db = self._seed_both(module, tmp_path / "data")
+        monkeypatch.setattr(
+            module, "project_path", lambda *parts: tmp_path.joinpath(*parts)
+        )
+        monkeypatch.setattr(module, "host_utc_offset_minutes", lambda: 0)
+
+        with pytest.raises(RuntimeError, match="--allow-non-beijing-host"):
+            module.main(["--apply"])
+        # 拒绝后库保持未迁移原样
+        assert sqlite3.connect(sqlite_db).execute(
+            "SELECT last_active_at FROM topic_state"
+        ).fetchone()[0] == "2026-11-21 10:00:00"
+
+    def test_apply_via_cli_override_flag_migrates(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        module = _load_migration_module()
+        (tmp_path / "data").mkdir(parents=True, exist_ok=True)
+        sqlite_db, _agent_db = self._seed_both(module, tmp_path / "data")
+        monkeypatch.setattr(
+            module, "project_path", lambda *parts: tmp_path.joinpath(*parts)
+        )
+        monkeypatch.setattr(module, "host_utc_offset_minutes", lambda: 0)
+
+        rc = module.main(["--allow-non-beijing-host", "--apply"])
+        assert rc == 0
+        report = json.loads(capsys.readouterr().out)
+        assert report["status"] == "applied"
+        assert sqlite3.connect(sqlite_db).execute(
+            "SELECT last_active_at FROM topic_state"
+        ).fetchone()[0] == "2026-11-21 02:00:00"

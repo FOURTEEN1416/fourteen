@@ -650,3 +650,108 @@ def test_voice_gate_allows_fresh_window(chan, monkeypatch):
     got = pvd.send_proactive_voice(f"{uid}:wx_peer@im.wechat", "想你了", "c1")
     assert got == (True, "", 0)
     assert len(calls["synth"]) == 1 and len(calls["file"]) == 2
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ⑨ 扫码超时降级对象必须让出注册表槽位（M9，2026-11-22）
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_interactive_login_timeout_releases_registry_slot(chan, monkeypatch):
+    """扫码超时（interactive 登录失败）后：降级对象摘出注册表 + 释放 flock。
+
+    修复前：run() 只把状态写成 degraded 就返回，对象（_stop=False）滞留
+    注册表——MAX_CHANNELS_PER_USER=1 下重扫 /connect 恒 429。
+    """
+    uid = 51
+    conn = _mk_conn(chan, uid=uid)
+    reg = get_registry()
+    reg._connectors[(uid, 0)] = conn
+    reg._poll_lock_fds[(uid, 0)] = -1
+    monkeypatch.setattr(conn, "login", lambda interactive=True: False)
+    conn.allow_interactive_login = True
+
+    try:
+        conn.run()
+
+        assert conn.auth_state == wc.AUTH_STATE_DEGRADED
+        assert not conn._terminal_state, "扫码超时不是终态，用户可再次发起"
+        assert (uid, 0) not in reg._connectors, (
+            "超时降级对象必须摘出注册表（滞留则重扫 /connect 恒 429）"
+        )
+        assert (uid, 0) not in reg._poll_lock_fds, "通道 flock 必须随降级回收释放"
+        assert reg._pick_slot(uid) == 0, "回收后同槽位必须可再次分配"
+    finally:
+        reg._connectors.pop((uid, 0), None)
+        reg._poll_lock_fds.pop((uid, 0), None)
+
+
+def test_start_login_after_timeout_can_reconnect(chan, monkeypatch):
+    """扫码超时后再次 start_login：不再 429，新连接器带交互旗标启动。"""
+    uid = 56
+    reg = get_registry()
+    stale = _mk_conn(chan, uid=uid)
+    reg._connectors[(uid, 0)] = stale
+    stale.allow_interactive_login = True
+    monkeypatch.setattr(stale, "login", lambda interactive=True: False)
+    stale.run()  # 超时 → degraded → 自动摘出注册表
+    assert (uid, 0) not in reg._connectors
+
+    seen: dict[str, bool] = {}
+
+    class _Dummy:
+        slot = 0
+        owner_user_id = uid
+        allow_interactive_login = False
+        _stop = False
+        _terminal_state = False
+
+        def run(self):
+            seen["allow"] = self.allow_interactive_login
+
+    monkeypatch.setattr(
+        "wechat_direct.wechat_connector.WeChatConnector",
+        lambda user_manager=None, **kw: _Dummy(),
+    )
+    monkeypatch.setattr(
+        ConnectorRegistry, "_try_acquire_poll_lock", staticmethod(lambda u, s: 0)
+    )
+    try:
+        result = reg.start_login(uid, slot=0)
+        assert result["status"] == "connecting"
+        deadline = time.time() + 2.0
+        while "allow" not in seen and time.time() < deadline:
+            time.sleep(0.01)
+        assert seen.get("allow") is True, "重扫必须重新进入交互式扫码（修复前恒 429）"
+    finally:
+        reg._connectors.pop((uid, 0), None)
+        reg._poll_lock_fds.pop((uid, 0), None)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ⑩ token 窗口探针感知 needs_reauth 终态（L6，2026-11-22）
+# ═══════════════════════════════════════════════════════════════
+
+
+def test_token_window_state_treats_needs_reauth_as_dead(chan):
+    """终态会话即使 token 文件新鲜，探针也必须判 dead（烧前闸据此跳过）。
+
+    修复前：探针只看 context_tokens.json 的 ts 新鲜度——会话死后窗口文件
+    <24h 新鲜期间返回 fresh，主动线烧前闸放行，决策 LLM 仍被白烧。
+    """
+    uid = 54
+    save_session_state(uid, 0, {"status": "needs_reauth", "auth_state": "needs_reauth"})
+    _seed_window(uid, 0)  # 新鲜 token——修复前探针返回 fresh
+
+    st = wc.token_window_state(uid, 0)
+    assert st["state"] == "dead"
+    assert st.get("reason") == "needs_reauth"
+
+
+def test_token_window_state_without_terminal_still_uses_freshness(chan):
+    """对照（防误伤）：无终态时探针仍按 token 新鲜度判定，不把健康会话判死。"""
+    uid = 55
+    save_session_state(uid, 0, {"status": "connected", "auth_state": "connected"})
+    _seed_window(uid, 0)  # 新鲜 token
+
+    assert wc.token_window_state(uid, 0)["state"] == "fresh"
