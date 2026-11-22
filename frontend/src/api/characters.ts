@@ -10,7 +10,6 @@ import type {
   CharacterListResponse,
   CharacterCreateResponse,
   StorylineConfigResponse,
-  StorylineProgress,
   StorylineDetectResult,
   StorylineConfigRequest,
   CharacterVoiceResponse,
@@ -186,11 +185,6 @@ export function addFavorite(characterId: string, memoryId: string) {
   })
 }
 
-/** DELETE /api/characters/{id}/favorites/{memoryId} — 取消收藏 */
-export function removeFavorite(characterId: string, memoryId: string) {
-  return client.delete(`/characters/${characterId}/favorites/${memoryId}`)
-}
-
 /** POST /api/characters/{cid}/favorites/forward — 转发收藏到其他角色 */
 export function forwardFavorite(fromCid: string, toCid: string, memoryId: string, content = '') {
   return client.post(`/characters/${fromCid}/favorites/forward`, {
@@ -216,16 +210,8 @@ export function deleteStorylineConfig(id: string): Promise<{ status: string; cha
   return client.delete(`/characters/${id}/storyline`).then(r => r.data as { status: string; character_id: string })
 }
 
-export function getStorylineProgress(id: string): Promise<StorylineProgress> {
-  return client.get(`/characters/${id}/storyline/progress`).then(r => r.data as StorylineProgress)
-}
-
 export function detectStoryline(id: string): Promise<StorylineDetectResult> {
   return client.post(`/characters/${id}/storyline/detect`).then(r => r.data as StorylineDetectResult)
-}
-
-export function resetStoryline(id: string): Promise<{ status: string; character_id: string }> {
-  return client.post(`/characters/${id}/storyline/reset`).then(r => r.data as { status: string; character_id: string })
 }
 
 // ════════════════════════════════════════════════════

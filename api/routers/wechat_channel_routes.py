@@ -150,27 +150,6 @@ async def get_my_channel(
     return payload
 
 
-@router.get("/list")
-async def list_my_channels(
-    user_id: int = Security(get_current_user_id),
-    db=Depends(get_db),
-):
-    statuses = get_registry().status_for_user(user_id)
-    for st in statuses:
-        slot = int(st.get("slot", 0))
-        connected = bool(st.get("connected"))
-        status = "connected" if connected else (st.get("status") or "idle")
-        if status in ("waiting_qr", "scanned") and connected:
-            status = "connected"
-        await _upsert_session_row(
-            db, user_id, slot,
-            status=status,
-            bot_id=str(st.get("bot_id") or ""),
-        )
-    channels = [_safe_channel_payload(s) for s in statuses]
-    return {"channels": channels, "max_per_user": channel_paths.MAX_CHANNELS_PER_USER}
-
-
 @router.post("/connect")
 async def connect_my_channel(
     req: ChannelConnectRequest | None = None,

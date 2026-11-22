@@ -23,6 +23,10 @@ function useBreadcrumbs(): Crumb[] {
   // /wechat
   if (pathname === '/wechat') return [{ label: '连接' }]
 
+  // /help 与 /intro：侧栏正常入口（2026-11-22 走查实证缺映射显示「未知页面」）
+  if (pathname === '/help') return [{ label: '使用帮助' }]
+  if (pathname === '/intro') return [{ label: '使用指南' }]
+
   // /settings/*
   const settingsMatch = pathname.match(/^\/settings\/(.+)/)
   if (settingsMatch) {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import Button from '../common/Button'
 import Badge from '../common/Badge'
+import { ConfirmDialog } from '../shared'
 import {
   useStorylineConfig,
   useUpdateStorylineConfig,
@@ -174,9 +175,11 @@ export default function StorylineEditor({ characterId, standalone = false }: Sto
   }
 
   // ── 删除 ──
+  // 2026-11-22：原生 window.confirm 换 ConfirmDialog——与数据页删除角色同一
+  // 危险操作确认形态（走查发现同类操作两套交互不一致）。
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   async function handleDelete() {
-    if (!confirm('确定删除剧情线配置？')) return
     try {
       await deleteMutation.mutateAsync(characterId)
       setEnabled(false)
@@ -538,12 +541,26 @@ export default function StorylineEditor({ characterId, standalone = false }: Sto
             <Button variant="primary" size="sm" onClick={handleSave} disabled={saveStatus === 'saving'}>
               {saveStatus === 'saved' ? '✓ 已保存' : saveStatus === 'error' ? '保存失败' : '保存剧情线'}
             </Button>
-            <Button variant="danger" size="sm" onClick={handleDelete}>
+            <Button variant="danger" size="sm" onClick={() => setShowDeleteConfirm(true)}>
               删除
             </Button>
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="确认删除剧情线"
+        message="删除后角色的剧情线配置与进度将被清除，对话不再受剧情线影响。确定继续？"
+        confirmText="删除"
+        cancelText="取消"
+        variant="danger"
+        onConfirm={() => {
+          setShowDeleteConfirm(false)
+          void handleDelete()
+        }}
+        onCancel={() => setShowDeleteConfirm(false)}
+      />
     </div>
   )
 }

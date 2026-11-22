@@ -84,14 +84,6 @@ async def list_favorites(
     return ApiResponse(data=favs)
 
 
-# 通配路由必须放在全部静态路径之后：原声明位次在 /favorites 之前，
-# `GET /api/shisi/memory/favorites` 被 `/{character_id}`（character_id="favorites"）
-# 抢先匹配 → 收藏列表端点在 API 层不可达（集成测试只断言 200 故长期未暴露）。
-@router.get("/{character_id}", response_model=ApiResponse)
-async def get_memories(character_id: str):
-    return ApiResponse(data={"character_id": character_id, "message": "记忆查询需要对接现有MemoryPipeline"})
-
-
 @router.post("/forward", response_model=ApiResponse)
 async def forward_memory(
     req: ForwardRequest,

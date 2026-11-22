@@ -17,11 +17,6 @@ vi.mock('../../hooks/useQueries', () => ({
   },
 }))
 
-vi.mock('../../api/wechat', () => ({
-  wechatCreateConnection: vi.fn(() => Promise.resolve()),
-  wechatDeleteConnection: vi.fn(() => Promise.resolve()),
-}))
-
 vi.mock('../../api/system', () => ({
   wechatQrCode: vi.fn(() => Promise.resolve({ data: {} })),
   wechatConnectionStatus: vi.fn(() => Promise.resolve({ data: {} })),
@@ -165,9 +160,13 @@ describe('WeChatPage 扫码弹窗状态机（NEW-4）', () => {
     vi.useRealTimers()
   })
 
-  it('二维码连续拉取失败 ≥3 次进入错误态并提供重试（旧实现 error 分支死代码）', async () => {
+  it('connect 成功但二维码连续拉取失败 ≥3 次 → 进入错误态并提供重试（旧实现 error 分支死代码）', async () => {
+    // 2026-11-22：connect 失败改为立即错误态（triggerConnection 内直接置 error），
+    // qr 失败 bail 路径改由「connect 成功 + qr 连续失败」驱动——原测试把 connect
+    // mock 成 reject，与新行为冲突；mock 实现泄漏（clearAllMocks 不重置实现）
+    // 还会污染后续两条用例，故三条用例各自显式设定 wechatConnect 的行为。
+    vi.mocked(wechatConnect).mockResolvedValue(undefined as never)
     vi.mocked(wechatQrCode).mockRejectedValue(new Error('network down'))
-    vi.mocked(wechatConnect).mockRejectedValue(new Error('connect failed'))
 
     renderPage()
     fireEvent.click(screen.getByText('立即扫码连接'))
@@ -179,7 +178,23 @@ describe('WeChatPage 扫码弹窗状态机（NEW-4）', () => {
     expect(screen.getByText('重试')).toBeDefined()
   })
 
+  it('connect 触发失败（无 response）→ 弹窗立即置错误态，不再展示扫不上的二维码', async () => {
+    vi.mocked(wechatConnect).mockRejectedValue(new Error('connect failed'))
+    vi.mocked(wechatQrCode).mockResolvedValue({ data: { qr_image: 'data:image/png;base64,AAA', is_expired: false } } as never)
+
+    renderPage()
+    fireEvent.click(screen.getByText('立即扫码连接'))
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+
+    // connect 失败 → 直接错误态（不等 1.5s 后的 qr 轮询），用户不扫无效码
+    expect(screen.getByText('发起扫码连接失败，请检查网络后重试')).toBeDefined()
+    expect(screen.getByText('重试')).toBeDefined()
+    expect(screen.queryByText('请用微信扫描二维码')).toBeNull()
+  })
+
   it('等待扫码期间后端报 is_expired → 自动切「二维码已过期」', async () => {
+    vi.mocked(wechatConnect).mockResolvedValue(undefined as never)
     vi.mocked(wechatQrCode).mockResolvedValue({ data: { qr_image: 'data:image/png;base64,AAA', is_expired: false } } as never)
     // 连接轮询返回 waiting_qr + 过期
     vi.mocked(wechatConnectionStatus).mockResolvedValue({ data: { connected: false, status: 'waiting_qr', is_expired: true } } as never)
@@ -194,6 +209,7 @@ describe('WeChatPage 扫码弹窗状态机（NEW-4）', () => {
   })
 
   it('连接成功态展示首日接力提示（V2-4③）', async () => {
+    vi.mocked(wechatConnect).mockResolvedValue(undefined as never)
     vi.mocked(wechatQrCode).mockResolvedValue({ data: { qr_image: 'data:image/png;base64,AAA', is_expired: false } } as never)
     vi.mocked(wechatConnectionStatus).mockResolvedValue({ data: { connected: true, status: 'connected' } } as never)
 

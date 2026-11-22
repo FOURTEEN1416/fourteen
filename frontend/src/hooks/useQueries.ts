@@ -523,15 +523,6 @@ export function useStorylineConfig(characterId: string | undefined) {
   })
 }
 
-export function useStorylineProgress(characterId: string | undefined) {
-  return useQuery({
-    queryKey: privateKey('storyline', characterId, 'progress'),
-    queryFn: () => api.getStorylineProgress(characterId!),
-    enabled: !!characterId,
-    refetchInterval: 60 * 1000,
-  })
-}
-
 export function useUpdateStorylineConfig() {
   const qc = useQueryClient()
   return useMutation({
@@ -566,12 +557,3 @@ export function useDetectStoryline() {
   })
 }
 
-export function useResetStoryline() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (characterId: string) => api.resetStoryline(characterId),
-    onSuccess: (_data, characterId) => {
-      qc.invalidateQueries({ queryKey: privateKey('storyline', characterId, 'progress') })
-    },
-  })
-}

@@ -39,7 +39,6 @@ from api.routers.safety_routes import router as safety_router
 from api.routers.tools_routes import router as tools_router
 from api.routers.topic_routes import router as topic_state_router
 from api.routers.training_routes import router as training_router
-from api.routers.users_routes import router as users_router
 from api.runtime_config import (
     UNSAFE_API_KEYS,
     is_explicit_dev,
@@ -290,7 +289,6 @@ def create_api_app(
     app.include_router(misc_router)         # health/stats/memory/logs/config/channels/routes
     app.include_router(chat_router)         # chat/session + wechat channels
     app.include_router(personality_router)  # emotion/persona/psych
-    app.include_router(users_router)        # users/*
     app.include_router(training_router)     # training/* + proactive/*（含手动控制）
     app.include_router(tools_router)        # tools/* + plugins/*
     app.include_router(safety_router)       # safety/rag/voice/files/cache

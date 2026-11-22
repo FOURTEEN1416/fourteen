@@ -709,35 +709,6 @@ export interface StorylineConfigResponse {
   affects_chat?: boolean
 }
 
-export interface StorylineState {
-  character_id: string
-  story_time_minutes: number
-  story_day: number
-  story_hour: number
-  story_minute: number
-  display_time: string
-  current_stage_index: number
-  is_ended: boolean
-  turn_count: number
-}
-
-export interface StorylineCurrentStage {
-  name: string
-  display_name: string
-  style_rules: string[]
-  behavior_rules: string[]
-  dialogue_notes: string
-  transition_message: string
-}
-
-export interface StorylineProgress {
-  enabled: boolean
-  state: StorylineState | null
-  current_stage: StorylineCurrentStage | null
-  progress_percent: number
-  total_stages: number
-}
-
 export interface StorylineDetectResult {
   has_storyline: boolean
   confidence: number

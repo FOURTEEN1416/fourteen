@@ -211,20 +211,6 @@ async def delete_storyline_config(
     return {"status": "deleted", "character_id": character_id}
 
 
-@router.get("/{character_id}/storyline/progress")
-async def get_storyline_progress(
-    character_id: str,
-    _auth: bool = Security(verify_api_key_dep),
-    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
-    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
-    _owned: dict = Depends(require_character_access),
-):
-    """获取角色剧情线进度。"""
-    engine = get_storyline_engine()
-    progress = engine.get_progress(character_id)
-    return progress
-
-
 @router.post("/{character_id}/storyline/detect")
 async def detect_storyline(
     character_id: str,
@@ -254,17 +240,3 @@ async def detect_storyline(
         "matched_patterns": result.matched_patterns,
         "suggested": result.suggested_config.to_dict() if result.suggested_config else None,
     }
-
-
-@router.post("/{character_id}/storyline/reset")
-async def reset_storyline(
-    character_id: str,
-    _auth: bool = Security(verify_api_key_dep),
-    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
-    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
-    _owned: dict = Depends(require_character_access),
-):
-    """重置角色剧情线进度（从头开始）。"""
-    engine = get_storyline_engine()
-    engine.reset_state(character_id)
-    return {"status": "reset", "character_id": character_id}

@@ -537,9 +537,11 @@ async def test_session_create_and_list_use_authenticated_owner(monkeypatch):
     monkeypatch.setattr(chat_routes.deps, "sessions", manager)
     created = await chat_routes.create_session(CreateSessionRequest(user_id="8", channel="8:web"), _auth=True, user_id=7)
     assert created["session_id"].startswith("7:web:")
-    listed = await chat_routes.list_sessions(_auth=True, user_id=7)
-    assert listed == {"sessions": [created["session_id"]], "active_count": 1}
-    assert other not in listed["sessions"]
+    # GET /api/sessions 已随 2026-11-22 淘汰批删除（全仓零 HTTP 消费）；「列表只回
+    # 本人会话」的归属隔离语义改在 SessionManager 层验证（读侧唯一实现）。
+    owned = manager.get_active_sessions("7")
+    assert created["session_id"] in owned
+    assert other not in owned
 
 
 @pytest.mark.parametrize("text", [

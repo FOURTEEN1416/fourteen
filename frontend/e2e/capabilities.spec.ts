@@ -9,7 +9,7 @@
  *   E2E 库必然无日记 → 按任务包降级为「空态不报错」：断言状态中心正常渲染 + /api/memory/diary 契约。
  *   （DiaryCard 组件按设计在空态不渲染，故不冒烟卡片展开，避免为测试改业务代码）
  * - BYOK 完整引导流（403 → toast → /settings/llm）需 byok_required=true 后端 + 非 admin 用户，
- *   成本高 → 按任务包降级为 /api/meta 的 byok_required 字段结构断言（公开端点）。
+ *   成本高 → 该契约由前端 client.ts 的 X-Error-Code 响应头拦截链承担（/api/meta 死端点已随淘汰批删除）。
  */
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
@@ -138,15 +138,6 @@ test.describe('W4 新能力冒烟', () => {
       data: { dates: baseline },
     })
     expect(restore.ok()).toBeTruthy()
-  })
-
-  test('BYOK 引导契约：/api/meta 公开端点返回 byok_required 布尔字段', async ({ request }) => {
-    const res = await request.get('/api/meta')
-    expect(res.ok()).toBeTruthy()
-    const body = await res.json()
-    // W1-BYOK 契约：前端统一 403 拦截依据该字段；结构存在性即冒烟目标
-    expect(typeof body.byok_required).toBe('boolean')
-    expect(typeof body.version).toBe('string')
   })
 })
 

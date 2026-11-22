@@ -244,15 +244,6 @@ async def get_dashboard_stats(
 # ═══════════════════════════════════════════════════════
 
 
-@router.get("/api/meta")
-async def public_meta():
-    """公开元信息（无认证）：前端启动判断 BYOK 引导等。"""
-    from api.byok import byok_required
-
-    llm_cfg = deps.orch.components.get("config").config.llm if deps.orch and deps.orch.components else None
-    return {"byok_required": byok_required(llm_cfg), "version": "3.1.0"}
-
-
 class DiarySeedRequest(BaseModel):
     date: str  # YYYY-MM-DD
     summary: str = Field(min_length=1, max_length=8000)
@@ -424,59 +415,6 @@ async def get_logs(
             user_id=_logs_user_id(current_user),
         )
     }
-
-
-@router.get("/api/logs/stream")
-async def stream_logs(
-    _auth: bool = Security(verify_api_key_dep),
-    current_user: User = Security(get_current_user),
-):
-    user_id = _logs_user_id(current_user)
-
-    async def event_generator():
-        queue: asyncio.Queue = asyncio.Queue(maxsize=100)
-        # get_running_loop：本函数为 async generator，循环必然在运行中。
-        # get_event_loop() 已废弃（3.12 起 DeprecationWarning）。
-        loop = asyncio.get_running_loop()
-
-        log_queue_handler = logging.Handler()
-        log_queue_handler.setLevel(logging.INFO)
-
-        def emit(record):
-            try:
-                # 非管理员只推送属于本账号的日志
-                if user_id is not None and getattr(record, "user_id", None) != user_id:
-                    return
-                msg = log_queue_handler.format(record)
-                asyncio.run_coroutine_threadsafe(queue.put(msg), loop)
-            except Exception as e:
-                logger.debug("Failed to emit log to SSE queue: %s", e)
-
-        log_queue_handler.emit = emit
-
-        root_logger = logging.getLogger()
-        root_logger.addHandler(log_queue_handler)
-
-        try:
-            while True:
-                try:
-                    msg = await asyncio.wait_for(queue.get(), timeout=30)
-                    yield f"data: {msg}\n\n"
-                except asyncio.TimeoutError:
-                    yield "data: {}\n\n"
-        finally:
-            root_logger.removeHandler(log_queue_handler)
-
-    from fastapi.responses import StreamingResponse
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 # ═══════════════════════════════════════════════════════

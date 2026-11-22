@@ -28,7 +28,6 @@ from api.auth import verify_api_key_dep
 from api.auth_jwt import (
     AuthPrincipal,
     get_current_user,
-    get_current_user_id,
     get_optional_principal,
     require_role,
 )
@@ -391,16 +390,6 @@ async def create_session(
     sessions = deps.sessions
     session_id = sessions.create_session(str(user_id), "web") if sessions else _owned_session("", user_id)
     return {"session_id": session_id}
-
-
-@router.get("/api/sessions")
-async def list_sessions(
-    _auth: bool = Security(verify_api_key_dep),
-    user_id: int = Security(get_current_user_id),
-):
-    sessions = deps.sessions
-    owned = sessions.get_active_sessions(str(user_id)) if sessions else []
-    return {"sessions": owned, "active_count": len(owned)}
 
 
 def _session_owned_by(session_id: str, user_id: int) -> bool:

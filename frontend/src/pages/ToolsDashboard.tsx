@@ -34,6 +34,12 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   set_reminder: '设置定时提醒',
   query_reminders: '查询已有提醒',
   time_awareness: '时间感知与日程认知',
+  // 2026-11-22：走查发现 5 个工具缺字典条目直出英文键——描述与后端 registry 语义一致
+  manage_reminder: '管理已设提醒（取消 / 改期 / 恢复）',
+  update_user_profile: '更新你的画像档案（只记你明确说过的信息）',
+  remember_facts: '把你说过的新事实写入长期记忆',
+  forget_facts: '删除错误或被你否认的事实（可恢复）',
+  query_profile: '查询你的画像与相关事实',
 }
 
 /** V2-1②：未收录工具的标题/描述可读化（snake_case → 空格分词），不再直出英文原始键 */

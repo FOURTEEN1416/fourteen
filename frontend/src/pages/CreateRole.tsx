@@ -622,6 +622,10 @@ function PresetPills({ onSelect }: { onSelect: (p: Partial<PersonaState>) => voi
   const setImportFile = useCharacterBuilderStore(s => s.setImportFile)
 
   useEffect(() => {
+    // 2026-11-22：StrictMode dev remount 下 cleanup 置位的 cancelledRef 会拦截
+    // 第二次 mount 自己的请求结果——「加载预设角色...」永久挂起（走查实证）。
+    // effect 开头重置，每个生命周期只拦 cleanup 之后迟到的旧请求。
+    cancelledRef.current = false
     listPresets()
       .then(res => { if (!cancelledRef.current) setPresets(res.presets || []) })
       .catch((err: unknown) => { if (import.meta.env.DEV) console.warn('加载预设角色失败:', err) })

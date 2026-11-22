@@ -88,13 +88,13 @@ const GUIDE_ITEMS: GuideItem[] = [
   },
   {
     to: '/settings/security',
-    title: '安全 · 会话管理',
-    desc: '登录会话与退出登录。',
+    title: '安全 · 内容安全',
+    desc: '内容安全面板的运行状态、累计拦截与最近安全事件。',
   },
   {
     to: '/settings/logs',
     title: '日志 · 运行记录',
-    desc: '系统运行日志（管理员面）。',
+    desc: '运行日志：普通用户见本人请求级日志，管理员见全站日志。',
   },
 ]
 

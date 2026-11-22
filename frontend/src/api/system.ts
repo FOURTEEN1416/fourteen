@@ -152,7 +152,6 @@ export function channels() { return client.get('/channels') }
 // 微信通道：2026-09-19 起改为每人独立通道
 // 用户侧主接口 = /api/wechat/channel*；旧 /channels/wechat/* 需 JWT 且仅返回自己的状态
 export function wechatStatus() { return client.get('/wechat/channel') }
-export function wechatChannelList() { return client.get('/wechat/channel/list') }
 export function wechatReconnect() { return client.post('/wechat/channel/reconnect') }
 export function wechatConnect() { return client.post('/wechat/channel/connect') }
 export function wechatDisconnect() { return client.post('/wechat/channel/disconnect') }

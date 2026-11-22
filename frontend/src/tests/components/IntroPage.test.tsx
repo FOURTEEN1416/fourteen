@@ -34,7 +34,8 @@ describe('IntroPage', () => {
     expect(link.getAttribute('href')).toBe('/login')
     // D13 开放注册主链路：不得再把「邀请码制」说成注册前提
     expect(screen.queryByText(/注册采用邀请码制/)).toBeNull()
-    expect(screen.getByText(/无需邀请码/)).toBeDefined()
+    // 2026-11-22：指南卡也补了「无需邀请码」对齐——用 getAllByText 断言两处都在
+    expect(screen.getAllByText(/无需邀请码/).length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows the MIT open-source badge with GitHub link', () => {

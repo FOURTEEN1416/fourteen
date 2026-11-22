@@ -1,8 +1,8 @@
 """
 9 sub-router mount verification — migrated to api.routers/
 
-Each test verifies that endpoints from one of the 9 sub-routers
-(api.routers.misc_routes, chat_routes, personality_routes, users_routes,
+Each test verifies that endpoints from one of the 8 sub-routers
+(api.routers.misc_routes, chat_routes, personality_routes,
  training_routes, tools_routes, safety_routes, clone_routes, topic_routes)
 are correctly mounted in the FastAPI app with the right method+path.
 
@@ -30,7 +30,6 @@ from api.routers import (
     tools_routes,
     topic_routes,
     training_routes,
-    users_routes,
 )
 
 
@@ -143,11 +142,10 @@ def test_control_plane_critical_routes_are_mounted(app):
 @pytest.mark.parametrize(
     "module,expected_count,label",
     [
-        (misc_routes, 17, "stats/memory/diary/dates/meta/logs/config/channels/routes/user-llm-config（10-29 +user/llm-config/test BYOK 连通性测试）"),
-        (chat_routes, 11, "chat/session + wechat channels"),
+        (misc_routes, 15, "stats/memory/diary/dates/logs/config/channels/routes/user-llm-config（10-29 +user/llm-config/test；11-22 淘汰 /api/meta 与 /api/logs/stream，17→15）"),
+        (chat_routes, 10, "chat/session + wechat channels（11-22 淘汰 GET /api/sessions，11→10）"),
         (personality_routes, 10, "emotion/persona/psych（08-31? +emotion/distribution SP-1）"),
-        (users_routes, 7, "users/*"),
-        (training_routes, 19, "training/* + proactive/* + humanize/*（11-07 +user/self-profile GET/PUT P8 +user/proactive/history P7；11-08 D-A 退役 user/reply-mode×2 + user/humanize×4 + humanize/config DELETE×1 + user/proactive-config×3 + user/proactive/pause×1，30→19）"),
+        (training_routes, 17, "training/* + proactive/* + humanize/*（11-07 +user/self-profile GET/PUT P8 +user/proactive/history P7；11-08 D-A 退役 11 条 30→19；11-22 淘汰 training/clean+test 双端皆死，19→17）"),
         (tools_routes, 6, "tools/* + plugins/* + health"),
         (safety_routes, 12, "safety/rag/voice/files/cache"),
         (clone_routes, 8, "clone/* (2026-08-27 剥离 /api/clone/preview 死路径)"),
@@ -168,8 +166,11 @@ def test_sub_router_mounts_all_endpoints(app, module, expected_count, label):
     )
 
 
-def test_total_contribution_is_93(app):
-    """The 9 new sub-routers together contribute exactly 93 endpoints.
+def test_total_contribution_is_81(app):
+    """The 8 new sub-routers together contribute exactly 81 endpoints.
+
+    2026-11-22: 淘汰批 —— users_routes 整删（-7）、misc /api/meta+/api/logs/stream（-2）、
+    chat GET /api/sessions（-1）、training clean+test（-2）：9 路由 93 端点 → 8 路由 81 端点（总 93→81）。
 
     2026-08-27: 微信克隆 Option B 剥离 /api/clone/preview，clone_routes 由 9 端点变 8 端点
     2026-08-28: training/extract 移除（9→8）；proactive +config(GET)/send/pause 手动控制（8→11）；misc +diary/important-dates×2/meta（11→15）
@@ -191,18 +192,18 @@ def test_total_contribution_is_93(app):
                 （v1.60「原记 10 个/101 系算术错误」即此类事故）。
     """
     modules = [
-        misc_routes, chat_routes, personality_routes, users_routes,
+        misc_routes, chat_routes, personality_routes,
         training_routes, tools_routes, safety_routes, clone_routes,
         topic_routes,
     ]
     total = sum(len(_sub_router_routes(m)) for m in modules)
-    assert total == 93, f"9 sub-routers contribute {total} routes, expected 93"
+    assert total == 81, f"8 sub-routers contribute {total} routes, expected 81"
 
 
 def test_no_duplicate_endpoints_across_sub_routers():
-    """No (METHOD, path) appears in more than one of the 9 new sub-routers."""
+    """No (METHOD, path) appears in more than one of the 8 new sub-routers."""
     modules = [
-        misc_routes, chat_routes, personality_routes, users_routes,
+        misc_routes, chat_routes, personality_routes,
         training_routes, tools_routes, safety_routes, clone_routes,
         topic_routes,
     ]

@@ -249,6 +249,13 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   const qc = useQueryClient()
   // M9：连接触发失败（429 等）显式 toast
   const addToast = useErrorStore(s => s.addToast)
+  // 2026-11-22 双发防重：StrictMode dev 下 effect mount→cleanup→remount 会把
+  // triggerConnection 跑两遍（cleanup 只清 timer，撤不掉已发出的 POST）——
+  // 走查实证「一次点击双发 POST connect，一条 200 一条 429」，限流额度被无谓消耗。
+  // in-flight 标记在请求 settle 前挡掉重入；handleRefresh 重置。
+  const connectInFlightRef = useRef(false)
+  /** 本弹窗生命周期内 startFlow 只自动触发一次（StrictMode dev remount 防重） */
+  const flowStartedRef = useRef(false)
 
   /** 连续失败达阈值：停轮询并置错误态（重试按钮走 handleRefresh 重开全流程） */
   const bailToError = useCallback((what: 'qr' | 'conn') => {
@@ -259,6 +266,8 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   }, [])
 
   const triggerConnection = useCallback(async () => {
+    if (connectInFlightRef.current) return
+    connectInFlightRef.current = true
     try {
       await wechatConnect()
     } catch (e) {
@@ -274,6 +283,15 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
           ? '微信通道已被占用或连接过于频繁，请稍后重试'
           : '发起扫码连接失败，请检查网络后重试')
       addToast({ type: 'error', message })
+      // 2026-11-22 补强：连接建立失败时弹窗同步置错误态——旧流程弹窗照常拿码，
+      // 用户会去扫一个「后端根本没有为它建立通道」的无效二维码，扫完永远停在等待。
+      if (startupTimerRef.current) clearTimeout(startupTimerRef.current)
+      if (pollingRef.current) clearInterval(pollingRef.current)
+      pollingRef.current = null
+      setStatus('error')
+      setErrorMsg(message)
+    } finally {
+      connectInFlightRef.current = false
     }
   }, [addToast])
 
@@ -339,6 +357,9 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   }, [startConnectionPolling, bailToError])
 
   const startFlow = useCallback(() => {
+    // StrictMode dev remount 的第二次 effect 直接跳过（handleRefresh 手动重置后允许重发）
+    if (flowStartedRef.current) return
+    flowStartedRef.current = true
     if (startupTimerRef.current) clearTimeout(startupTimerRef.current)
     if (pollingRef.current) clearInterval(pollingRef.current)
 
@@ -355,6 +376,7 @@ function QrCodeConnectionModal({ onClose, onConnected }: { onClose: () => void; 
   }, [startFlow])
 
   const handleRefresh = () => {
+    flowStartedRef.current = false
     setStatus('loading')
     setErrorMsg('')
     qrFailRef.current = 0

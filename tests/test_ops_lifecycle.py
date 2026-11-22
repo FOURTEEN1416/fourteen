@@ -288,9 +288,10 @@ class TestApplicationFactory:
     def test_create_api_app_registers_routers(self) -> None:
         """Verify representative paths from the main sub-routers are mounted.
 
-        api.app_factory mounts at least 11 business sub-routers (incl.
+        api.app_factory mounts at least 10 business sub-routers (incl.
         topic_state_router and the two announcement routers); this test checks
-        one representative path from 8 of them.
+        one representative path from 7 of them. (users_router 已随淘汰批
+        2026-11-22 整文件删除——零消费面，代表路径不再列入。)
         """
         from api.app_factory import create_api_app
         app = create_api_app()
@@ -301,7 +302,6 @@ class TestApplicationFactory:
             "/api/health",                # misc_router
             "/api/chat",                  # chat_router
             "/api/emotion/state",         # personality_router
-            "/api/users",                 # users_router
             "/api/training/status",       # training_router
             "/api/tools",                 # tools_router
             "/api/safety/stats",          # safety_router

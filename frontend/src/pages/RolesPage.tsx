@@ -58,7 +58,8 @@ function DefaultPersonaCard({
         <UserRound className="h-5 w-5" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-semibold text-gray-800">默认人设（内置）</div>
+        {/* 2026-11-22：标题带出主角色名「十四」——走查实证新用户按名字找不到宣传主角 */}
+        <div className="text-sm font-semibold text-gray-800">十四 · 默认人设（内置）</div>
         <div className="mt-0.5 text-xs text-gray-500">
           {active ? '当前使用中：进入系统的默认角色卡' : '不选择任何角色卡时使用的默认角色卡'}
         </div>
@@ -121,6 +122,12 @@ function RoleCard({
             {tag.length > 14 ? `${tag.slice(0, 14)}…` : tag}
           </span>
         ))) ?? <span className="text-[10px] text-gray-400">无标签</span>}
+      </div>
+
+      {/* 2026-11-22：同名卡区分——走查实证 3 张同名「林挽夏」并列时仅凭名称无法分辨，
+          尾缀 id 前 8 位让同名卡可区分（公共卡/私有卡另有徽章） */}
+      <div className="text-[10px] text-gray-300 mb-2 select-all" title="角色 ID（用于区分同名卡）">
+        ID {character.id.slice(0, 8)}
       </div>
 
       {character.is_active ? (

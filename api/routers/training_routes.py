@@ -31,7 +31,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
@@ -83,47 +82,6 @@ async def get_training_progress(
 # ═══════════════════════════════════════════════════════
 
 
-@router.post("/api/training/clean")
-async def start_cleaning(
-    accept_score: int = 2,
-    _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
-):
-    def _do_clean():
-        try:
-            from clone_training.data_cleaner import DataCleaner
-            from llm_provider import get_llm
-            llm = get_llm()
-            cleaner = DataCleaner(llm=llm, accept_score=accept_score)
-            data_dir = _training_dir()
-            json_files = sorted(data_dir.glob("*.jsonl"))
-            if not json_files:
-                raise FileNotFoundError("No dataset found")
-            latest = str(json_files[-1])
-            result_path = cleaner.score_from_dataset(latest)
-            cleaned_count = 0
-            if result_path:
-                try:
-                    with open(result_path, encoding="utf-8") as f:
-                        cleaned_data = json.load(f)
-                    cleaned_count = len(cleaned_data) if isinstance(cleaned_data, list) else 0
-                except Exception as e:
-                    logger.debug("Failed to read cleaned data result: %s", e)
-            deps.training_mgr.update(
-                status="cleaned",
-                cleaned_turns=cleaned_count,
-                progress=0.6,
-                step_name="数据清洗",
-            )
-        except Exception:
-            logger.exception("Cleaning failed")
-            deps.training_mgr.update(status="error", error="internal_error")
-
-    deps.training_mgr.update(status="cleaning", start_time=time.time(), step_name="数据清洗")
-    deps.training_mgr.submit(_do_clean)
-    return {"status": "started", "task": "clean", "accept_score": accept_score}
-
-
 def _live_tone_mimic():
     """优先用编排器在跑的 ToneMimic（与 RAG 检索同一实例）；无则按需构建。"""
     orch = deps.orch
@@ -134,29 +92,6 @@ def _live_tone_mimic():
 
     chroma_path = str(Path(__file__).parent.parent.parent / "data" / "chroma_db")
     return ToneMimic(chroma_path=chroma_path)
-
-
-def _style_preview_sync(message: str) -> dict:
-    """同步段：ToneMimic 构造（Chroma/ONNX 首次加载可达数秒）+ 风格画像读取。"""
-    mimic = _live_tone_mimic()
-    style_prompt = mimic.get_style_prompt()
-    examples = mimic.retrieve_style_examples(message, top_k=3)
-    return {"message": message, "style_output": style_prompt,
-            "style_examples": examples, "status": "ok"}
-
-
-@router.post("/api/training/test")
-async def test_clone(
-    message: str = Query(..., max_length=1000),
-    _auth: bool = Security(verify_api_key_dep),
-    _admin: tuple[int, User] = Depends(require_role("admin")),
-):
-    try:
-        # 构造/检索是同步阻塞 IO，必须在 worker 线程跑，否则卡住整个事件循环
-        return await asyncio.to_thread(_style_preview_sync, message)
-    except (ImportError, OSError, ValueError):
-        logger.exception("Test clone failed")
-        return {"message": message, "style_output": "", "status": "error", "detail": "internal_error"}
 
 
 def _training_dir() -> Path:

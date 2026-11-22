@@ -65,25 +65,6 @@ async def add_favorite(
     return {"status": "favorited", "character_id": character_id, "memory_id": memory_id}
 
 
-@router.delete("/{character_id}/favorites/{memory_id}")
-async def remove_favorite(
-    character_id: str,
-    memory_id: str,
-    _auth: bool = Security(verify_api_key_dep),
-    # W1：角色子资源统一归属校验（唯一 owner 在 character_routes）。
-    # 有 Bearer 主体时：他人卡片 / 无主存量卡一律 404；机器面（无 Bearer）不干预。
-    _owned: dict = Depends(require_character_access),
-):
-    """取消收藏"""
-    fav_mgr = getattr(deps.shisi_reg, "favorite_manager", None)
-    if fav_mgr is None:
-        raise HTTPException(status_code=503, detail="收藏管理器未初始化")
-    ok = fav_mgr.unfavorite(character_id, memory_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="收藏未找到")
-    return {"status": "unfavorited", "character_id": character_id}
-
-
 @router.post("/{character_id}/favorites/forward")
 async def forward_favorite(
     character_id: str,

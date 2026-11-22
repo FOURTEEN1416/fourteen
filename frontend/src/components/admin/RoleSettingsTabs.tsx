@@ -49,6 +49,7 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
   const [speaking, setSpeaking] = useState<Record<string, number>>(() => normalizeSpeakingStyle(character.speaking_style))
   const [catchphrases, setCatchphrases] = useState<string[]>(character.catchphrases || [])
   const [saving, setSaving] = useState(false)
+  const [previewCopied, setPreviewCopied] = useState(false)
 
   // 当 character 变化时（角色切换），同步重置本地表单 state
   // 触发条件：character.id 变化而非整个对象引用变化
@@ -173,8 +174,19 @@ function BasicTab({ character }: { character: RoleSettingsCharacter }) {
       <Section title="配置预览">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs text-gray-400">JSON 预览 · 可复制导出</span>
-          <button onClick={() => navigator.clipboard.writeText(JSON.stringify(personaJson, null, 2))} className="flex items-center gap-1 text-xs text-primary-500 hover:text-primary-600 transition-colors">
-            <Copy className="w-3 h-3" /> 复制
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(JSON.stringify(personaJson, null, 2))
+                setPreviewCopied(true)
+                setTimeout(() => setPreviewCopied(false), 2000)
+              } catch {
+                useErrorStore.getState().addToast({ type: 'error', message: '复制失败，请手动选择文本复制' })
+              }
+            }}
+            className="flex items-center gap-1 text-xs text-primary-500 hover:text-primary-600 transition-colors"
+          >
+            <Copy className="w-3 h-3" /> {previewCopied ? '已复制' : '复制'}
           </button>
         </div>
         <pre className="bg-gray-50 rounded-xl p-3 text-xs text-gray-600 font-mono overflow-auto max-h-48 border border-gray-100">
@@ -605,6 +617,9 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
   const [collectAvailable, setCollectAvailable] = useState(true)
 
   useEffect(() => {
+    // 2026-11-22：collect-config 是 admin 门控端点——普通用户每次进数据页都必发一发
+    // 必 403 的预取（走查实证：仅控制台错误噪声，功能未坏）。非 admin 直接跳过。
+    if (!isAdmin) return
     let alive = true
     knowledgeCollectConfig().then((res) => {
       if (!alive) return
@@ -613,7 +628,7 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
       setCollectAvailable(res.data?.available !== false)
     }).catch(() => setCollectAvailable(false))
     return () => { alive = false }
-  }, [])
+  }, [isAdmin])
 
   const handleCollectToggle = async (next: boolean) => {
     setCollectSaving(true)
@@ -669,7 +684,21 @@ function DataTab({ character }: { character: RoleSettingsCharacter }) {
           : '人设增强未新增知识块',
       })
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '人设增强失败'
+      // 2026-11-22：错误信息中文化——走查实证 axios 超时原样把英文 "timeout"
+      // 打在页面上，无原因说明与重试建议。区分超时/断网/服务端三种形态。
+      const ax = err as { code?: string; response?: { status?: number; data?: { detail?: string } } }
+      const raw = err instanceof Error ? err.message : ''
+      const detail = ax?.response?.data?.detail
+      let msg: string
+      if (detail) {
+        msg = `网络增强失败：${detail}`
+      } else if (ax?.code === 'ECONNABORTED' || /timeout/i.test(raw)) {
+        msg = '网络增强失败：请求超时——多源抓取通常需要 1~2 分钟，高峰期更久，请稍后重试'
+      } else if (!ax?.response) {
+        msg = '网络增强失败：网络连接异常，请检查网络后重试'
+      } else {
+        msg = `网络增强失败：服务暂时不可用（${ax?.response?.status ?? '未知'}），请稍后重试`
+      }
       setEnrichError(msg)
       useErrorStore.getState().addToast({ type: 'error', message: msg })
     } finally {

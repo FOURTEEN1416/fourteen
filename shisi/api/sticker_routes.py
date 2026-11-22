@@ -30,28 +30,9 @@ def _get_manager() -> StickerManager:
     return _manager
 
 
-class RecommendRequest(BaseModel):
-    emotion_tags: list[str]
-    limit: int = 5
-
-
 class BindRequest(BaseModel):
     sticker_ids: list[str]
     unlock_threshold: int = 0
-
-
-@router.get("", response_model=ApiResponse)
-async def list_stickers(category: str | None = None):
-    mgr = _get_manager()
-    stickers = mgr.list_by_category(category)
-    return ApiResponse(data=stickers)
-
-
-@router.post("/recommend", response_model=ApiResponse)
-async def recommend_stickers(req: RecommendRequest):
-    mgr = _get_manager()
-    results = mgr.recommend(req.emotion_tags, req.limit)
-    return ApiResponse(data=results)
 
 
 @router.post("/import", response_model=ApiResponse)

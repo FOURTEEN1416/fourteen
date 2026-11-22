@@ -19,8 +19,7 @@ import { clearAccountScopedCache } from './queryClient'
 
 // ── Domain API imports (for re-export and api namespace) ──
 import {
-  trainingStatus, trainingProgress, trainingClean,
-  trainingTest, trainingApply,
+  trainingStatus, trainingProgress, trainingApply,
 } from './training'
 import {
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
@@ -39,15 +38,12 @@ import {
   psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
 } from './system'
 import {
-  wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
-} from './wechat'
-import {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
   getPersona, updatePersona,
   getPersonaCard, updatePersonaCard, previewPersonaCard,
-  listFavorites, addFavorite, removeFavorite, forwardFavorite,
+  listFavorites, addFavorite, forwardFavorite,
   getStorylineConfig, updateStorylineConfig, deleteStorylineConfig,
-  getStorylineProgress, detectStoryline, resetStoryline,
+  detectStoryline,
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter, previewCharacterFromDescription,
   listPresets, getPreset,
@@ -232,23 +228,20 @@ export default client
 // chat 会话域已随僵尸 chatStore 一并删除
 export { emotionState, emotionTrend }
 export { normalizeDetail }
-export { trainingStatus, trainingProgress, trainingClean, trainingTest, trainingApply }
+export { trainingStatus, trainingProgress, trainingApply }
 export { cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset, cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats }
 export {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
   getPersona, updatePersona,
   getPersonaCard, updatePersonaCard, previewPersonaCard,
-  listFavorites, addFavorite, removeFavorite, forwardFavorite,
+  listFavorites, addFavorite, forwardFavorite,
   getStorylineConfig, updateStorylineConfig, deleteStorylineConfig,
-  getStorylineProgress, detectStoryline, resetStoryline,
+  detectStoryline,
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter, previewCharacterFromDescription,
   listPresets, getPreset,
 }
 export { adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser }
-export {
-  wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
-}
 export {
   health, stats, dashboardStats, config, saveConfig,
   personaProfile, personaEvolutionLog, memoryFacts,
@@ -271,8 +264,7 @@ export const api = {
   tools, toolsHealth, toggleTool, toolHistory, proactiveHistory, updateProactiveConfig,
   logs, channels, wechatStatus, wechatReconnect, wechatConnect, wechatDisconnect,
   wechatConnectionStatus, wechatQrCode,
-  trainingStatus, trainingProgress, trainingClean,
-  trainingTest, trainingApply,
+  trainingStatus, trainingProgress, trainingApply,
   cloneContacts, cloneDatasets, cloneDatasetDetail, cloneDeleteDataset,
   cloneDeleteConversation, cloneBatchDeleteConversations, cloneUpload, cloneStats,
   psychProfile, psychSnapshots, psychReset, psychMentalHealth, psychLiwc,
@@ -285,14 +277,12 @@ export const api = {
   listCharacters, createCharacter, getCharacter, updateCharacter, deleteCharacter, activateCharacter,
   getPersona, updatePersona,
   getPersonaCard, updatePersonaCard, previewPersonaCard,
-  listFavorites, addFavorite, removeFavorite, forwardFavorite,
+  listFavorites, addFavorite, forwardFavorite,
   getStorylineConfig, updateStorylineConfig, deleteStorylineConfig,
-  getStorylineProgress, detectStoryline, resetStoryline,
+  detectStoryline,
   getVoiceConfig, bindVoice, updateVoice, unbindVoice, testVoice,
   exportCharacter, importCharacter, previewCharacterFromDescription,
   listPresets, getPreset,
   // admin domain
   adminListUsers, adminUpdateUser, adminDeleteUser, adminCreateUser,
-  // wechat connections
-  wechatCreateConnection, wechatListConnections, wechatUpdateConnection, wechatDeleteConnection,
 }

@@ -140,30 +140,6 @@ def test_apply_clone_route_no_longer_fakes_applied(tmp_path, monkeypatch) -> Non
     assert ei.value.status_code == 404
 
 
-def test_test_clone_route_returns_style_via_live_mimic(monkeypatch) -> None:
-    from api.routers import training_routes
-
-    class FakeTone:
-        def get_style_prompt(self) -> str:
-            return "SP"
-
-        def retrieve_style_examples(self, query, top_k=3):
-            return [f"ex:{query}"]
-
-    monkeypatch.setattr(training_routes, "_live_tone_mimic", lambda: FakeTone())
-    res = asyncio.run(training_routes.test_clone(message="m", _auth=True, _admin=(1, None)))
-    assert res["status"] == "ok"
-    assert res["style_output"] == "SP"
-    assert res["style_examples"] == ["ex:m"]
-
-
-def test_test_clone_runs_blocking_part_off_event_loop() -> None:
-    from api.routers.training_routes import test_clone
-
-    src = inspect.getsource(test_clone)
-    assert "asyncio.to_thread" in src
-
-
 # ═════════════════ item32/33/34/37/40：路由修复钉住 ═════════════════
 
 
