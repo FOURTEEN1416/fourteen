@@ -17,6 +17,7 @@
 - **并行纪律事故认领**：本会话未登记 BOARD 在主检出施工，v1.75 窗口两次提交被共享暂存区夹带本窗在制品（047f6bb/cc8de41）致 main 两度 import 断裂（漂移告警在案）→ 已 BOARD 登记认领 + 记忆沉淀（git rm 自动进共享 index 同级危险 / 先施工后登记是根因 / 删除状态被 stash pop 恢复须 ls-files 复核）；本批提交全部**路径限定**。
 - **文档**：CODEMAPS/BACKEND.md 六行端点计数与说明同步、READING_REPORT_api.md SSE 清单加时效注记、DELETION_LOG 本批全清单+测试连带全记录。
 - **未部署**（推送/部署随用户裁决）；存疑 5 条中 diary/seed 与 vault/features 保留（用途声明明确），留 owner 后续裁决。
+- **部署补记（用户裁决「推送部署，清除中间文件等相关垃圾」）**：push `8483a00..08d116e` → 🔴 **pull 后发现 users_routes.py 漏删**（git rm 删除状态被 stash pop/reset 恢复后重删漏查——a1ac588 装配已删但孤儿文件留存，文档「整删」口径与事实不符）→ `9719cc2` 补删（ruff 0/内省 227/188 不变/定向 38 绿）→ 服务器 pull（1 file/-150）→ `remote_deploy.sh`（前端 build 1.01s、UTC 迁移 already_applied no-op、重启、nginx reload）→ **核验**：HEAD `9719cc25`、health/ready **200**（直连 127.0.0.1:8000）、openapi **188 paths / 227 ops**（与本地口径一致）、users_routes 落删、重启窗口 journal ERROR/Traceback **0 行**、blob 抽验 3 文件 `git hash-object` **3/3 一致**（sha256sum 差异系 CRLF/LF 行尾，对象层归一化一致）、nginx 前端 8001 **200**。**垃圾清理**：`.playwright-mcp`(885K)/`.tmp-pytest`(2.4M)/`.ruff_cache` 删前 git ls-files 全 0 命中，工作树归零。🔴 教训追加：`git stash pop` 会经 index 恢复把已 rm 文件带回来——**每次 stash/pop 后必须 `git ls-files` 复核全部 rm 目标**，不能只复核当波 rm 的文件。**三端部署 @ `9719cc2`（2026-11-23）**。
 
 ---
 
